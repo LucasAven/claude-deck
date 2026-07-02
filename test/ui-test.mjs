@@ -61,10 +61,16 @@ await page.$eval('.quickkeys[data-term="claude"] [data-k="esc"]', (b) => {
   b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
 });
 ok('tecla rápida Esc enviada sin errores', consoleErrors.length === 0);
-ok('tecla "/" primera en la barra de Claude (tras el divisor)', await page.$eval(
+// orden de la barra de Claude: "nl" primero (acceso rápido, pedido del usuario),
+// "/" segundo. El botón nl (newline suave, ESC+CR) no se tapea: mandaría un
+// salto de línea al prompt de la sesión deck real. Tampoco existe en Shell.
+const keyOrder = await page.$$eval(
   '.quickkeys[data-term="claude"] button[data-k]',
-  (b) => b.dataset.k === 'slash',
-));
+  (bs) => bs.map((b) => b.dataset.k),
+);
+ok('teclas "nl" y "/" primeras en la barra de Claude', keyOrder[0] === 'nl' && keyOrder[1] === 'slash');
+ok('botón nl solo en Claude, no en Shell',
+  (await page.$('.quickkeys[data-term="shell"] [data-k="nl"]')) === null);
 
 // 5b. adjuntar imagen = solo preview (dos pasos): el chip queda pendiente con
 // el hint de "tocá para enviar" y NO se sube nada hasta confirmar con un tap

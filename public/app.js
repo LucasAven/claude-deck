@@ -45,6 +45,20 @@ function createTermConnection(containerId, connId, target, getSession) {
   term.loadAddon(fit);
   term.open(document.getElementById(containerId));
 
+  if (target === 'claude') {
+    // shift+enter desde teclado físico (BT): xterm lo mandaría como \r (submit).
+    // Traducirlo al newline suave de Claude Code (ESC+CR, ver KEYS.nl).
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.key === 'Enter' && ev.shiftKey) {
+        if (ev.type === 'keydown' && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ t: 'in', d: '\x1b\r' }));
+        }
+        return false;
+      }
+      return true;
+    });
+  }
+
   let ws = null;
   let gen = 0;          // generación de conexión: invalida handlers de sockets viejos
   let retries = 0;
@@ -223,6 +237,9 @@ const KEYS = {
   ctrlc: '\x03',
   enter: '\r',
   slash: '/',
+  // salto de línea SIN enviar el prompt: Claude Code trata ESC+CR (alt+enter)
+  // como newline suave — verificado contra claude real dentro de tmux
+  nl: '\x1b\r',
 };
 
 function wireQuickKeys() {

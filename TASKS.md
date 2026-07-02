@@ -4,15 +4,6 @@ Feature requests from the user (2026-07-02). A new session should read `HANDOFF.
 
 Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `public/style.css`, `server/index.ts` (backend). Verify with `node test/ui-test.mjs` (+ update it if you add UI) and let the user confirm touch/keyboard behavior on the phone — headless Chromium can't simulate the iOS virtual keyboard.
 
-## 5. Newline (line break) input on mobile
-
-- [ ] There's currently no way to type a line break within a prompt on mobile: the virtual keyboard's Enter, and even shift+enter on an external Bluetooth keyboard, all reach Claude Code as a plain Enter (submits the prompt). Provide a way to insert a newline.
-
-Context: Claude Code accepts `\` + Enter, and also treats **alt/option+enter** or `\x1b\r` (ESC CR) as a soft newline in most terminals — verify which sequence works inside tmux on this setup before wiring it. Two parts:
-  1. Add a quickkeys button (e.g. `↵` labeled "nl" or similar) that sends the soft-newline sequence via the `KEYS` map in `app.js`.
-  2. If feasible, intercept shift+enter from physical/Bluetooth keyboards in the xterm.js `attachCustomKeyEventHandler` (or the key handler in `app.js`) and translate it to the soft-newline sequence instead of `\r`.
-  This one needs on-device verification by the user (headless tests can't reproduce the iOS keyboard or a BT keyboard).
-
 ## 6. Rename deck sessions
 
 - [ ] In the session chips row, tapping the session **name** (as opposed to the ✕, which kills it) should let the user rename the session, to make it easier to distinguish multiple sessions.
@@ -30,6 +21,16 @@ Context: chips render into `#session-chips` (`app.js:425`); the ✕ kill handler
 
 (move completed items here, with a one-line note on how they were verified)
 
+### 5. Newline (line break) input on mobile — DONE (2026-07-02)
+
+- [x] Quickkeys button `\n` — FIRST in the Claude key row, before `/` (user's request: quick access). Sends `\x1b\r` via `KEYS.nl` in `app.js`. Verified by the user on the phone.
+- [x] shift+enter from a physical/Bluetooth keyboard → soft newline instead of submit: `term.attachCustomKeyEventHandler` in `createTermConnection` (`app.js`, Claude terminal only; keydown sends `\x1b\r`, returns `false` so xterm never emits the plain `\r`). Verified by the user on the BT keyboard.
+
+Notes / decisions:
+- The sequence `\x1b\r` (ESC CR, what alt/option+enter produces) was verified against a real `claude` inside a scratch tmux session BEFORE wiring (text + `send-keys -H 1b 0d` + text → two-line prompt). `\` + Enter wasn't needed.
+- Label history: started as `↵`, but the user flagged it could be misread as an enter/send button; briefly `nl`, final label is **`\n`** (user asked for "/n to make it clearer" — interpreted as the `\n` newline escape, since a leading `/` would read as a slash command).
+- ui-test asserts the row order is `nl`, `/`, … and that Shell has no nl button (32 checks). The nl button is never tapped in tests — it would inject a newline into the real deck session's prompt.
+
 ### 2. Stage / unstage buttons in the diff (Cambios) section — DONE (2026-07-02)
 
 - [x] Each row in `#file-list` has a `+`/`−` button (`.file-act`) that stages/unstages the file and refreshes the list. Verified by the user from the phone ("its working now").
@@ -43,6 +44,7 @@ Implementation: one endpoint `POST /api/git/stage?session=` with body `{ path, a
 ### 4. Move the `/` button to the first position in the key row — DONE (2026-07-02)
 
 - [x] `<button data-k="slash">/</button>` moved from last to first among the key buttons in `index.html` (right after the divider, before `esc`); camera/paste buttons and divider untouched. The ui-test check was upgraded from "/" present to "/" is the FIRST `button[data-k]` in the Claude quickkeys row. Verified by the user.
+- **Superseded later the same day by task 5**: the new `nl` (newline) button now takes the first position and `/` is second; the ui-test check asserts that order.
 
 ### 3. Mode switcher + model/effort switcher — DONE (2026-07-02)
 

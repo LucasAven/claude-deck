@@ -1,6 +1,6 @@
 # HANDOFF — claude-deck
 
-**Fecha:** 2026-07-02 (5ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde la pestaña Cambios, todo funcionando y verificado por el usuario en el celular. **Backlog activo en `TASKS.md`** (quedan tareas 5, 6 y 7) — ese archivo es la fuente de verdad de qué se hizo y qué falta; este archivo cubre arquitectura y gotchas.
+**Fecha:** 2026-07-02 (5ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter para salto de línea, todo funcionando y verificado por el usuario en el celular (incl. teclado Bluetooth). **Backlog activo en `TASKS.md`** (quedan tareas 6 y 7) — ese archivo es la fuente de verdad de qué se hizo y qué falta; este archivo cubre arquitectura y gotchas.
 
 ## Qué es y dónde está todo
 
@@ -9,7 +9,7 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 - `server/index.ts` — todo el backend (Hono + ws + node-pty, un solo archivo)
 - `public/` — frontend vanilla: `index.html`, `app.js`, `style.css`, PWA (`manifest.json`, `sw.js` passthrough sin caché, `icon.svg`)
 - `test/ws-test.mjs` — E2E de WS/tmux/API (**26 checks**; sección 9b —stage/unstage— es de la 5ª sesión; acepta `DECK_PORT` para apuntar a otro puerto)
-- `test/ui-test.mjs` — smoke de UI en Chromium headless, viewport iPhone (**31 checks**; deja `test/shot-*.png`. Ver `TASKS.md` para el backlog de features y lo ya hecho.)
+- `test/ui-test.mjs` — smoke de UI en Chromium headless, viewport iPhone (**32 checks**; deja `test/shot-*.png`. Ver `TASKS.md` para el backlog de features y lo ya hecho.)
 - `test/shot-diff.mjs` — helper que screenshotea el diff (normal / h-scroll / v-scroll) para iterar UI sin celular
 - `.claude/settings.example.json` + `scripts/notify.sh` — hooks ntfy (bonus §12), **inactivos** hasta que el usuario los renombre a `settings.json`
 
@@ -62,7 +62,7 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 ```bash
 PORT=7433 npm run dev          # server en http://127.0.0.1:7433 (PORT explícito: ver gotcha 12; banner: gotcha 6)
 node test/ws-test.mjs          # 26 checks (server arriba; ver gotchas 8 y 9; DECK_PORT para otro puerto)
-node test/ui-test.mjs          # 31 checks + screenshots test/shot-*.png (correrlo lo prefiere el usuario)
+node test/ui-test.mjs          # 32 checks + screenshots test/shot-*.png (correrlo lo prefiere el usuario)
 node test/shot-diff.mjs        # screenshots del diff view
 ```
 
@@ -70,6 +70,6 @@ node test/shot-diff.mjs        # screenshots del diff view
 
 ## Pendientes explícitos
 
-1. Commitear los cambios de stage/unstage (5ª sesión) — solo si el usuario lo pide.
+1. Commitear solo cuando el usuario lo pida (al cierre de la 5ª sesión el árbol quedó limpio).
 2. Usuario debe activar hooks ntfy si los quiere (`mv .claude/settings.example.json .claude/settings.json` + `NTFY_TOPIC` en `.env`).
 3. Fase 2 (chat nativo con Agent SDK) — documentada en `README.md` y `SPEC.md` §11, **no implementar** sin pedido explícito.
