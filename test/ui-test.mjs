@@ -63,6 +63,30 @@ await page.$eval('.quickkeys[data-term="claude"] [data-k="esc"]', (b) => {
 ok('tecla rápida Esc enviada sin errores', consoleErrors.length === 0);
 ok('tecla "/" presente en la barra de Claude', (await page.$('.quickkeys[data-term="claude"] [data-k="slash"]')) !== null);
 
+// 5b. adjuntar imagen = solo preview (dos pasos): el chip queda pendiente con
+// el hint de "tocá para enviar" y NO se sube nada hasta confirmar con un tap
+let pasteReqs = 0;
+page.on('request', (r) => { if (r.url().includes('/api/paste-image')) pasteReqs++; });
+const imgInput = await page.$('#img-input');
+await imgInput.uploadFile(new URL('./shot-diff.png', import.meta.url).pathname);
+await new Promise((r) => setTimeout(r, 1200));
+const chipState = await page.evaluate(() => {
+  const chip = document.querySelector('#img-chip');
+  const hint = document.querySelector('#img-chip-hint');
+  return {
+    visible: !chip.classList.contains('hidden'),
+    pending: chip.classList.contains('pending'),
+    hintShown: hint && getComputedStyle(hint).display !== 'none',
+  };
+});
+ok('adjuntar imagen muestra chip de preview pendiente', chipState.visible && chipState.pending);
+ok('hint "tocá para enviar" visible en el chip', chipState.hintShown);
+ok('no se subió nada sin confirmar (0 POSTs a paste-image)', pasteReqs === 0);
+await page.screenshot({ path: new URL('./shot-img-pending.png', import.meta.url).pathname });
+await page.click('#img-chip-close');
+await new Promise((r) => setTimeout(r, 300));
+ok('✕ descarta el preview sin enviar', await page.$eval('#img-chip', (el) => el.classList.contains('hidden')) && pasteReqs === 0);
+
 // 6. pestaña Cambios: header + lista de archivos
 await page.click('.tab[data-tab="changes"]');
 await new Promise((r) => setTimeout(r, 1500));

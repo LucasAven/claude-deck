@@ -221,6 +221,19 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+#img-chip-hint {
+  display: none;
+  color: var(--accent);
+  font-size: 11px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* pendiente de confirmación: el chip entero es tappeable para enviar */
+.img-chip.pending { cursor: pointer; }
+.img-chip.pending #img-chip-hint { display: block; }
+.img-chip.pending:active { border-color: var(--accent); }
 #img-chip-close {
   flex: none;
   min-width: 40px;

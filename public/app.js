@@ -280,40 +280,58 @@ function setImgChipMeta(meta) {
 
 function hideImgChip() {
   clearTimeout(chipTimer);
+  pendingImg = null;
   $('#img-chip').classList.add('hidden');
+  $('#img-chip').classList.remove('pending');
   if (chipUrl) { URL.revokeObjectURL(chipUrl); chipUrl = null; }
   requestAnimationFrame(() => claudeConn && claudeConn.fit());
 }
 
+// Dos pasos: primero se muestra el preview en el chip y recién al tocarlo se
+// sube — así el usuario confirma que la imagen es la correcta antes de que
+// llegue al prompt. El ✕ descarta sin enviar.
+let pendingImg = null; // { blob, dims } esperando confirmación de envío
 let sendingImage = false;
+
 async function attachImage(file, title) {
   if (!file || sendingImage) return;
+  const { blob, width, height } = await normalizeImage(file);
+  const dims = width ? `${width} × ${height} · PNG` : (file.type || 'imagen');
+  pendingImg = { blob, dims };
+  showImgChip(blob, title, dims);
+  $('#img-chip').classList.add('pending');
+}
+
+async function sendPendingImage() {
+  if (!pendingImg || sendingImage) return;
   sendingImage = true;
-  $('#btn-img').classList.add('busy');
-  $('#btn-paste').classList.add('busy');
+  const { blob, dims } = pendingImg;
+  const chip = $('#img-chip');
+  chip.classList.remove('pending');
+  setImgChipMeta(`${dims} · enviando…`);
   try {
-    const { blob, width, height } = await normalizeImage(file);
-    const dims = width ? `${width} × ${height} · PNG` : (file.type || 'imagen');
-    showImgChip(blob, title, `${dims} · enviando…`);
     const res = await api(`/api/paste-image?session=${encodeURIComponent(state.session)}`, {
       method: 'POST',
       headers: { 'content-type': 'image/png' },
       body: blob,
     });
     if (res.ok) {
+      pendingImg = null;
       setImgChipMeta(`${dims} · enviada — mirá el prompt`);
       chipTimer = setTimeout(hideImgChip, 8000);
     } else {
       let msg = `HTTP ${res.status}`;
       try { msg = (await res.json()).error || msg; } catch (_) {}
       setImgChipMeta(`${dims} · error: ${msg}`);
+      chip.classList.add('pending'); // otro tap reintenta
     }
   } catch (e) {
-    if (String(e.message) !== '401') setImgChipMeta('error de red (¿server caído?)');
+    if (String(e.message) !== '401') {
+      setImgChipMeta('error de red (¿server caído?)');
+      chip.classList.add('pending');
+    }
   } finally {
     sendingImage = false;
-    $('#btn-img').classList.remove('busy');
-    $('#btn-paste').classList.remove('busy');
   }
 }
 
@@ -348,7 +366,11 @@ function wireImagePaste() {
     input.value = ''; // permitir re-elegir el mismo archivo
   });
   $('#btn-paste').addEventListener('click', pasteFromClipboard);
-  $('#img-chip-close').addEventListener('click', hideImgChip);
+  $('#img-chip').addEventListener('click', sendPendingImage);
+  $('#img-chip-close').addEventListener('click', (e) => {
+    e.stopPropagation(); // que el ✕ no cuente como tap de "enviar"
+    hideImgChip();
+  });
   // pegar con Cmd/Ctrl+V (teclado físico o desktop) con la pestaña Claude activa
   document.addEventListener('paste', (e) => {
     if (state.activeTab !== 'claude') return;
