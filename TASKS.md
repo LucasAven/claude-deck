@@ -4,12 +4,6 @@ Feature requests from the user (2026-07-02). A new session should read `HANDOFF.
 
 Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `public/style.css`, `server/index.ts` (backend). Verify with `node test/ui-test.mjs` (+ update it if you add UI) and let the user confirm touch/keyboard behavior on the phone — headless Chromium can't simulate the iOS virtual keyboard.
 
-## 2. Stage / unstage buttons in the diff (Cambios) section
-
-- [ ] The Cambios tab already splits files into staged/unstaged lists. Add a button per file (and/or per group) to stage or unstage it.
-
-Context: file list renders into `#file-list` (`index.html`, section `view-changes`); git data comes from the server (`server/index.ts` — look for the git status/diff endpoints, they resolve the session's cwd via `tmuxPaneDir`). You'll need new endpoints, e.g. `POST /api/git/stage` / `POST /api/git/unstage` (or one endpoint with an action param) that run `git add -- <file>` / `git restore --staged -- <file>` in the session's repo dir. Refresh the file list after the action. Mind tmux gotcha 3 in HANDOFF (`=name:` target syntax) if you shell out via the pane dir helper. Add checks to `test/ws-test.mjs` if practical.
-
 ## 5. Newline (line break) input on mobile
 
 - [ ] There's currently no way to type a line break within a prompt on mobile: the virtual keyboard's Enter, and even shift+enter on an external Bluetooth keyboard, all reach Claude Code as a plain Enter (submits the prompt). Provide a way to insert a newline.
@@ -25,9 +19,22 @@ Context: Claude Code accepts `\` + Enter, and also treats **alt/option+enter** o
 
 Context: chips render into `#session-chips` (`app.js:425`); the ✕ kill handler calls `DELETE /api/tmux/sessions/:name` (`app.js:461`) — the new name-tap handler must not conflict with it (the ✕ already uses `stopPropagation` patterns elsewhere, follow that). Needs a new server endpoint, e.g. `PATCH /api/tmux/sessions/:name` with `{ newName }`, that runs `tmux rename-session`. **Important:** every deck session has a paired `<name>-shell` session (see the DELETE handler in `server/index.ts`, which kills both) — rename both to keep the pairing convention, and validate the new name (no spaces/colons/dots; tmux rejects `.` and `:` in names, and the `=name:` target syntax from HANDOFF gotcha 3 depends on clean names). Also make sure open WS terminals survive or reconnect after the rename (the WS attach targets the session by name — likely need the frontend to re-attach with the new name). Simple UX: `prompt()` on tap, or an inline input in the chip.
 
+## 7. Dev server has no watch mode → stale-server 404s (improve later)
+
+- [ ] `npm run dev` is plain `tsx server/index.ts` — **no watch/reload**. After editing `server/index.ts` the running server keeps serving the OLD code (static files in `public/` ARE fresh, they're read per request), so new endpoints 404 from the phone while the UI already shows the new buttons. This bit us on 2026-07-02 testing task 2.
+- Second trap from the same incident: the user's shell profile exports **`PORT=7434`** (inherited by any terminal, including Claude's), so a casual `npm run dev` binds 7434 while `tailscale serve` points at 7433 → phone hits a stale/absent server.
+- How we fixed it that day: kill whatever holds the ports (`lsof -tnP -iTCP:7433 -sTCP:LISTEN`), relaunch with `PORT=7433 npm run dev`, re-run `tailscale serve --bg 7433`, verify with `curl -s -o /dev/null -w "%{http_code}" https://<maquina>.<tailnet>.ts.net/api/config` → `401` = alive and reachable.
+- Proper fix ideas: change dev script to `tsx watch server/index.ts` (check node-pty/ws survive reloads without leaking ptys), and/or pin the port in the script (`PORT=7433 tsx …`) or in `.env` so the profile export can't hijack it. Quick diagnosis: compare the process start time (`ps -p <pid> -o lstart`) against the mtime of `server/index.ts` — if the file is newer, the server is stale.
+
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)
+
+### 2. Stage / unstage buttons in the diff (Cambios) section — DONE (2026-07-02)
+
+- [x] Each row in `#file-list` has a `+`/`−` button (`.file-act`) that stages/unstages the file and refreshes the list. Verified by the user from the phone ("its working now").
+
+Implementation: one endpoint `POST /api/git/stage?session=` with body `{ path, action: 'stage' | 'unstage' }` (`server/index.ts`), backed by `gitStage()`; path validation extracted from `gitDiff` into shared `checkRepoPath()`. Unstage uses `git restore --staged`, with `git rm -r --cached` fallback when the repo has no HEAD yet. Frontend: file rows became `div`s (buttons can't nest); `stageFile()` in `app.js` calls the endpoint and `refreshGit()`. Tests: ws-test section 9b (+4 checks → 26: stage, unstage, path traversal → 400, bad action → 400; creates+cleans a temp file in the deck-2 repo) and ws-test now honors `DECK_PORT`; ui-test asserts every row has its button without clicking (+1 check → 31). Gotcha found while testing: the dev server has no watch mode, so the new endpoint 404'd until restart — see task 7.
 
 ### 1. Hide tab bar while the virtual keyboard is open — DONE (2026-07-02)
 

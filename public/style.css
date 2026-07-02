@@ -465,6 +465,21 @@ body {
   text-align: left;
 }
 
+.file-act {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.file-act:active { background: var(--panel); }
+.file-act:disabled { opacity: 0.4; }
+
 .empty-state {
   padding: 40px 20px;
   text-align: center;

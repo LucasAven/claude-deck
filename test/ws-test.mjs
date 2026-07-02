@@ -5,7 +5,9 @@ import fs from 'node:fs';
 
 const TOKEN = fs.readFileSync('/path/to/claude-deck/.env', 'utf8')
   .match(/AUTH_TOKEN=(.+)/)[1].trim();
-const BASE = 'ws://127.0.0.1:7433/ws/term';
+const PORT = process.env.DECK_PORT || '7433';
+const BASE = `ws://127.0.0.1:${PORT}/ws/term`;
+const HTTP = `http://127.0.0.1:${PORT}`;
 const results = [];
 const ok = (name, cond) => results.push(`${cond ? 'PASS' : 'FAIL'}  ${name}`);
 
@@ -81,7 +83,7 @@ const r4 = await session(c4);
 ok('shell crea/attachea deck-shell', r4.meta?.session === 'deck-shell');
 
 // 8. /api/tmux/sessions: lista deck y deck-2, excluye *-shell
-const res = await fetch('http://127.0.0.1:7433/api/tmux/sessions', { headers: { 'x-deck-token': TOKEN } });
+const res = await fetch(`${HTTP}/api/tmux/sessions`, { headers: { 'x-deck-token': TOKEN } });
 const sessions = await res.json();
 const names = sessions.map((s) => s.name);
 ok('sessions lista deck y deck-2', names.includes('deck') && names.includes('deck-2'));
@@ -89,12 +91,43 @@ ok('sessions excluye *-shell', !names.some((n) => n.endsWith('-shell')));
 ok('sessions trae dir del pane', sessions.every((s) => s.dir.startsWith('/')));
 
 // 9. git endpoints con ?session=deck-2 (resuelve el dir del pane)
-const sum = await fetch('http://127.0.0.1:7433/api/git/summary?session=deck-2', { headers: { 'x-deck-token': TOKEN } });
+const sum = await fetch(`${HTTP}/api/git/summary?session=deck-2`, { headers: { 'x-deck-token': TOKEN } });
 const sumJson = await sum.json();
 ok('git summary con ?session=deck-2', sum.status === 200 && typeof sumJson.branch === 'string');
 
+// 9b. POST /api/git/stage: stagear/desstagear un archivo temporal del repo de deck-2
+// (las sesiones nacen con -c REPO_DIR, así que el dir del pane es el toplevel del repo)
+const stageDir = sessions.find((s) => s.name === 'deck-2')?.dir;
+const tmpRel = `.tmp-ws-test-stage-${Date.now()}.txt`;
+fs.writeFileSync(`${stageDir}/${tmpRel}`, 'stage-test\n');
+const postStage = (path, action) => fetch(`${HTTP}/api/git/stage?session=deck-2`, {
+  method: 'POST',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  body: JSON.stringify({ path, action }),
+});
+try {
+  const st1 = await postStage(tmpRel, 'stage');
+  let sumSt = await (await fetch(`${HTTP}/api/git/summary?session=deck-2`, { headers: { 'x-deck-token': TOKEN } })).json();
+  let entry = sumSt.files.find((f) => f.path === tmpRel);
+  ok('stage → el archivo queda staged', st1.status === 200 && entry?.staged === true);
+
+  const st2 = await postStage(tmpRel, 'unstage');
+  sumSt = await (await fetch(`${HTTP}/api/git/summary?session=deck-2`, { headers: { 'x-deck-token': TOKEN } })).json();
+  entry = sumSt.files.find((f) => f.path === tmpRel);
+  ok('unstage → vuelve a untracked', st2.status === 200 && entry?.staged === false && entry?.untracked === true);
+
+  const stBad = await postStage('../fuera-del-repo', 'stage');
+  ok('stage path fuera del repo → 400', stBad.status === 400);
+  const stBadAction = await postStage(tmpRel, 'commit');
+  ok('stage action inválida → 400', stBadAction.status === 400);
+} finally {
+  // nunca dejar el archivo temporal ni su entrada en el index del repo real
+  try { execFileSync('git', ['-C', stageDir, 'restore', '--staged', '--', tmpRel], { stdio: 'ignore' }); } catch {}
+  fs.unlinkSync(`${stageDir}/${tmpRel}`);
+}
+
 // 10. sesión inexistente → 404
-const nf = await fetch('http://127.0.0.1:7433/api/git/summary?session=no-existe', { headers: { 'x-deck-token': TOKEN } });
+const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);
 
 // 11. las sesiones se crean con mouse on (requisito del scroll táctil)
@@ -107,22 +140,22 @@ const PNG_1x1 = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 );
-const up = await fetch('http://127.0.0.1:7433/api/paste-image?session=deck', {
+const up = await fetch(`${HTTP}/api/paste-image?session=deck`, {
   method: 'POST', headers: { 'x-deck-token': TOKEN }, body: PNG_1x1,
 });
 const upJson = await up.json();
 ok('paste-image PNG → 200 modo clipboard', up.status === 200 && upJson.mode === 'clipboard');
-const up415 = await fetch('http://127.0.0.1:7433/api/paste-image?session=deck', {
+const up415 = await fetch(`${HTTP}/api/paste-image?session=deck`, {
   method: 'POST', headers: { 'x-deck-token': TOKEN }, body: 'esto no es una imagen',
 });
 ok('paste-image no-imagen → 415', up415.status === 415);
-const up404 = await fetch('http://127.0.0.1:7433/api/paste-image?session=no-existe', {
+const up404 = await fetch(`${HTTP}/api/paste-image?session=no-existe`, {
   method: 'POST', headers: { 'x-deck-token': TOKEN }, body: PNG_1x1,
 });
 ok('paste-image sesión inexistente → 404', up404.status === 404);
 
 // 13. DELETE /api/tmux/sessions/:name mata la sesión
-const del = await fetch('http://127.0.0.1:7433/api/tmux/sessions/deck-2', { method: 'DELETE', headers: { 'x-deck-token': TOKEN } });
+const del = await fetch(`${HTTP}/api/tmux/sessions/deck-2`, { method: 'DELETE', headers: { 'x-deck-token': TOKEN } });
 ok('DELETE sesión existente → 200', del.status === 200);
 await new Promise((r) => setTimeout(r, 300));
 let dead = false;
@@ -130,9 +163,9 @@ try { execFileSync('tmux', ['has-session', '-t', '=deck-2'], { stdio: 'ignore' }
 ok('la sesión tmux deck-2 quedó muerta', dead);
 
 // 14. DELETE inexistente → 404, nombre inválido → 400
-const del404 = await fetch('http://127.0.0.1:7433/api/tmux/sessions/no-existe-x', { method: 'DELETE', headers: { 'x-deck-token': TOKEN } });
+const del404 = await fetch(`${HTTP}/api/tmux/sessions/no-existe-x`, { method: 'DELETE', headers: { 'x-deck-token': TOKEN } });
 ok('DELETE sesión inexistente → 404', del404.status === 404);
-const del400 = await fetch('http://127.0.0.1:7433/api/tmux/sessions/mal%21nombre', { method: 'DELETE', headers: { 'x-deck-token': TOKEN } });
+const del400 = await fetch(`${HTTP}/api/tmux/sessions/mal%21nombre`, { method: 'DELETE', headers: { 'x-deck-token': TOKEN } });
 ok('DELETE nombre inválido → 400', del400.status === 400);
 
 c2.close(); c4.close();

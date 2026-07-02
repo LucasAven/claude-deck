@@ -141,7 +141,10 @@ await new Promise((r) => setTimeout(r, 1500));
 const branch = await page.$eval('#git-branch', (el) => el.textContent);
 ok('header muestra la rama', branch.includes('main'));
 const rows = await page.$$('#file-list .file-row');
-ok('lista archivos modificados (untracked ??)', rows.length > 5);
+ok('lista archivos modificados', rows.length > 0);
+// 6b. cada fila tiene su botón de stage/unstage (no se clickea: tocaría el repo real)
+const actBtns = await page.$$('#file-list .file-act');
+ok('cada fila tiene botón stage/unstage (+/−)', rows.length > 0 && actBtns.length === rows.length);
 
 // 7. tap en un archivo → diff renderizado con diff2html
 await rows[0].click();

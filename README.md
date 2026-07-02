@@ -102,8 +102,8 @@ Esta app expone una shell de tu PC. Medidas tomadas (no negociables):
 
 - **Bind solo a `127.0.0.1`.** El server nunca escucha en interfaces externas. La única exposición es vía `tailscale serve` (HTTPS + WireGuard, visible solo para los dispositivos de tu tailnet). **Jamás** bindear `0.0.0.0` ni abrir el puerto en el router.
 - **`AUTH_TOKEN` obligatorio** incluso dentro del tailnet (defensa en profundidad). Si falta o es corto (<32 chars), el server no arranca. Toda ruta — estáticos incluidos — y el handshake del WebSocket validan la cookie httpOnly `deck_token` (o el header `x-deck-token`). Sin token válido → 401.
-- **Validación estricta de paths** en `/api/git/diff`: se rechazan rutas absolutas, `..` y symlinks que escapen del repo.
-- **Sin ejecución arbitraria por HTTP**: ningún endpoint ejecuta comandos del cliente; solo subcomandos fijos de `git`/`tmux` con argumentos validados (`execFile`, sin shell). Cualquier acción de escritura (stage, commit, push) se hace pidiéndosela a Claude o a mano en la pestaña Shell.
+- **Validación estricta de paths** en `/api/git/diff` y `/api/git/stage` (helper compartido `checkRepoPath`): se rechazan rutas absolutas, `..` y symlinks que escapen del repo.
+- **Sin ejecución arbitraria por HTTP**: ningún endpoint ejecuta comandos del cliente; solo subcomandos fijos de `git`/`tmux` con argumentos validados (`execFile`, sin shell). La única escritura sobre el repo es stage/unstage de un archivo (`/api/git/stage`); commit, push, etc. se hacen pidiéndoselos a Claude o a mano en la pestaña Shell.
 - **Multi-sesión acotada**: los endpoints git con `?session=` solo operan en repos dentro de `WORKSPACES_ROOT`; los nombres de sesión se validan contra `^[A-Za-z0-9_-]{1,32}$`.
 - **Rate limit** básico en los endpoints HTTP.
 - El token en la URL solo se usa la primera vez; después vive en una cookie httpOnly.
@@ -120,6 +120,7 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 | `POST /api/paste-image?session=<s>` | Sube una imagen (PNG/JPEG, máx 15 MB): la pone en el clipboard de la Mac y manda `Ctrl+V` a la sesión — Claude Code la ingiere como `[Image #N]`. Fallback: escribe la ruta del archivo en el prompt |
 | `GET /api/git/summary?session=<s>` | Rama, upstream, ahead/behind, archivos |
 | `GET /api/git/diff?path=<rel>&staged=0\|1&session=<s>` | Diff unificado (`text/plain`, truncado a 500 KB) |
+| `POST /api/git/stage?session=<s>` | Stage/unstage de un archivo. Body JSON: `{ "path": "<rel>", "action": "stage"\|"unstage" }`. Unstage usa `git restore --staged` (o `git rm -r --cached` si el repo no tiene commits) |
 | `GET /api/git/log?n=15&session=<s>` | Últimos commits |
 | `GET /api/config` | Sesión default y `REPO_DIR` |
 

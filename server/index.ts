@@ -214,8 +214,8 @@ async function gitSummary(dir: string) {
 
 const DIFF_LIMIT = 500 * 1024
 
-async function gitDiff(dir: string, rel: string, staged: boolean): Promise<string> {
-  // Validación estricta del path: nada fuera del repo.
+/** Validación estricta de un path relativo al repo: nada fuera del repo. Devuelve el absoluto. */
+function checkRepoPath(dir: string, rel: string): string {
   if (!rel || rel.includes('\0') || path.isAbsolute(rel) || rel.split(/[\\/]+/).includes('..')) {
     throw new HttpError(400, 'path inválido')
   }
@@ -227,6 +227,11 @@ async function gitDiff(dir: string, rel: string, staged: boolean): Promise<strin
     const real = fs.realpathSync(abs)
     if (!insideDir(real, realDir)) throw new HttpError(400, 'path fuera del repo (symlink)')
   }
+  return abs
+}
+
+async function gitDiff(dir: string, rel: string, staged: boolean): Promise<string> {
+  const abs = checkRepoPath(dir, rel)
 
   // ¿Untracked? (no está en el index pero existe en disco)
   let untracked = false
@@ -257,6 +262,28 @@ async function gitDiff(dir: string, rel: string, staged: boolean): Promise<strin
     out = out.slice(0, DIFF_LIMIT) + '\n... [diff truncado: supera 500 KB]\n'
   }
   return out
+}
+
+async function gitStage(dir: string, rel: string, action: 'stage' | 'unstage'): Promise<void> {
+  checkRepoPath(dir, rel)
+  try {
+    if (action === 'stage') {
+      await execFileP('git', ['-C', dir, 'add', '--', rel])
+    } else {
+      // repo sin commits: no hay HEAD contra el que restaurar → sacar del index
+      let hasHead = true
+      try {
+        await execFileP('git', ['-C', dir, 'rev-parse', '--verify', 'HEAD'])
+      } catch {
+        hasHead = false
+      }
+      if (hasHead) await execFileP('git', ['-C', dir, 'restore', '--staged', '--', rel])
+      else await execFileP('git', ['-C', dir, 'rm', '-r', '--cached', '--', rel])
+    }
+  } catch (e: any) {
+    const msg = String(e?.stderr || e?.message || e).split('\n')[0]
+    throw new HttpError(400, `git ${action === 'stage' ? 'add' : 'restore --staged'} falló: ${msg}`)
+  }
 }
 
 async function gitLog(dir: string, n: number) {
@@ -418,6 +445,24 @@ app.get('/api/git/diff', async (c) => {
   const staged = c.req.query('staged') === '1'
   const diff = await gitDiff(dir, rel, staged)
   return c.text(diff)
+})
+
+// Stage / unstage de un archivo. Body JSON: { path, action: 'stage' | 'unstage' }
+app.post('/api/git/stage', async (c) => {
+  const dir = await resolveGitDir(c.req.query('session'))
+  let body: { path?: unknown; action?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const rel = typeof body.path === 'string' ? body.path : ''
+  const action = body.action
+  if (action !== 'stage' && action !== 'unstage') {
+    throw new HttpError(400, "action debe ser 'stage' o 'unstage'")
+  }
+  await gitStage(dir, rel, action)
+  return c.json({ ok: true })
 })
 
 app.get('/api/git/log', async (c) => {

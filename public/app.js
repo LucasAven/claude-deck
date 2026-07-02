@@ -685,7 +685,8 @@ async function refreshGit() {
     h.textContent = title;
     list.appendChild(h);
     for (const f of files) {
-      const row = document.createElement('button');
+      // div y no button: adentro va el botón de stage/unstage (no se anidan buttons)
+      const row = document.createElement('div');
       row.className = 'file-row';
       const badge = document.createElement('span');
       badge.className = 'badge' + (f.staged ? ' staged' : '');
@@ -693,8 +694,17 @@ async function refreshGit() {
       const p = document.createElement('span');
       p.className = 'file-path';
       p.textContent = f.path;
+      const act = document.createElement('button');
+      act.className = 'file-act';
+      act.textContent = f.staged ? '−' : '+';
+      act.title = f.staged ? 'Sacar del stage' : 'Stagear';
+      act.addEventListener('click', (e) => {
+        e.stopPropagation();
+        stageFile(f, act);
+      });
       row.appendChild(badge);
       row.appendChild(p);
+      row.appendChild(act);
       row.addEventListener('click', () => openDiff(f));
       list.appendChild(row);
     }
@@ -702,6 +712,24 @@ async function refreshGit() {
 
   renderGroup('Staged', staged);
   renderGroup('Sin stagear', unstaged);
+}
+
+async function stageFile(f, btn) {
+  btn.disabled = true;
+  try {
+    const res = await api(`/api/git/stage?${sessionQuery()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: f.path, action: f.staged ? 'unstage' : 'stage' }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.error || `HTTP ${res.status}`);
+    }
+  } catch (e) {
+    if (String(e.message) !== '401') window.alert(`No se pudo ${f.staged ? 'sacar del stage' : 'stagear'} ${f.path}: ${e.message}`);
+  }
+  refreshGit();
 }
 
 async function openDiff(file) {
