@@ -61,7 +61,10 @@ await page.$eval('.quickkeys[data-term="claude"] [data-k="esc"]', (b) => {
   b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
 });
 ok('tecla rápida Esc enviada sin errores', consoleErrors.length === 0);
-ok('tecla "/" presente en la barra de Claude', (await page.$('.quickkeys[data-term="claude"] [data-k="slash"]')) !== null);
+ok('tecla "/" primera en la barra de Claude (tras el divisor)', await page.$eval(
+  '.quickkeys[data-term="claude"] button[data-k]',
+  (b) => b.dataset.k === 'slash',
+));
 
 // 5b. adjuntar imagen = solo preview (dos pasos): el chip queda pendiente con
 // el hint de "tocá para enviar" y NO se sube nada hasta confirmar con un tap

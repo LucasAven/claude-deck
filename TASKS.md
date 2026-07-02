@@ -16,12 +16,6 @@ Context: keyboard open/close is already detected via `visualViewport` in `update
 
 Context: file list renders into `#file-list` (`index.html`, section `view-changes`); git data comes from the server (`server/index.ts` — look for the git status/diff endpoints, they resolve the session's cwd via `tmuxPaneDir`). You'll need new endpoints, e.g. `POST /api/git/stage` / `POST /api/git/unstage` (or one endpoint with an action param) that run `git add -- <file>` / `git restore --staged -- <file>` in the session's repo dir. Refresh the file list after the action. Mind tmux gotcha 3 in HANDOFF (`=name:` target syntax) if you shell out via the pane dir helper. Add checks to `test/ws-test.mjs` if practical.
 
-## 4. Move the `/` button to the first position in the key row
-
-- [ ] In the Claude quickkeys row, move `<button data-k="slash">/</button>` from last to **first** among the key buttons (right after the divider, before `esc`), since it's the most used and should be easiest to reach.
-
-Context: pure markup reorder in `index.html:52-58`. Keep the camera/paste buttons and divider where they are.
-
 ## 5. Newline (line break) input on mobile
 
 - [ ] There's currently no way to type a line break within a prompt on mobile: the virtual keyboard's Enter, and even shift+enter on an external Bluetooth keyboard, all reach Claude Code as a plain Enter (submits the prompt). Provide a way to insert a newline.
@@ -40,6 +34,10 @@ Context: chips render into `#session-chips` (`app.js:425`); the ✕ kill handler
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)
+
+### 4. Move the `/` button to the first position in the key row — DONE (2026-07-02)
+
+- [x] `<button data-k="slash">/</button>` moved from last to first among the key buttons in `index.html` (right after the divider, before `esc`); camera/paste buttons and divider untouched. The ui-test check was upgraded from "/" present to "/" is the FIRST `button[data-k]` in the Claude quickkeys row. Verified by the user.
 
 ### 3. Mode switcher + model/effort switcher — DONE (2026-07-02)
 
