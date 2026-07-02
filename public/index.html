@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#0b0d10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>claude-deck</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <!-- CDN: jsdelivr (cdnjs ya no hostea @xterm/addon-fit ni los bundles de diff2html) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3.4.52/bundles/css/diff2html.min.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ============ Pestaña Claude ============ -->
+    <section id="view-claude" class="view active">
+      <div class="session-row">
+        <div id="session-chips" class="chips"></div>
+        <button id="btn-new-session" class="chip chip-add" title="Nueva sesión">+</button>
+        <span class="conn" id="conn-claude"><span class="dot"></span></span>
+      </div>
+      <div id="hint-claude" class="hint hidden">
+        Sesión tmux nueva y vacía — escribí <code>claude --continue</code> para retomar la última conversación del repo. <span class="hint-close">✕</span>
+      </div>
+      <div id="term-claude" class="term-wrap"></div>
+
+      <!-- controles en la zona del pulgar, arriba de la tab bar -->
+      <div class="controlbar">
+        <div id="img-chip" class="img-chip hidden">
+          <img id="img-chip-thumb" alt="" />
+          <div class="img-chip-info">
+            <div id="img-chip-title"></div>
+            <div id="img-chip-meta"></div>
+          </div>
+          <button id="img-chip-close" title="Descartar">&#10005;</button>
+        </div>
+        <div class="controlrow quickkeys" data-term="claude">
+          <button id="btn-img" class="ctl-sq" title="Enviar imagen a Claude">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 7l1.6-2.4h3.8L15.5 7"/><circle cx="12" cy="13.2" r="3.4"/></svg>
+          </button>
+          <button id="btn-paste" class="ctl-sq" title="Pegar imagen del portapapeles">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4.5" width="14" height="17" rx="2.5"/><path d="M9 4.5a3 3 0 0 1 6 0"/><path d="M9.3 13.5l2 2 3.4-3.8"/></svg>
+          </button>
+          <input id="img-input" type="file" accept="image/*" class="hidden" />
+          <span class="ctl-div"></span>
+          <button data-k="esc">esc</button>
+          <button data-k="up">&#8593;</button>
+          <button data-k="down">&#8595;</button>
+          <button data-k="tab">tab</button>
+          <button data-k="ctrlc">ctrl+c</button>
+          <button data-k="slash">/</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Pestaña Cambios ============ -->
+    <section id="view-changes" class="view">
+      <div class="changes-header">
+        <button id="btn-diff-back" class="icon-btn hidden">&#8592;</button>
+        <div class="branch-info">
+          <span id="git-branch">&#8942;</span>
+          <span id="git-ab" class="muted"></span>
+        </div>
+        <button id="btn-refresh" class="icon-btn">&#10227;</button>
+      </div>
+      <div id="file-list" class="scroll"></div>
+      <div id="diff-view" class="scroll hidden"></div>
+    </section>
+
+    <!-- ============ Pestaña Shell ============ -->
+    <section id="view-shell" class="view">
+      <div class="quickkeys" data-term="shell">
+        <button data-k="esc">Esc</button>
+        <button data-k="up">&#8593;</button>
+        <button data-k="down">&#8595;</button>
+        <button data-k="tab">Tab</button>
+        <button data-k="ctrlc">Ctrl+C</button>
+        <button data-k="enter">Enter</button>
+        <span class="conn" id="conn-shell"><span class="dot"></span></span>
+      </div>
+      <div id="term-shell" class="term-wrap"></div>
+    </section>
+
+    <!-- ============ Tab bar ============ -->
+    <nav class="tabbar">
+      <button class="tab active" data-tab="claude">
+        <span class="tab-icon">&#9670;</span><span>Claude</span>
+      </button>
+      <button class="tab" data-tab="changes">
+        <span class="tab-icon">&#916;</span><span>Cambios</span>
+      </button>
+      <button class="tab" data-tab="shell">
+        <span class="tab-icon">&gt;_</span><span>Shell</span>
+      </button>
+    </nav>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.52/bundles/js/diff2html.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

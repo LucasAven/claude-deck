@@ -1,0 +1,109 @@
+// Smoke test de UI de claude-deck con puppeteer-core + chromium headless de playwright
+import puppeteer from 'puppeteer-core';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const TOKEN = fs.readFileSync('/path/to/claude-deck/.env', 'utf8')
+  .match(/AUTH_TOKEN=(.+)/)[1].trim();
+
+const shell = path.join(
+  os.homedir(),
+  'Library/Caches/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-mac-arm64/chrome-headless-shell',
+);
+
+const results = [];
+const ok = (name, cond) => results.push(`${cond ? 'PASS' : 'FAIL'}  ${name}`);
+
+const browser = await puppeteer.launch({
+  executablePath: shell,
+  headless: true,
+  args: ['--no-sandbox', '--window-size=390,844'],
+});
+const page = await browser.newPage();
+await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+
+const consoleErrors = [];
+page.on('pageerror', (e) => consoleErrors.push(String(e)));
+page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+
+// 1. auth por ?token= → redirect a /
+await page.goto(`http://127.0.0.1:7433/?token=${TOKEN}`, { waitUntil: 'networkidle2', timeout: 20000 });
+ok('redirect a / tras ?token=', new URL(page.url()).pathname === '/' && !page.url().includes('token='));
+
+// 2. xterm renderiza en pestaña Claude
+await page.waitForSelector('#term-claude .xterm', { timeout: 10000 }).catch(() => {});
+ok('xterm montado en pestaña Claude', !!(await page.$('#term-claude .xterm')));
+
+// 3. WS conectado (indicador) + prompt visible en la terminal
+await new Promise((r) => setTimeout(r, 2500));
+ok('indicador de conexión ON', await page.$eval('#conn-claude', (el) => el.classList.contains('on')));
+const termText = await page.$eval('#term-claude', (el) => el.innerText);
+ok('la terminal muestra contenido de la sesión tmux', termText.trim().length > 0);
+
+// 4. chips de sesión (el label es el primer span; el activo suma el ✕)
+const chips = await page.$$eval('#session-chips .chip', (els) => els.map((e) => e.querySelector('span').textContent));
+ok('chip de sesión "deck" presente y activo', chips.includes('deck'));
+ok('chip activo tiene botón ✕ (matar sesión)', (await page.$('#session-chips .chip.active .chip-x')) !== null);
+ok('botón 📷 de enviar imagen presente', (await page.$('#btn-img')) !== null);
+ok('botón pegar del portapapeles presente', (await page.$('#btn-paste')) !== null);
+
+// 5. barra de control abajo (zona del pulgar), entre la terminal y la tab bar
+const geo = await page.evaluate(() => ({
+  term: document.querySelector('#term-claude').getBoundingClientRect().top,
+  bar: document.querySelector('.controlbar').getBoundingClientRect().top,
+  tabs: document.querySelector('.tabbar').getBoundingClientRect().top,
+}));
+ok('controles debajo de la terminal y arriba de las tabs', geo.term < geo.bar && geo.bar < geo.tabs);
+
+// teclas rápidas: Esc no rompe (envía por WS); la barra de Claude tiene "/"
+await page.$eval('.quickkeys[data-term="claude"] [data-k="esc"]', (b) => {
+  b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+});
+ok('tecla rápida Esc enviada sin errores', consoleErrors.length === 0);
+ok('tecla "/" presente en la barra de Claude', (await page.$('.quickkeys[data-term="claude"] [data-k="slash"]')) !== null);
+
+// 6. pestaña Cambios: header + lista de archivos
+await page.click('.tab[data-tab="changes"]');
+await new Promise((r) => setTimeout(r, 1500));
+const branch = await page.$eval('#git-branch', (el) => el.textContent);
+ok('header muestra la rama', branch.includes('main'));
+const rows = await page.$$('#file-list .file-row');
+ok('lista archivos modificados (untracked ??)', rows.length > 5);
+
+// 7. tap en un archivo → diff renderizado con diff2html
+await rows[0].click();
+await page.waitForSelector('#diff-view .d2h-wrapper, #diff-view .d2h-file-wrapper', { timeout: 8000 }).catch(() => {});
+ok('diff renderizado con diff2html', !!(await page.$('#diff-view .d2h-file-wrapper')));
+ok('modo line-by-line (no side-by-side)', !(await page.$('#diff-view .d2h-file-side-diff')));
+
+// 8. botón ← vuelve a la lista
+await page.click('#btn-diff-back');
+await new Promise((r) => setTimeout(r, 300));
+ok('botón ← vuelve a la lista', !(await page.$eval('#file-list', (el) => el.classList.contains('hidden'))));
+
+// 9. pestaña Shell: terminal conectada
+await page.click('.tab[data-tab="shell"]');
+await new Promise((r) => setTimeout(r, 2500));
+ok('xterm montado en pestaña Shell', !!(await page.$('#term-shell .xterm')));
+ok('shell conectada (indicador ON)', await page.$eval('#conn-shell', (el) => el.classList.contains('on')));
+
+// 10. service worker registrado + manifest
+const swReg = await page.evaluate(async () => {
+  const reg = await navigator.serviceWorker.getRegistration();
+  return !!reg;
+});
+ok('service worker registrado', swReg);
+
+// 11. sin errores JS en consola
+ok(`sin errores JS en consola (${consoleErrors.length})`, consoleErrors.length === 0);
+if (consoleErrors.length) console.log('ERRORES:', consoleErrors.slice(0, 5).join('\n'));
+
+await page.screenshot({ path: new URL('./shot-shell.png', import.meta.url).pathname });
+await page.click('.tab[data-tab="claude"]');
+await new Promise((r) => setTimeout(r, 800));
+await page.screenshot({ path: new URL('./shot-claude.png', import.meta.url).pathname });
+
+await browser.close();
+console.log(results.join('\n'));
+process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);

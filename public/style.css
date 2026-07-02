@@ -1,0 +1,475 @@
+/* claude-deck — tema oscuro "sala de control" */
+
+:root {
+  --bg: #0b0d10;
+  --panel: #12151a;
+  --panel-2: #171b21;
+  --border: #232830;
+  --text: #c8ccd4;
+  --muted: #7d8590;
+  --accent: #e8b04b;        /* ámbar — único color de acento */
+  --accent-dim: #8a6a2e;
+  --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  --vvh: 100dvh;
+  --vvt: 0px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* la página nunca scrollea: con teclado abierto iOS panea el visual viewport
+   y #app lo sigue vía --vvt (ver updateViewportGeometry) */
+body {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+#app {
+  position: relative;
+  top: var(--vvt);
+  height: var(--vvh);
+  display: flex;
+  flex-direction: column;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* ---------- vistas ---------- */
+.view {
+  flex: 1;
+  min-height: 0;
+  display: none;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+}
+.view.active { display: flex; }
+
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+
+/* ---------- chips de sesión ---------- */
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 4px;
+  overflow-x: auto;
+  flex: none;
+  scrollbar-width: none;
+}
+.session-row::-webkit-scrollbar { display: none; }
+
+.chips { display: flex; gap: 6px; }
+
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 14px;
+  border-radius: 17px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+.chip-x {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 2px 6px 6px;  /* área táctil generosa dentro del chip */
+  margin: -6px -6px -6px 0;
+}
+.chip-x:active { color: var(--accent); }
+.chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--panel-2);
+}
+.chip-add { min-width: 40px; font-size: 16px; }
+
+/* ---------- barra de teclas rápidas ---------- */
+.quickkeys {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  flex: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+}
+.quickkeys::-webkit-scrollbar { display: none; }
+
+.quickkeys button {
+  flex: none;
+  min-width: 48px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.quickkeys button:active {
+  background: var(--panel-2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* ---------- barra de control inferior (pestaña Claude) ---------- */
+.controlbar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* fila única scrolleable; pisa los estilos base de .quickkeys */
+.controlrow {
+  padding: 0;
+  border-bottom: none;
+  gap: 10px;
+}
+.controlrow button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 11px;
+  border: 1px solid #2a2f37;
+  background: #1b1f26;
+  color: #cdd2d9;
+  font-size: 14px;
+}
+.controlrow button:active {
+  background: #1b1f26;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.controlrow .ctl-sq {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.controlrow button.busy {
+  pointer-events: none;
+  animation: img-busy 1s ease-in-out infinite;
+}
+@keyframes img-busy { 50% { opacity: 0.25; } }
+
+.ctl-div {
+  flex: none;
+  width: 1px;
+  height: 26px;
+  background: #2a2f37;
+  margin: 0 2px;
+}
+
+/* chip de imagen adjunta (preview arriba de la fila de controles) */
+.img-chip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid #2a2f37;
+  border-radius: 12px;
+  background: #14171c;
+}
+.img-chip img {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #2a2f37;
+  background: #1b1f26;
+}
+.img-chip-info { flex: 1; min-width: 0; }
+#img-chip-title {
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#img-chip-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#img-chip-close {
+  flex: none;
+  min-width: 40px;
+  min-height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+#img-chip-close:active { color: var(--accent); }
+
+/* indicador conectado/desconectado */
+.conn { margin-left: auto; display: flex; align-items: center; padding: 0 4px; }
+.conn .dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: #555c66;
+  box-shadow: 0 0 0 0 transparent;
+  transition: background .3s;
+}
+.conn.on .dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px 0 var(--accent-dim);
+}
+
+/* ---------- hint sesión nueva ---------- */
+.hint {
+  flex: none;
+  margin: 6px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.hint code { color: var(--accent); }
+.hint-close { float: right; color: var(--muted); padding: 0 4px; cursor: pointer; }
+
+/* ---------- terminales ---------- */
+.term-wrap {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 2px 4px 8px;
+  background: var(--bg);
+}
+.term-wrap .xterm { height: 100%; }
+.xterm .xterm-viewport { background: transparent !important; }
+
+/* ---------- pestaña Cambios ---------- */
+.changes-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  min-height: 52px;
+}
+.branch-info {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+#git-branch { color: var(--accent); overflow: hidden; text-overflow: ellipsis; }
+
+.icon-btn {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 17px;
+  cursor: pointer;
+  flex: none;
+}
+.icon-btn:active { border-color: var(--accent); color: var(--accent); }
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; /* no encadenar el scroll al body */
+}
+
+.file-section {
+  padding: 10px 12px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.file-row:active { background: var(--panel); }
+
+.badge {
+  flex: none;
+  min-width: 26px;
+  padding: 2px 5px;
+  text-align: center;
+  border: 1px solid var(--accent-dim);
+  border-radius: 5px;
+  color: var(--accent);
+  font-size: 11px;
+}
+.badge.staged { background: var(--accent-dim); color: var(--bg); }
+
+.file-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;      /* prioriza el final del path */
+  text-align: left;
+}
+
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* ---------- diff2html overrides (tema oscuro) ---------- */
+#diff-view { padding: 8px; }
+#diff-view .d2h-wrapper { text-align: left; }
+#diff-view .d2h-file-wrapper {
+  position: relative; /* ancla los números (absolute): siguen el scroll
+                         vertical y quedan fijos en el horizontal */
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  background: var(--panel);
+}
+#diff-view .d2h-file-header {
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+#diff-view .d2h-file-name { color: var(--text); }
+#diff-view .d2h-tag {
+  background: transparent;
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+/* Números de línea: diff2html los pone position:absolute (7.5em, sin alto),
+   lo que deja huecos por los que se ve el contenido al scrollear horizontal.
+   Los volvemos celdas reales sticky: opacas, del alto de la fila, fijas a la
+   izquierda en el scroll horizontal y siguiendo el vertical. */
+#diff-view .d2h-diff-table {
+  border-collapse: separate; /* sticky no funciona bien con collapse */
+  border-spacing: 0;
+  line-height: 18px;
+}
+#diff-view .d2h-code-linenumber,
+#diff-view .d2h-code-side-linenumber {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--muted);
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: table-cell;
+  width: 52px;
+  min-width: 52px;
+  max-width: 52px;
+  font-size: 10px;
+}
+#diff-view .d2h-code-linenumber .line-num1,
+#diff-view .d2h-code-linenumber .line-num2 {
+  width: 50%;        /* las de diff2html (3.5em c/u) no entran en 52px */
+  padding: 0 3px;
+}
+#diff-view .d2h-code-line { padding: 0 10px; width: auto; }
+#diff-view .d2h-file-diff { overscroll-behavior-x: contain; }
+#diff-view .d2h-code-line, #diff-view .d2h-code-line-ctn { color: var(--text); }
+#diff-view .d2h-info { background: var(--panel-2); color: var(--muted); border-color: var(--border); }
+#diff-view .d2h-ins { background: #102818; border-color: #1d4028; }
+#diff-view .d2h-ins .d2h-code-line-ctn { background: transparent; }
+#diff-view .d2h-del { background: #2e1416; border-color: #4a2023; }
+#diff-view .d2h-del .d2h-code-line-ctn { background: transparent; }
+#diff-view ins { background: #1d4a28; text-decoration: none; }
+#diff-view del { background: #5a2428; text-decoration: none; }
+#diff-view .d2h-emptyplaceholder, #diff-view .d2h-code-side-emptyplaceholder {
+  background: var(--bg); border-color: var(--border);
+}
+#diff-view table { font-size: 12px; }
+
+/* ---------- tab bar inferior ---------- */
+.tabbar {
+  flex: none;
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tab {
+  flex: 1;
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.tab .tab-icon { font-size: 16px; }
+.tab.active { color: var(--accent); }
+
+/* overlay 401 */
+#auth-error {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  text-align: center;
+  color: var(--muted);
+  z-index: 99;
+  line-height: 1.6;
+}
