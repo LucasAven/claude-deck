@@ -134,6 +134,7 @@ body {
 }
 /* ---------- barra de control inferior (pestaña Claude) ---------- */
 .controlbar {
+  position: relative; /* ancla del popover .switch-menu */
   flex: none;
   display: flex;
   flex-direction: column;
@@ -141,6 +142,96 @@ body {
   padding: 10px;
   border-top: 1px solid var(--border);
   background: var(--bg);
+}
+
+/* pills de modo y modelo/esfuerzo (arriba de la fila de teclas) */
+.switchrow { display: flex; }
+.switchrow .switch-pill {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+.pill-left,
+.pill-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.pill-left span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.pill-chev { color: var(--muted); font-size: 11px; }
+.pill-muted { color: var(--muted); font-size: 12px; }
+.model-star { color: #b294bb; }
+
+/* popover compartido de los switchers (abre hacia arriba) */
+.switch-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 10px;
+  right: 10px;
+  z-index: 40;
+  background: #14171c;
+  border: 1px solid #2a2f37;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  max-height: 45dvh;
+  overflow-y: auto;
+}
+.switch-menu .mh {
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.switch-menu .mi {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.switch-menu .mi:active { background: #1b1f26; }
+.switch-menu .mi.sel { color: var(--accent); }
+.switch-menu .mi .mi-check { margin-left: auto; color: var(--accent); }
+.switch-menu .mdiv { height: 1px; background: #2a2f37; margin: 6px 4px; }
+.switch-menu .mi-efforts {
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px 8px;
+}
+.switch-menu .mi-efforts button {
+  flex: 1;
+  min-height: 38px;
+  border: 1px solid #2a2f37;
+  border-radius: 8px;
+  background: #1b1f26;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.switch-menu .mi-efforts button.sel {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* fila única scrolleable; pisa los estilos base de .quickkeys */

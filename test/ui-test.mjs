@@ -87,6 +87,36 @@ await page.click('#img-chip-close');
 await new Promise((r) => setTimeout(r, 300));
 ok('✕ descarta el preview sin enviar', await page.$eval('#img-chip', (el) => el.classList.contains('hidden')) && pasteReqs === 0);
 
+// 5c. switchers de modo y modelo/esfuerzo (pills arriba de la fila de teclas)
+const pd = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+const swGeo = await page.evaluate(() => ({
+  pills: document.querySelector('.switchrow').getBoundingClientRect().top,
+  keys: document.querySelector('.quickkeys[data-term="claude"]').getBoundingClientRect().top,
+}));
+ok('pills de modo/modelo arriba de la fila de teclas', swGeo.pills < swGeo.keys);
+
+// modo: label fijo ("Mode switcher"), cada tap manda UN shift+tab real sin
+// tocar el label; 3 taps = ciclo completo → la sesión tmux queda como estaba
+ok('pill de modo con label fijo', (await page.$eval('#mode-label', (el) => el.textContent)) === 'Mode switcher');
+for (let i = 1; i <= 3; i++) {
+  await page.$eval('#btn-mode', pd);
+  await new Promise((r) => setTimeout(r, 150));
+}
+ok('el label no cambia tras 3 taps (shift+tab reales)',
+  (await page.$eval('#mode-label', (el) => el.textContent)) === 'Mode switcher');
+
+// modelo/esfuerzo: solo abrir e inspeccionar (elegir mandaría /model y /effort
+// a la sesión real); cerrar tocando afuera
+await page.$eval('#btn-model', pd);
+await new Promise((r) => setTimeout(r, 200));
+ok('menú de modelo: 4 modelos + 4 niveles de esfuerzo',
+  (await page.$$('#switch-menu .mi')).length === 4
+  && (await page.$$('#switch-menu .mi-efforts button')).length === 4);
+await page.screenshot({ path: new URL('./shot-switchers.png', import.meta.url).pathname });
+await page.$eval('#term-claude', pd);
+await new Promise((r) => setTimeout(r, 200));
+ok('tap afuera cierra el menú', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
+
 // 6. pestaña Cambios: header + lista de archivos
 await page.click('.tab[data-tab="changes"]');
 await new Promise((r) => setTimeout(r, 1500));

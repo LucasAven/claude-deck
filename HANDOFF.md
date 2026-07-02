@@ -9,7 +9,7 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 - `server/index.ts` — todo el backend (Hono + ws + node-pty, un solo archivo)
 - `public/` — frontend vanilla: `index.html`, `app.js`, `style.css`, PWA (`manifest.json`, `sw.js` passthrough sin caché, `icon.svg`)
 - `test/ws-test.mjs` — E2E de WS/tmux/API (**22 checks**, todos PASS)
-- `test/ui-test.mjs` — smoke de UI en Chromium headless, viewport iPhone (**24 checks**; deja `test/shot-*.png`. Los 4 nuevos —flujo de imagen en dos pasos, sección 5b— se agregaron en la 3ª sesión y **aún no se corrieron**: el usuario cortó la corrida y verificó a mano en el celular. Correrlos en la próxima oportunidad.)
+- `test/ui-test.mjs` — smoke de UI en Chromium headless, viewport iPhone (**29 checks**, todos PASS; deja `test/shot-*.png`. Los 5 de la sección 5c —switchers de modo/modelo— son de la 4ª sesión; ver `TASKS.md` para el backlog de features y lo ya hecho.)
 - `test/shot-diff.mjs` — helper que screenshotea el diff (normal / h-scroll / v-scroll) para iterar UI sin celular
 - `.claude/settings.example.json` + `scripts/notify.sh` — hooks ntfy (bonus §12), **inactivos** hasta que el usuario los renombre a `settings.json`
 

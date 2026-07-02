@@ -102,8 +102,9 @@ function createTermConnection(containerId, connId, target, getSession) {
       if (myGen !== gen) return;
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
-      if (m.t === 'out') term.write(m.d);
-      else if (m.t === 'meta' && m.created && target === 'claude') showHint();
+      if (m.t === 'out') {
+        term.write(m.d);
+      } else if (m.t === 'meta' && m.created && target === 'claude') showHint();
     };
 
     sock.onclose = () => {
@@ -235,6 +236,145 @@ function wireQuickKeys() {
       });
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Switchers de modo (shift+tab) y modelo/esfuerzo (/model, /effort)
+// Modo: cada tap manda UN shift+tab, igual que en la terminal. La pill tiene
+// label fijo ("Mode switcher"): la app no puede leer el estado real de Claude
+// desde el pty, así que no intenta adivinarlo — el usuario ve el modo actual
+// en el propio terminal.
+// ---------------------------------------------------------------------------
+const MODELS = [
+  { id: 'fable', label: 'Fable 5' },
+  { id: 'opus', label: 'Opus 4.8' },
+  { id: 'sonnet', label: 'Sonnet 5' },
+  { id: 'haiku', label: 'Haiku 4.5' },
+];
+const EFFORTS = [
+  { id: 'low', label: 'Bajo' },
+  { id: 'medium', label: 'Medio' },
+  { id: 'high', label: 'Alto' },
+  { id: 'max', label: 'Máx' },
+];
+
+function loadSwitch() {
+  try {
+    return JSON.parse(localStorage.getItem(`deck-switch:${state.session}`)) || {};
+  } catch (_) { return {}; }
+}
+function saveSwitch(sw) {
+  try { localStorage.setItem(`deck-switch:${state.session}`, JSON.stringify(sw)); } catch (_) {}
+}
+
+function renderSwitchPills() {
+  const sw = loadSwitch();
+  const model = MODELS.find((m) => m.id === sw.model);
+  $('#model-label').textContent = model ? model.label : (sw.model || 'Modelo');
+  const effort = EFFORTS.find((e) => e.id === sw.effort);
+  $('#effort-label').textContent = effort ? effort.label : '';
+}
+
+function cycleMode() {
+  closeSwitchMenu();
+  if (!claudeConn) return;
+  claudeConn.sendKeys('\x1b[Z');
+}
+
+// manda un slash command al prompt de Claude; el Enter va aparte con una
+// pausa corta para que el autocomplete de "/" no se coma el submit
+function sendSlashCommand(cmd) {
+  if (!claudeConn) return;
+  claudeConn.sendKeys(cmd);
+  setTimeout(() => claudeConn && claudeConn.sendKeys('\r'), 150);
+}
+
+function closeSwitchMenu() {
+  $('#switch-menu').classList.add('hidden');
+}
+
+function menuItem(label, selected, onPick) {
+  const btn = document.createElement('button');
+  btn.className = 'mi' + (selected ? ' sel' : '');
+  const span = document.createElement('span');
+  span.textContent = label;
+  btn.appendChild(span);
+  if (selected) {
+    const check = document.createElement('span');
+    check.className = 'mi-check';
+    check.textContent = '✓';
+    btn.appendChild(check);
+  }
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); // no cerrar el teclado virtual
+    onPick();
+  });
+  return btn;
+}
+
+function menuHeader(text) {
+  const h = document.createElement('div');
+  h.className = 'mh';
+  h.textContent = text;
+  return h;
+}
+
+function openModelMenu() {
+  const menu = $('#switch-menu');
+  if (!menu.classList.contains('hidden')) {
+    closeSwitchMenu();
+    return;
+  }
+  menu.innerHTML = '';
+  const sw = loadSwitch();
+
+  menu.appendChild(menuHeader('Modelo'));
+  for (const m of MODELS) {
+    menu.appendChild(menuItem(m.label, m.id === sw.model, () => {
+      sendSlashCommand(`/model ${m.id}`);
+      sw.model = m.id;
+      saveSwitch(sw);
+      renderSwitchPills();
+      closeSwitchMenu();
+    }));
+  }
+  menu.appendChild(Object.assign(document.createElement('div'), { className: 'mdiv' }));
+  menu.appendChild(menuHeader('Esfuerzo'));
+  const row = document.createElement('div');
+  row.className = 'mi-efforts';
+  for (const e of EFFORTS) {
+    const btn = document.createElement('button');
+    btn.className = e.id === sw.effort ? 'sel' : '';
+    btn.textContent = e.label;
+    btn.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      sendSlashCommand(`/effort ${e.id}`);
+      sw.effort = e.id;
+      saveSwitch(sw);
+      renderSwitchPills();
+      closeSwitchMenu();
+    });
+    row.appendChild(btn);
+  }
+  menu.appendChild(row);
+
+  menu.classList.remove('hidden');
+}
+
+function wireSwitchers() {
+  $('#btn-mode').addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    cycleMode();
+  });
+  $('#btn-model').addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    openModelMenu();
+  });
+  // tap afuera cierra el menú
+  document.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('#switch-menu, #btn-mode, #btn-model')) closeSwitchMenu();
+  });
+  renderSwitchPills();
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +590,8 @@ function selectSession(name) {
   if (name === state.session) return;
   state.session = name;
   hideHint();
+  closeSwitchMenu();
+  renderSwitchPills(); // el estado de modo/modelo es por sesión
   claudeConn.reconnect();
   refreshSessions();
   refreshGit(); // la pestaña Cambios sigue a la sesión seleccionada
@@ -655,6 +797,7 @@ async function init() {
   shellConn = createTermConnection('term-shell', 'conn-shell', 'shell', () => state.defaultSession);
 
   wireQuickKeys();
+  wireSwitchers();
   wireTouchScroll('term-claude', () => claudeConn);
   wireTouchScroll('term-shell', () => shellConn);
   wireImagePaste();
