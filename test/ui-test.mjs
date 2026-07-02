@@ -120,6 +120,21 @@ await page.$eval('#term-claude', pd);
 await new Promise((r) => setTimeout(r, 200));
 ok('tap afuera cierra el menú', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
 
+// 5d. teclado virtual → tabbar oculta: headless no puede abrir el teclado de
+// iOS, así que se simula la clase que setea updateViewportGeometry y se
+// verifica el CSS; el heurístico real (innerHeight − vv.height > 100) lo
+// confirma el usuario en el celular
+const kbSim = await page.evaluate(() => {
+  const tabbar = document.querySelector('.tabbar');
+  const before = tabbar.offsetHeight;
+  document.body.classList.add('kb-open');
+  const hidden = tabbar.offsetHeight;
+  document.body.classList.remove('kb-open');
+  return { before, hidden, after: tabbar.offsetHeight };
+});
+ok('body.kb-open oculta la tabbar (simulado)',
+  kbSim.before > 0 && kbSim.hidden === 0 && kbSim.after === kbSim.before);
+
 // 6. pestaña Cambios: header + lista de archivos
 await page.click('.tab[data-tab="changes"]');
 await new Promise((r) => setTimeout(r, 1500));

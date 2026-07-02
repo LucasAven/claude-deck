@@ -544,6 +544,9 @@ body {
   background: var(--panel);
   padding-bottom: env(safe-area-inset-bottom);
 }
+/* teclado virtual abierto (body.kb-open, ver updateViewportGeometry):
+   la tabbar se oculta para que la terminal gane esas filas */
+body.kb-open .tabbar { display: none; }
 .tab {
   flex: 1;
   min-height: 56px;

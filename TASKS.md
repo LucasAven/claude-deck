@@ -4,12 +4,6 @@ Feature requests from the user (2026-07-02). A new session should read `HANDOFF.
 
 Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `public/style.css`, `server/index.ts` (backend). Verify with `node test/ui-test.mjs` (+ update it if you add UI) and let the user confirm touch/keyboard behavior on the phone — headless Chromium can't simulate the iOS virtual keyboard.
 
-## 1. Hide tab bar while the virtual keyboard is open
-
-- [ ] When the mobile virtual keyboard opens, hide the bottom sections navbar (`<nav class="tabbar">`, `index.html:91`) so the terminal gets more vertical space; show it again when the keyboard closes.
-
-Context: keyboard open/close is already detected via `visualViewport` in `updateViewportGeometry()` (`app.js:628`) — the app pins itself to the visible area with `--vvt/--vvh`. A reasonable heuristic: keyboard is open when `window.innerHeight - visualViewport.height` exceeds some threshold (~100px). Toggle a class on `body` or `.tabbar` and let CSS hide it. Make sure the terminal re-fits (there's already a debounced re-fit, 120 ms) so it actually gains the rows.
-
 ## 2. Stage / unstage buttons in the diff (Cambios) section
 
 - [ ] The Cambios tab already splits files into staged/unstaged lists. Add a button per file (and/or per group) to stage or unstage it.
@@ -34,6 +28,10 @@ Context: chips render into `#session-chips` (`app.js:425`); the ✕ kill handler
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)
+
+### 1. Hide tab bar while the virtual keyboard is open — DONE (2026-07-02)
+
+- [x] `updateViewportGeometry()` (`app.js`) toggles `kb-open` on `body` when `window.innerHeight − visualViewport.height > 100` (`KB_THRESHOLD`); `body.kb-open .tabbar { display: none; }` in `style.css`. The toggle runs before the debounced 120 ms re-fit, so the terminal gains/returns the rows automatically. ui-test check 5d (30 total) simulates the class and asserts the tabbar collapses/restores; the real keyboard heuristic was verified by the user on the phone ("works great").
 
 ### 4. Move the `/` button to the first position in the key row — DONE (2026-07-02)
 

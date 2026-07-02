@@ -767,12 +767,16 @@ function switchTab(name) {
 // seguir el paneo del visual viewport cuando iOS muestra el teclado.
 // ---------------------------------------------------------------------------
 let fitTimer = null;
+const KB_THRESHOLD = 100; // px: diferencia layout↔visual viewport que delata al teclado
 function updateViewportGeometry() {
   const vv = window.visualViewport;
   const h = vv ? vv.height : window.innerHeight;
   const top = vv ? vv.offsetTop : 0;
   document.documentElement.style.setProperty('--vvh', `${h}px`);
   document.documentElement.style.setProperty('--vvt', `${top}px`);
+  // teclado abierto → ocultar la tabbar para darle esas filas a la terminal
+  // (el fit con debounce de abajo corre después del toggle y toma el espacio)
+  document.body.classList.toggle('kb-open', window.innerHeight - h > KB_THRESHOLD);
   // fit con debounce: el teclado dispara ráfagas de resize y cada re-fit
   // real provoca un redraw completo de tmux
   clearTimeout(fitTimer);
