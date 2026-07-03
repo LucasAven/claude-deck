@@ -974,6 +974,7 @@ function closeDiff() {
 // Carga lazy por nivel (/api/fs/list); tap en un archivo abre /api/fs/file.
 // ---------------------------------------------------------------------------
 let treeSession = null; // sesión cuyo árbol está renderizado (null = refetch)
+let treeRoot = null; // raíz absoluta renderizada: si el cwd del pane resuelve a otra, re-render
 let treeRootName = 'Archivos'; // basename de la raíz, para el título del header
 
 function extClass(name) {
@@ -1132,21 +1133,34 @@ function renderEntries(entries, container, base, depth) {
 }
 
 async function refreshTree(force) {
-  if (treeSession === state.session && !force) return;
-  closeFileView();
+  // Con el árbol de esta sesión ya pintado, la llamada igual relistea la raíz
+  // (el server resuelve el cwd del pane en cada request): si un cd movió la
+  // sesión a OTRA raíz hay que re-renderizar, pero si sigue en la misma no se
+  // toca el DOM — las carpetas expandidas y el archivo abierto sobreviven.
+  const cached = treeSession === state.session && !force;
+  const ses = state.session;
   const tree = $('#file-tree');
-  tree.innerHTML = '';
-  tree.appendChild(emptyNote('Cargando…'));
+  if (!cached) {
+    closeFileView();
+    tree.innerHTML = '';
+    tree.appendChild(emptyNote('Cargando…'));
+  }
   let data;
   try {
     data = await fetchList('');
   } catch (e) {
+    if (ses !== state.session) return; // cambió la sesión mientras cargaba
     treeSession = null;
+    closeFileView();
     tree.innerHTML = '';
     if (String(e.message) !== '401') tree.appendChild(emptyNote(`No se pudo listar: ${e.message}`));
     return;
   }
+  if (ses !== state.session) return; // idem: que una respuesta vieja no pise el árbol nuevo
+  if (cached && data.root === treeRoot) return;
+  closeFileView(); // raíz nueva: resetear archivo abierto y expansión
   treeSession = state.session;
+  treeRoot = data.root;
   treeRootName = data.root.split('/').pop() || 'Archivos';
   $('#files-title').textContent = treeRootName;
   tree.innerHTML = '';
@@ -1326,12 +1340,14 @@ async function init() {
     if (document.visibilityState !== 'visible') return;
     refreshGit();
     if (state.activeTab === 'claude') refreshSessions();
+    if (state.activeTab === 'files') refreshTree(false); // sigue el cwd del pane: re-render solo si cambió la raíz
   }, 8000);
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       refreshGit();
       refreshSessions();
+      if (state.activeTab === 'files') refreshTree(false);
       // iOS suele matar los WS en background: reconectar sin esperar backoff
       claudeConn.resume();
     }

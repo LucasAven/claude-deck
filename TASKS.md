@@ -12,6 +12,15 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 
 (move completed items here, with a one-line note on how they were verified)
 
+### 14. Archivos follows the pane's current directory (per deck) — DONE (2026-07-03)
+
+Requested 2026-07-03. User repro: `cd ../maria-delia/` in the deck's terminal → the Archivos tab kept showing the OLD project's tree. Server was never the problem (`resolveFsDir()` resolves the pane's cwd fresh per request); the frontend cache was: `refreshTree(false)` early-returned when `treeSession === state.session`, so the 8 s poll and tab switches never noticed the root changed.
+
+- [x] `refreshTree(false)` no longer trusts the session-name cache blindly: it always relists the root (`/api/fs/list` is cheap, same cadence as `refreshGit`) and compares `data.root` against the new `treeRoot` (full path, tracked alongside `treeSession`). **Same root → return without touching the DOM** (expanded folders and the open file survive every poll); different root → full re-render with `closeFileView()` + expansion reset + `#files-title` update. The "root = git toplevel" rule is untouched (server-side), so `cd` into a subdir of the same repo still doesn't reroot. Stale-response guard: aborts if `state.session` changed while the fetch was in flight.
+- [x] Root check runs when entering Archivos (existing `switchTab` call), on the 8 s poll and on visibilitychange→visible (both new, only while the Archivos tab is active). On fetch error with a rendered tree (e.g. cwd resolved outside `WORKSPACES_ROOT` → 403) the tree is replaced by the error note and `treeSession` resets, so the next poll retries from scratch.
+
+Verified: scratch puppeteer script (not committed) **10/10 PASS** against a scratch tmux session `deck14` cd-ing between two scratch git repos `deck14-a`/`deck14-b` under the workspaces root (all cleaned up after): initial tree, poll with unchanged root preserves a DOM marker + expanded folder + open file, `cd` to a subdir of the same repo doesn't reroot, `cd` to the other project reroots (new entries, file view closed, expansion reset), tab-switch away and back picks up the new root, 0 page errors. ui-test +1 check (→ **53**, NOT run — user runs it): poll with unchanged root keeps the DOM marker and expansion.
+
 ### 13. Unified attach button (+) replacing camera + paste, and text paste support — DONE (2026-07-03)
 
 Requested 2026-07-03. Two related changes to the Claude controlbar attach flow:

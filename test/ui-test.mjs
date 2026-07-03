@@ -276,6 +276,17 @@ ok('carpetas primero en el árbol', topTypes.length > 0
 await page.click('#file-tree > .ft-row.dir');
 await new Promise((r) => setTimeout(r, 1000));
 ok('expandir carpeta carga sus hijos', (await page.$$('#file-tree .ft-kids .ft-row, #file-tree .ft-kids .empty-state')).length > 0);
+// tarea 14: el poll relistea la raíz pero NO re-renderiza si no cambió — el
+// marcador en un nodo del DOM y la carpeta expandida deben sobrevivir
+const pollKept = await page.evaluate(async () => {
+  document.querySelector('#file-tree .ft-row').dataset.marker = 'kept';
+  await refreshTree(false);
+  return {
+    marker: document.querySelector('#file-tree .ft-row').dataset.marker === 'kept',
+    expanded: [...document.querySelectorAll('#file-tree .ft-kids')].some((k) => !k.classList.contains('hidden')),
+  };
+});
+ok('poll con raíz sin cambios no re-renderiza el árbol', pollKept.marker && pollKept.expanded);
 await page.screenshot({ path: new URL('./shot-files.png', import.meta.url).pathname });
 // el botón de vista renderizada no aparece en el árbol (solo con un .md abierto)
 ok('botón markdown oculto en la vista de árbol', await page.$eval('#btn-md-render', (el) => el.classList.contains('hidden')));
