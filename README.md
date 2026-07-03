@@ -4,6 +4,8 @@ Panel remoto móvil (PWA) para controlar **la misma sesión interactiva de Claud
 
 Todo corre en tu máquina; el celular es solo una ventana.
 
+> **¿Primera vez? Andá directo a [`docs/SETUP.md`](docs/SETUP.md)** — la guía paso a paso para dejarlo funcionando desde cero (instalación, teléfono y uso diario) sin leer el resto de este README. Lo que sigue acá es la referencia de cómo funciona el proyecto.
+
 ## Cómo funciona
 
 La sesión de Claude Code corre **dentro de tmux**. La terminal de VS Code y la pestaña del celular se *attachean* a la misma sesión tmux, así ambas ven y controlan exactamente lo mismo en tiempo real. Cerrar el navegador nunca mata la sesión: tmux la mantiene viva.
