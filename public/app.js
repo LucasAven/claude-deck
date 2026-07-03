@@ -61,6 +61,7 @@ function createTermConnection(containerId, connId, getSession) {
   let gen = 0;          // generación de conexión: invalida handlers de sockets viejos
   let retries = 0;
   let retryTimer = null;
+  let refreshTimer = null; // watchdog del refresh post-resume (detecta WS zombie)
   let wantedSession = getSession();
   let lastCols = 0;
   let lastRows = 0;
@@ -87,6 +88,8 @@ function createTermConnection(containerId, connId, getSession) {
   function connect() {
     clearTimeout(retryTimer);
     retryTimer = null;
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
     const myGen = ++gen;
     if (ws) {
       // nunca dos attaches vivos por terminal: duplican el output (texto
@@ -115,6 +118,11 @@ function createTermConnection(containerId, connId, getSession) {
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
       if (m.t === 'out') {
+        // llegó output: el socket está vivo, cancelar el watchdog de resume()
+        if (refreshTimer) {
+          clearTimeout(refreshTimer);
+          refreshTimer = null;
+        }
         term.write(m.d);
       } else if (m.t === 'meta' && m.created) showHint();
     };
@@ -152,7 +160,30 @@ function createTermConnection(containerId, connId, getSession) {
       if (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
         retries = 0;
         connect();
+        return;
       }
+      if (ws.readyState !== WebSocket.OPEN) return; // CONNECTING: dejarlo terminar
+      // El socket dice OPEN pero después de un freeze de iOS puede ser un
+      // zombie, o el buffer de xterm puede haber quedado corrupto (tarea 11:
+      // texto doblado/mezclado que solo se arreglaba abriendo el teclado,
+      // porque el cambio de viewport forzaba un resize → repaint de tmux).
+      // Pedir un repaint completo siempre; si no llega NINGÚN output en 2 s,
+      // el socket estaba muerto → reconectar.
+      doFit(true);
+      try {
+        ws.send(JSON.stringify({ t: 'refresh' }));
+      } catch (_) {
+        retries = 0;
+        connect();
+        return;
+      }
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        console.warn('[deck] sin output tras refresh post-resume: WS zombie, reconectando');
+        retries = 0;
+        connect();
+      }, 2000);
     },
     currentSession: () => wantedSession,
   };

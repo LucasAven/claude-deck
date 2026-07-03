@@ -114,7 +114,7 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 
 | Ruta | Descripción |
 |---|---|
-| `WS /ws/term?session=<s>` | Terminal (attach tmux). Mensajes JSON: `{"t":"in","d":…}`, `{"t":"resize","cols":N,"rows":N}` ⇄ `{"t":"out","d":…}` |
+| `WS /ws/term?session=<s>` | Terminal (attach tmux). Mensajes JSON: `{"t":"in","d":…}`, `{"t":"resize","cols":N,"rows":N}`, `{"t":"refresh"}` (repaint completo, lo manda la PWA al volver de background) ⇄ `{"t":"out","d":…}` |
 | `GET /api/tmux/sessions` | Sesiones tmux activas (excluye `*-shell`, legacy de la pestaña Shell) |
 | `DELETE /api/tmux/sessions/:name` | Mata la sesión tmux (y su `*-shell` acompañante si quedó de la v1) |
 | `PATCH /api/tmux/sessions/:name` | Renombra la sesión (y su `*-shell` si existe). Body JSON: `{ "newName": "<nombre>" }` (letras/números/`-`/`_`, máx 32, sufijo `-shell` reservado). 409 si el nombre ya existe |

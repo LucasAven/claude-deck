@@ -6,14 +6,20 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 
 ## Backlog
 
-### 11. Garbled terminal rendering (hard to reproduce)
-
-- [ ] Bug seen occasionally on the phone (screenshot from 2026-07-02 20:21): the Claude terminal renders corrupted — lines interleaved/overlapping (words mashed together like "toaupdate.Now verifyt heendpointcworksoend-to-end"), spinner/status lines duplicated, and a large block of repeated tmux status-bar lines (`[deck] 0:2.1.198*` many times) painted with the copy-mode/selection highlight in the middle of the scrollback. No known repro yet.
-- [ ] Likely suspects to investigate: resize/re-fit races (cols/rows mismatch between xterm and tmux after keyboard open/close or backgrounding), a stale/duplicate WS attach slipping past the `gen` guard (this exact symptom — doubled/flickering text — was a duplicate-attach bug fixed in session 2, see HANDOFF), or tmux copy-mode entered via the touch-scroll SGR sequences leaving the pane in a weird state. Worth adding cheap diagnostics (e.g. log attach gen + resize events) if it can't be reproduced directly.
+(empty)
 
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)
+
+### 11. Garbled terminal rendering after backgrounding — DONE (2026-07-03)
+
+Original report: the Claude terminal occasionally renders corrupted — lines interleaved/overlapping (words mashed like "toaupdate.Nowverify…"), duplicated spinner/status lines, repeated tmux status-bar blocks. User's decisive clue: it happens **when coming back to the app after switching apps / locking the phone**, and it **fixes itself when the virtual keyboard opens**.
+
+- [x] Diagnosis: opening the keyboard "fixes" it because the viewport change forces a re-fit → resize → SIGWINCH → **tmux repaints the whole screen**; the repaint is the real cure. After an iOS freeze/thaw, several paths leave junk in xterm's buffer (a reconnect's initial 80×24 paint before the real size lands — `pty.spawn` is hardcoded 80×24 and the `onopen` fit runs inside a `requestAnimationFrame` that doesn't fire while frozen; or a zombie WS whose `readyState` still says OPEN so `resume()` did nothing). Coming back with the **same viewport**, `sendResize` dedups on unchanged cols/rows → nothing ever repaints → the garble sticks until the keyboard changes the size.
+- [x] Fix: on `resume()` (visibilitychange → visible), don't trust an OPEN socket. It now does `doFit(true)` + sends a new WS message `{t:'refresh'}` — the server (`tmuxRefreshClients` in `server/index.ts`) runs `tmux refresh-client` on every client of the session (gotcha: `refresh-client -t` takes a *client tty* from `list-clients`, not a session), forcing a full repaint that overwrites any junk. A 2 s watchdog (`refreshTimer`) treats "no output at all after refresh" as a zombie socket → `connect()` (a repaint always produces output, so a healthy socket always cancels it; any `out` clears it in `onmessage`). `connect()` clears the watchdog so it can't fire across generations.
+
+Verified: ws-test +1 check (→ **37**; `{t:'refresh'}` on an idle deck-2 pane produces an `out` — an idle pane emits nothing on its own, so the output can only be the forced repaint; run from inside `deck`, 36 PASS + the known gotcha-13 `created=true` noise). Scratch puppeteer script (not committed) 13/13 PASS against a scratch `deck-N` session: healthy resume sends `refresh`, repaint arrives, NO reconnect, no zombie warn; zombie resume (WebSocket.send monkeypatched to drop) → no premature reconnect at 1.2 s, watchdog reconnects at ~2 s with console warn, new socket repaints, connection indicator back on, 0 page errors. Pending: user confirming on the phone over the next days that the garble no longer appears after backgrounding (iOS freeze behavior can't be simulated headless).
 
 ### 9c. Markdown render toggle in the Archivos header — DONE (2026-07-03)
 

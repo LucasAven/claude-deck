@@ -1,6 +1,6 @@
 # HANDOFF — claude-deck
 
-**Fecha:** 2026-07-02 (8ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + rename de sesiones (tarea 6) + dev script con watch y puerto pineado (tarea 7) + badge de cambios (tarea 8) + fix del label de switchers al matar la sesión activa (tarea 10) + **file browser "Archivos" que reemplaza a la pestaña Shell (tarea 9, confirmada por el usuario: "working perfectly") + syntax highlighting e iconos estilo VS Code en el árbol (tarea 9b) + botón de render de .md en el header de Archivos (tarea 9c — verificadas headless; falta el vistazo del usuario en el celu)**. **Backlog en `TASKS.md`: queda la tarea 11 (bug de render corrupto)** — ese archivo es la fuente de verdad del backlog y de qué se hizo; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
+**Fecha:** 2026-07-03 (9ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + rename de sesiones (tarea 6) + dev script con watch y puerto pineado (tarea 7) + badge de cambios (tarea 8) + fix del label de switchers al matar la sesión activa (tarea 10) + file browser "Archivos" con highlighting, iconos y render de .md (tareas 9/9b/9c) + **fix del render corrupto post-background (tarea 11, 9ª sesión): `resume()` fuerza repaint de tmux vía WS `{t:'refresh'}` + watchdog de 2 s que reconecta si el socket era un zombie de iOS — verificado headless; falta que el usuario confirme en el celu que el garble no vuelve**. **Backlog en `TASKS.md`: vacío** — ese archivo es la fuente de verdad del backlog y de qué se hizo; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
 
 ## Qué es y dónde está todo
 
@@ -8,7 +8,7 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 
 - `server/index.ts` — todo el backend (Hono + ws + node-pty, un solo archivo)
 - `public/` — frontend vanilla: `index.html`, `app.js`, `style.css`, PWA (`manifest.json`, `sw.js` passthrough sin caché, `icon.svg`)
-- `test/ws-test.mjs` — E2E de WS/tmux/API (**36 checks**; sección 9c —fs endpoints— es de la 8ª sesión; acepta `DECK_PORT` para apuntar a otro puerto)
+- `test/ws-test.mjs` — E2E de WS/tmux/API (**37 checks**; sección 5b —`{t:'refresh'}` repinta— es de la 9ª sesión; acepta `DECK_PORT` para apuntar a otro puerto)
 - `test/ui-test.mjs` — smoke de UI en Chromium headless, viewport iPhone (**45 checks**; deja `test/shot-*.png`. Ver `TASKS.md` para el backlog de features y lo ya hecho.)
 - `test/shot-diff.mjs` — helper que screenshotea el diff (normal / h-scroll / v-scroll) para iterar UI sin celular
 - `.claude/settings.example.json` + `scripts/notify.sh` — hooks ntfy (bonus §12), **inactivos** hasta que el usuario los renombre a `settings.json`
@@ -62,7 +62,7 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 
 ```bash
 npm run dev                    # server en http://127.0.0.1:7433, con watch; el server lee DECK_PORT, ignora PORT (gotcha 12; banner: gotcha 6)
-node test/ws-test.mjs          # 36 checks (server arriba; ver gotchas 8, 9 y 13; DECK_PORT para otro puerto)
+node test/ws-test.mjs          # 37 checks (server arriba; ver gotchas 8, 9 y 13; DECK_PORT para otro puerto)
 node test/ui-test.mjs          # 45 checks + screenshots test/shot-*.png (correrlo lo prefiere el usuario)
 node test/shot-diff.mjs        # screenshots del diff view
 ```

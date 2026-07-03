@@ -70,6 +70,19 @@ const c3 = connect('target=claude&session=deck-2');
 const r3 = await session(c3);
 ok('sesión deck-2 creada vía ?session=', r3.meta?.created === true && r3.meta?.session === 'deck-2');
 
+// 5b. {t:'refresh'} fuerza un repaint completo de tmux (fix tarea 11: el
+// frontend lo manda al volver de background; un pane idle no emite nada,
+// así que el 'out' que llega solo puede ser el redraw del refresh-client)
+const gotRepaint = await new Promise((resolve) => {
+  const timer = setTimeout(() => resolve(false), 3000);
+  c3.on('message', (raw) => {
+    const m = JSON.parse(String(raw));
+    if (m.t === 'out') { clearTimeout(timer); resolve(true); }
+  });
+  c3.send(JSON.stringify({ t: 'refresh' }));
+});
+ok('refresh → tmux repinta (llega out en pane idle)', gotRepaint);
+
 // 6. sesión inválida rechazada
 await new Promise((resolve) => {
   const bad = connect('target=claude&session=..%2Fmal');

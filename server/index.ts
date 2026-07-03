@@ -100,6 +100,20 @@ async function tmuxRenameSession(oldName: string, newName: string): Promise<void
   await execFileP('tmux', ['rename-session', '-t', `=${oldName}`, newName])
 }
 
+async function tmuxRefreshClients(name: string): Promise<void> {
+  // Redibujo completo de todos los clientes attacheados a la sesión (los ptys
+  // de este server). El frontend lo pide al volver de background: iOS puede
+  // dejar el buffer de xterm corrupto y, si el viewport no cambió, ningún
+  // resize va a forzar el repaint (tarea 11).
+  try {
+    const { stdout } = await execFileP('tmux', ['list-clients', '-t', `=${name}`, '-F', '#{client_tty}'])
+    const ttys = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+    await Promise.all(ttys.map((tty) => execFileP('tmux', ['refresh-client', '-t', tty]).catch(() => {})))
+  } catch {
+    /* sesión sin clientes o muerta: nada que refrescar */
+  }
+}
+
 async function tmuxPaneDir(name: string): Promise<string> {
   const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{pane_current_path}'])
   return stdout.trim()
@@ -704,6 +718,10 @@ async function handleTerm(ws: WebSocket, url: URL) {
       if (cols && rows) {
         try { p.resize(cols, rows) } catch { /* pty ya muerto */ }
       }
+    } else if (m.t === 'refresh') {
+      // resume desde el celular: forzar repaint (garantiza al menos un 'out',
+      // que el frontend usa como señal de vida del socket)
+      void tmuxRefreshClients(tmuxName)
     }
   })
 
