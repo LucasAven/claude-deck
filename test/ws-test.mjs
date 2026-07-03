@@ -77,12 +77,7 @@ await new Promise((resolve) => {
   bad.on('error', () => { ok('nombre de sesión inválido → close 1008', false); resolve(); });
 });
 
-// 7. target=shell crea deck-shell
-const c4 = connect('target=shell');
-const r4 = await session(c4);
-ok('shell crea/attachea deck-shell', r4.meta?.session === 'deck-shell');
-
-// 8. /api/tmux/sessions: lista deck y deck-2, excluye *-shell
+// 8. /api/tmux/sessions: lista deck y deck-2, excluye *-shell (legacy)
 const res = await fetch(`${HTTP}/api/tmux/sessions`, { headers: { 'x-deck-token': TOKEN } });
 const sessions = await res.json();
 const names = sessions.map((s) => s.name);
@@ -124,6 +119,35 @@ try {
   // nunca dejar el archivo temporal ni su entrada en el index del repo real
   try { execFileSync('git', ['-C', stageDir, 'restore', '--staged', '--', tmpRel], { stdio: 'ignore' }); } catch {}
   fs.unlinkSync(`${stageDir}/${tmpRel}`);
+}
+
+// 9c. GET /api/fs/list y /api/fs/file: file browser read-only de la sesión
+const fsRel = `.tmp-ws-test-fs-${Date.now()}`;
+fs.mkdirSync(`${stageDir}/${fsRel}/sub`, { recursive: true });
+fs.writeFileSync(`${stageDir}/${fsRel}/sub/hola.txt`, 'contenido-fs-test\n');
+const getJson = async (url) => {
+  const res = await fetch(url, { headers: { 'x-deck-token': TOKEN } });
+  return { status: res.status, json: await res.json().catch(() => null) };
+};
+try {
+  const root = await getJson(`${HTTP}/api/fs/list?session=deck-2`);
+  ok('fs/list raíz → 200 con entries', root.status === 200 && Array.isArray(root.json?.entries)
+    && root.json.entries.some((e) => e.name === fsRel && e.type === 'dir'));
+  ok('fs/list excluye .git y ordena carpetas primero',
+    !root.json.entries.some((e) => e.name === '.git')
+    && root.json.entries.every((e, i, a) => i === 0 || !(a[i - 1].type === 'file' && e.type === 'dir')));
+  const sub = await getJson(`${HTTP}/api/fs/list?session=deck-2&path=${encodeURIComponent(`${fsRel}/sub`)}`);
+  ok('fs/list de subcarpeta lista sus archivos', sub.status === 200
+    && sub.json?.entries.some((e) => e.name === 'hola.txt' && e.type === 'file'));
+  const rf = await getJson(`${HTTP}/api/fs/file?session=deck-2&path=${encodeURIComponent(`${fsRel}/sub/hola.txt`)}`);
+  ok('fs/file devuelve el contenido', rf.status === 200
+    && rf.json?.content === 'contenido-fs-test\n' && rf.json?.binary === false);
+  const trav = await getJson(`${HTTP}/api/fs/list?session=deck-2&path=..`);
+  ok('fs/list path traversal → 400', trav.status === 400);
+  const nf404 = await getJson(`${HTTP}/api/fs/file?session=deck-2&path=no-existe-x.txt`);
+  ok('fs/file inexistente → 404', nf404.status === 404);
+} finally {
+  fs.rmSync(`${stageDir}/${fsRel}`, { recursive: true, force: true });
 }
 
 // 10. sesión inexistente → 404
@@ -204,7 +228,7 @@ ok('DELETE sesión inexistente → 404', del404.status === 404);
 const del400 = await fetch(`${HTTP}/api/tmux/sessions/mal%21nombre`, { method: 'DELETE', headers: { 'x-deck-token': TOKEN } });
 ok('DELETE nombre inválido → 400', del400.status === 400);
 
-c2.close(); c4.close();
+c2.close();
 await new Promise((r) => setTimeout(r, 300));
 console.log(results.join('\n'));
 process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);

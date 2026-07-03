@@ -32,7 +32,7 @@ const XTERM_THEME = {
 // ---------------------------------------------------------------------------
 // Terminal + WebSocket con reconexión (backoff)
 // ---------------------------------------------------------------------------
-function createTermConnection(containerId, connId, target, getSession) {
+function createTermConnection(containerId, connId, getSession) {
   const term = new Terminal({
     fontSize: 14,
     fontFamily: '"SF Mono", ui-monospace, Menlo, Consolas, monospace',
@@ -45,19 +45,17 @@ function createTermConnection(containerId, connId, target, getSession) {
   term.loadAddon(fit);
   term.open(document.getElementById(containerId));
 
-  if (target === 'claude') {
-    // shift+enter desde teclado físico (BT): xterm lo mandaría como \r (submit).
-    // Traducirlo al newline suave de Claude Code (ESC+CR, ver KEYS.nl).
-    term.attachCustomKeyEventHandler((ev) => {
-      if (ev.key === 'Enter' && ev.shiftKey) {
-        if (ev.type === 'keydown' && ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ t: 'in', d: '\x1b\r' }));
-        }
-        return false;
+  // shift+enter desde teclado físico (BT): xterm lo mandaría como \r (submit).
+  // Traducirlo al newline suave de Claude Code (ESC+CR, ver KEYS.nl).
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.key === 'Enter' && ev.shiftKey) {
+      if (ev.type === 'keydown' && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ t: 'in', d: '\x1b\r' }));
       }
-      return true;
-    });
-  }
+      return false;
+    }
+    return true;
+  });
 
   let ws = null;
   let gen = 0;          // generación de conexión: invalida handlers de sockets viejos
@@ -99,7 +97,7 @@ function createTermConnection(containerId, connId, target, getSession) {
     }
     wantedSession = getSession();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws/term?target=${target}&session=${encodeURIComponent(wantedSession)}`;
+    const url = `${proto}://${location.host}/ws/term?session=${encodeURIComponent(wantedSession)}`;
     const sock = new WebSocket(url);
     ws = sock;
 
@@ -118,7 +116,7 @@ function createTermConnection(containerId, connId, target, getSession) {
       try { m = JSON.parse(ev.data); } catch { return; }
       if (m.t === 'out') {
         term.write(m.d);
-      } else if (m.t === 'meta' && m.created && target === 'claude') showHint();
+      } else if (m.t === 'meta' && m.created) showHint();
     };
 
     sock.onclose = () => {
@@ -208,7 +206,6 @@ function wireTouchScroll(containerId, getConn) {
 }
 
 let claudeConn = null;
-let shellConn = null;
 
 // ---------------------------------------------------------------------------
 // Hint de sesión nueva
@@ -235,7 +232,6 @@ const KEYS = {
   down: '\x1b[B',
   tab: '\t',
   ctrlc: '\x03',
-  enter: '\r',
   slash: '/',
   // salto de línea SIN enviar el prompt: Claude Code trata ESC+CR (alt+enter)
   // como newline suave — verificado contra claude real dentro de tmux
@@ -243,14 +239,10 @@ const KEYS = {
 };
 
 function wireQuickKeys() {
-  document.querySelectorAll('.quickkeys').forEach((bar) => {
-    const which = bar.dataset.term;
-    bar.querySelectorAll('button[data-k]').forEach((btn) => {
-      btn.addEventListener('pointerdown', (e) => {
-        e.preventDefault(); // no robar el foco (que no se cierre el teclado)
-        const conn = which === 'shell' ? shellConn : claudeConn;
-        if (conn) conn.sendKeys(KEYS[btn.dataset.k]);
-      });
+  document.querySelectorAll('.quickkeys button[data-k]').forEach((btn) => {
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); // no robar el foco (que no se cierre el teclado)
+      if (claudeConn) claudeConn.sendKeys(KEYS[btn.dataset.k]);
     });
   });
 }
@@ -620,6 +612,7 @@ function selectSession(name) {
   claudeConn.reconnect();
   refreshSessions();
   refreshGit(); // la pestaña Cambios sigue a la sesión seleccionada
+  if (state.activeTab === 'files') refreshTree(false); // idem Archivos (si no está activa, refetchea al entrar)
 }
 
 async function killSession(name) {
@@ -645,6 +638,8 @@ async function killSession(name) {
     renderSwitchPills(); // sin esto la pill queda con el modelo de la sesión muerta
     claudeConn.reconnect();
     refreshGit();
+    treeSession = null; // el fallback puede reusar el nombre muerto: refetch siempre
+    if (state.activeTab === 'files') refreshTree(false);
   }
   refreshSessions();
 }
@@ -678,6 +673,7 @@ async function renameSession(name) {
   // falta reconectar el WS, solo actualizar el nombre con el que habla la API
   if (state.session === name) {
     state.session = newName;
+    if (treeSession === name) treeSession = newName; // mismo árbol, solo cambió el nombre
     try {
       // el estado de switchers se guarda por sesión: migrarlo al nuevo nombre
       const sw = localStorage.getItem(`deck-switch:${name}`);
@@ -865,6 +861,288 @@ function closeDiff() {
 }
 
 // ---------------------------------------------------------------------------
+// Pestaña Archivos: árbol del directorio de la sesión (solo lectura).
+// Carga lazy por nivel (/api/fs/list); tap en un archivo abre /api/fs/file.
+// ---------------------------------------------------------------------------
+let treeSession = null; // sesión cuyo árbol está renderizado (null = refetch)
+let treeRootName = 'Archivos'; // basename de la raíz, para el título del header
+
+function extClass(name) {
+  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+  if (['js', 'mjs', 'cjs', 'jsx'].includes(ext)) return 'ft-js';
+  if (['ts', 'tsx'].includes(ext)) return 'ft-ts';
+  if (ext === 'json') return 'ft-json';
+  if (['md', 'txt'].includes(ext)) return 'ft-md';
+  if (['css', 'scss', 'less'].includes(ext)) return 'ft-css';
+  if (['html', 'htm', 'svg', 'xml'].includes(ext)) return 'ft-html';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'heic'].includes(ext)) return 'ft-img';
+  if (['sh', 'bash', 'zsh', 'env'].includes(ext)) return 'ft-sh';
+  return 'ft-plain';
+}
+
+// Iconos SVG del árbol (estilo explorador de VS Code, mismo trazo que los
+// botones de cámara/pegar). Markup 100% constante de la app: acá nunca se
+// interpola contenido ni nombres de archivos (sin riesgo de inyección).
+const ftSvg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+const FT_ICONS = {
+  folder: ftSvg('<path d="M3 18.5V7a2 2 0 0 1 2-2h4.2l2 2.5H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+  folderOpen: ftSvg('<path d="M3 18.5V7a2 2 0 0 1 2-2h4.2l2 2.5H19"/><path d="M3 18.5l2.6-7h15.4l-2.5 7z"/>'),
+  js: ftSvg('<rect x="3" y="3" width="18" height="18" rx="3.5"/><text x="12" y="16.2" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9.5" font-weight="700" fill="currentColor" stroke="none">JS</text>'),
+  ts: ftSvg('<rect x="3" y="3" width="18" height="18" rx="3.5"/><text x="12" y="16.2" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9.5" font-weight="700" fill="currentColor" stroke="none">TS</text>'),
+  json: ftSvg('<path d="M9.5 4.5c-2 0-3 1-3 2.8v2c0 1.4-.9 2.2-2.5 2.7 1.6.5 2.5 1.3 2.5 2.7v2c0 1.8 1 2.8 3 2.8"/><path d="M14.5 4.5c2 0 3 1 3 2.8v2c0 1.4.9 2.2 2.5 2.7-1.6.5-2.5 1.3-2.5 2.7v2c0 1.8-1 2.8-3 2.8"/>'),
+  md: ftSvg('<path d="M3.5 16.5v-9l3.75 4.5L11 7.5v9"/><path d="M17 7.5v9"/><path d="M14 13.5l3 3 3-3"/>'),
+  css: ftSvg('<path d="M9.5 4l-2 16M16.5 4l-2 16M4.5 9.3h16M3.5 14.7h16"/>'),
+  html: ftSvg('<path d="M8.5 7l-5 5 5 5M15.5 7l5 5-5 5"/>'),
+  img: ftSvg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="8.8" cy="9.8" r="1.7"/><path d="M4.5 17.5l5-5 3 3 3.5-3.5 3.5 3.5"/>'),
+  sh: ftSvg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M6.8 9.3l3.2 2.7-3.2 2.7M12.5 15h4.5"/>'),
+  pkg: ftSvg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
+  git: ftSvg('<path d="M6.5 3.5v11"/><circle cx="17.5" cy="6.5" r="2.8"/><circle cx="6.5" cy="17.5" r="2.8"/><path d="M17.5 9.3a8.7 8.7 0 0 1-8.2 8.2"/>'),
+  env: ftSvg('<circle cx="7.8" cy="16.2" r="4.3"/><path d="M10.8 13.2l9.7-9.7M15.6 8.4l2.9 2.9"/>'),
+  file: ftSvg('<path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5"/>'),
+};
+
+// icono según la clase de tinte de extClass (lo que no matchea → página genérica)
+const FT_ICON_BY_CLASS = {
+  'ft-js': 'js', 'ft-ts': 'ts', 'ft-json': 'json', 'ft-md': 'md',
+  'ft-css': 'css', 'ft-html': 'html', 'ft-img': 'img', 'ft-sh': 'sh',
+};
+
+// tinte + icono de un archivo; nombres especiales primero, después la extensión
+function fileIcon(name) {
+  const lower = name.toLowerCase();
+  if (lower === 'package.json' || lower === 'package-lock.json') return { cls: 'ft-json', svg: FT_ICONS.pkg };
+  if (lower.startsWith('.git')) return { cls: 'ft-html', svg: FT_ICONS.git };
+  if (lower.startsWith('.env')) return { cls: 'ft-sh', svg: FT_ICONS.env };
+  const cls = extClass(name);
+  return { cls, svg: FT_ICONS[FT_ICON_BY_CLASS[cls]] || FT_ICONS.file };
+}
+
+// ext → lenguaje del bundle "common" de highlight.js (los que no están acá se
+// muestran en texto plano). Archivos grandes tampoco se resaltan: hljs es O(n)
+// pero con constantes feas — 200 KB ya se siente en el celular.
+const HLJS_LANGS = {
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
+  ts: 'typescript', tsx: 'typescript',
+  json: 'json', md: 'markdown', css: 'css', scss: 'scss', less: 'less',
+  html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml',
+  sh: 'bash', bash: 'bash', zsh: 'bash', env: 'bash',
+  py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java',
+  c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', cs: 'csharp',
+  php: 'php', swift: 'swift', kt: 'kotlin', lua: 'lua', pl: 'perl',
+  sql: 'sql', yml: 'yaml', yaml: 'yaml', toml: 'ini', ini: 'ini', diff: 'diff',
+};
+const HL_SIZE_LIMIT = 200 * 1024;
+
+function highlightInto(codeEl, name, content) {
+  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+  const lang = HLJS_LANGS[ext];
+  if (lang && window.hljs && content.length <= HL_SIZE_LIMIT) {
+    try {
+      codeEl.className = 'hljs';
+      codeEl.innerHTML = hljs.highlight(content, { language: lang }).value;
+      return;
+    } catch (_) { /* lenguaje no cargado en el bundle: caer a texto plano */ }
+  }
+  codeEl.textContent = content;
+}
+
+function fmtSize(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function emptyNote(text) {
+  const el = document.createElement('div');
+  el.className = 'empty-state';
+  el.textContent = text;
+  return el;
+}
+
+async function fetchList(relPath) {
+  const q = relPath ? `path=${encodeURIComponent(relPath)}&` : '';
+  const res = await api(`/api/fs/list?${q}${sessionQuery()}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error((err && err.error) || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+function renderEntries(entries, container, base, depth) {
+  for (const ent of entries) {
+    const rel = base ? `${base}/${ent.name}` : ent.name;
+    const row = document.createElement('div');
+    row.className = `ft-row ${ent.type}`;
+    row.style.paddingLeft = `${12 + depth * 16}px`;
+    const name = document.createElement('span');
+    name.className = 'ft-name';
+    name.textContent = ent.name;
+
+    if (ent.type === 'dir') {
+      const caret = document.createElement('span');
+      caret.className = 'ft-caret';
+      caret.textContent = '▸';
+      const ico = document.createElement('span');
+      ico.className = 'ft-ico ft-dir';
+      ico.innerHTML = FT_ICONS.folder; // cerrada; se intercambia al expandir
+      row.append(caret, ico, name);
+      // los hijos van en un contenedor propio: colapsar = ocultarlo (se
+      // conserva lo ya cargado), expandir la primera vez = fetch lazy
+      const kids = document.createElement('div');
+      kids.className = 'ft-kids hidden';
+      let loaded = false;
+      row.addEventListener('click', async () => {
+        if (!loaded) {
+          loaded = true;
+          try {
+            const data = await fetchList(rel);
+            renderEntries(data.entries, kids, rel, depth + 1);
+            if (data.truncated) kids.appendChild(emptyNote(`… lista truncada a ${data.entries.length} entradas`));
+            if (!data.entries.length) kids.appendChild(emptyNote('(vacío)'));
+          } catch (e) {
+            loaded = false;
+            if (String(e.message) === '401') return;
+          }
+        }
+        const nowHidden = kids.classList.toggle('hidden');
+        caret.textContent = nowHidden ? '▸' : '▾';
+        ico.innerHTML = nowHidden ? FT_ICONS.folder : FT_ICONS.folderOpen;
+      });
+      container.append(row, kids);
+    } else {
+      const fi = fileIcon(ent.name);
+      const ico = document.createElement('span');
+      ico.className = `ft-ico ${fi.cls}`;
+      ico.innerHTML = fi.svg;
+      row.append(ico, name);
+      row.addEventListener('click', () => openFile(rel));
+      container.append(row);
+    }
+  }
+}
+
+async function refreshTree(force) {
+  if (treeSession === state.session && !force) return;
+  closeFileView();
+  const tree = $('#file-tree');
+  tree.innerHTML = '';
+  tree.appendChild(emptyNote('Cargando…'));
+  let data;
+  try {
+    data = await fetchList('');
+  } catch (e) {
+    treeSession = null;
+    tree.innerHTML = '';
+    if (String(e.message) !== '401') tree.appendChild(emptyNote(`No se pudo listar: ${e.message}`));
+    return;
+  }
+  treeSession = state.session;
+  treeRootName = data.root.split('/').pop() || 'Archivos';
+  $('#files-title').textContent = treeRootName;
+  tree.innerHTML = '';
+  if (!data.entries.length) {
+    tree.appendChild(emptyNote('Directorio vacío'));
+    return;
+  }
+  renderEntries(data.entries, tree, '', 0);
+  if (data.truncated) tree.appendChild(emptyNote(`… lista truncada a ${data.entries.length} entradas`));
+}
+
+// archivo abierto en la vista (para el toggle fuente ↔ markdown sin refetch)
+let openedFile = null; // { rel, content, truncated, size } | null
+
+// links del markdown renderizado en pestaña nueva: que un tap no navegue la PWA
+if (typeof DOMPurify !== 'undefined') {
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'A' && node.hasAttribute('href')) {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+}
+
+function canRenderMd(rel) {
+  return /\.md$/i.test(rel) && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined';
+}
+
+// pinta el contenido ya cargado en #file-view: fuente resaltada o markdown
+function renderOpenedFile(asMarkdown) {
+  const view = $('#file-view');
+  view.innerHTML = '';
+  if (asMarkdown && canRenderMd(openedFile.rel)) {
+    const body = document.createElement('div');
+    body.className = 'md-body';
+    // sanitizado obligatorio: acá se abren archivos arbitrarios del repo
+    // (READMEs de node_modules incluidos) y el HTML corre en el origin de la app
+    body.innerHTML = DOMPurify.sanitize(marked.parse(openedFile.content));
+    view.appendChild(body);
+  } else {
+    const pre = document.createElement('pre');
+    pre.className = 'file-pre';
+    const code = document.createElement('code');
+    highlightInto(code, openedFile.rel, openedFile.content);
+    pre.appendChild(code);
+    view.appendChild(pre);
+  }
+  if (openedFile.truncated) view.appendChild(emptyNote(`… truncado a 512 KB (el archivo pesa ${fmtSize(openedFile.size)})`));
+  $('#btn-md-render').classList.toggle('active', asMarkdown);
+  view.scrollTop = 0;
+}
+
+function toggleMdRender() {
+  if (!openedFile || !canRenderMd(openedFile.rel)) return;
+  renderOpenedFile(!$('#btn-md-render').classList.contains('active'));
+}
+
+async function openFile(rel) {
+  $('#btn-file-back').classList.remove('hidden');
+  $('#file-tree').classList.add('hidden');
+  $('#files-title').textContent = rel;
+  openedFile = null;
+  $('#btn-md-render').classList.add('hidden');
+  $('#btn-md-render').classList.remove('active');
+  const view = $('#file-view');
+  view.classList.remove('hidden');
+  view.innerHTML = '';
+  view.appendChild(emptyNote('Cargando…'));
+
+  let data;
+  try {
+    const res = await api(`/api/fs/file?path=${encodeURIComponent(rel)}&${sessionQuery()}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error((err && err.error) || `HTTP ${res.status}`);
+    }
+    data = await res.json();
+  } catch (e) {
+    view.innerHTML = '';
+    if (String(e.message) !== '401') view.appendChild(emptyNote(`No se pudo leer el archivo: ${e.message}`));
+    return;
+  }
+
+  view.innerHTML = '';
+  if (data.binary) {
+    view.appendChild(emptyNote(`Archivo binario · ${fmtSize(data.size)}`));
+    return;
+  }
+  openedFile = { rel, content: data.content, truncated: data.truncated, size: data.size };
+  if (canRenderMd(rel)) $('#btn-md-render').classList.remove('hidden');
+  renderOpenedFile(false); // default: fuente
+}
+
+function closeFileView() {
+  openedFile = null;
+  $('#btn-md-render').classList.add('hidden');
+  $('#btn-md-render').classList.remove('active');
+  $('#btn-file-back').classList.add('hidden');
+  $('#file-view').classList.add('hidden');
+  $('#file-view').innerHTML = '';
+  $('#file-tree').classList.remove('hidden');
+  $('#files-title').textContent = treeRootName;
+}
+
+// ---------------------------------------------------------------------------
 // Tabs
 // ---------------------------------------------------------------------------
 function switchTab(name) {
@@ -872,7 +1150,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${name}`));
   if (name === 'claude') requestAnimationFrame(() => claudeConn.fit());
-  if (name === 'shell') requestAnimationFrame(() => shellConn.fit());
+  if (name === 'files') refreshTree(false);
   if (name === 'changes') refreshGit();
 }
 
@@ -897,7 +1175,6 @@ function updateViewportGeometry() {
   clearTimeout(fitTimer);
   fitTimer = setTimeout(() => {
     if (state.activeTab === 'claude' && claudeConn) claudeConn.fit();
-    if (state.activeTab === 'shell' && shellConn) shellConn.fit();
   }, 120);
 }
 
@@ -912,13 +1189,11 @@ async function init() {
   } catch (_) {}
   state.session = state.defaultSession;
 
-  claudeConn = createTermConnection('term-claude', 'conn-claude', 'claude', () => state.session);
-  shellConn = createTermConnection('term-shell', 'conn-shell', 'shell', () => state.defaultSession);
+  claudeConn = createTermConnection('term-claude', 'conn-claude', () => state.session);
 
   wireQuickKeys();
   wireSwitchers();
   wireTouchScroll('term-claude', () => claudeConn);
-  wireTouchScroll('term-shell', () => shellConn);
   wireImagePaste();
   refreshSessions();
   refreshGit(); // primer fetch del badge de Cambios sin esperar el intervalo
@@ -930,6 +1205,9 @@ async function init() {
 
   $('#btn-refresh').addEventListener('click', () => { state.inDiff ? null : refreshGit(); });
   $('#btn-diff-back').addEventListener('click', closeDiff);
+  $('#btn-files-refresh').addEventListener('click', () => refreshTree(true));
+  $('#btn-file-back').addEventListener('click', closeFileView);
+  $('#btn-md-render').addEventListener('click', toggleMdRender);
   $('#btn-new-session').addEventListener('click', createSession);
   $('#hint-claude .hint-close').addEventListener('click', hideHint);
 
@@ -947,7 +1225,6 @@ async function init() {
       refreshSessions();
       // iOS suele matar los WS en background: reconectar sin esperar backoff
       claudeConn.resume();
-      shellConn.resume();
     }
   });
 

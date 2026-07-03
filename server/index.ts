@@ -128,13 +128,8 @@ async function tmuxListSessions(): Promise<Array<{ name: string; attached: boole
   return out
 }
 
-/**
- * Resuelve el directorio git sobre el que operar.
- * Sin `session` → REPO_DIR. Con `session` → directorio actual del pane de esa
- * sesión tmux, validado como repo git dentro de WORKSPACES_ROOT.
- */
-async function resolveGitDir(session: string | undefined): Promise<string> {
-  if (!session) return REPO_DIR
+/** Directorio actual del pane de una sesión tmux, con validaciones de nombre. */
+async function resolvePaneDir(session: string): Promise<string> {
   if (!SESSION_RE.test(session)) throw new HttpError(400, 'nombre de sesión inválido')
   if (!(await tmuxHasSession(session))) throw new HttpError(404, `sesión tmux no encontrada: ${session}`)
   let dir: string
@@ -145,16 +140,49 @@ async function resolveGitDir(session: string | undefined): Promise<string> {
   }
   // tmux puede devolver vacío para targets raros; nunca operar sobre ''
   if (!dir || !path.isAbsolute(dir)) throw new HttpError(404, `sesión tmux sin directorio: ${session}`)
+  return dir
+}
+
+/** Realpath validado contra WORKSPACES_ROOT (el límite de todo acceso por sesión). */
+function checkInsideWorkspaces(p: string): string {
+  const real = fs.realpathSync(p)
+  const realRoot = fs.realpathSync(WORKSPACES_ROOT)
+  if (!insideDir(real, realRoot)) throw new HttpError(403, 'directorio fuera de WORKSPACES_ROOT')
+  return real
+}
+
+/**
+ * Resuelve el directorio git sobre el que operar.
+ * Sin `session` → REPO_DIR. Con `session` → directorio actual del pane de esa
+ * sesión tmux, validado como repo git dentro de WORKSPACES_ROOT.
+ */
+async function resolveGitDir(session: string | undefined): Promise<string> {
+  if (!session) return REPO_DIR
+  const dir = await resolvePaneDir(session)
   let toplevel: string
   try {
     toplevel = (await execFileP('git', ['-C', dir, 'rev-parse', '--show-toplevel'])).stdout.trim()
   } catch {
     throw new HttpError(400, `el directorio de la sesión no es un repo git: ${dir}`)
   }
-  const realTop = fs.realpathSync(toplevel)
-  const realRoot = fs.realpathSync(WORKSPACES_ROOT)
-  if (!insideDir(realTop, realRoot)) throw new HttpError(403, 'repo fuera de WORKSPACES_ROOT')
-  return realTop
+  return checkInsideWorkspaces(toplevel)
+}
+
+/**
+ * Raíz para el file browser: como resolveGitDir pero sin exigir repo git —
+ * si el pane está dentro de uno se usa su toplevel (la raíz del proyecto,
+ * estable aunque el shell haya hecho cd), si no, el directorio del pane.
+ */
+async function resolveFsDir(session: string | undefined): Promise<string> {
+  if (!session) return REPO_DIR
+  const dir = await resolvePaneDir(session)
+  let top = dir
+  try {
+    top = (await execFileP('git', ['-C', dir, 'rev-parse', '--show-toplevel'])).stdout.trim() || dir
+  } catch {
+    /* no es un repo: se lista el directorio del pane */
+  }
+  return checkInsideWorkspaces(top)
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +331,71 @@ async function gitLog(dir: string, n: number) {
   } catch {
     return [] // repo sin commits todavía
   }
+}
+
+// ---------------------------------------------------------------------------
+// File browser (solo lectura, pestaña Archivos)
+// ---------------------------------------------------------------------------
+const FS_LIST_MAX = 500
+const FS_FILE_LIMIT = 512 * 1024
+
+interface FsEntry {
+  name: string
+  type: 'dir' | 'file'
+  size: number
+}
+
+/** Lista un directorio (no recursivo: el árbol del frontend carga por nivel). */
+function fsList(dir: string, rel: string) {
+  const abs = rel ? checkRepoPath(dir, rel) : fs.realpathSync(dir)
+  let st: fs.Stats
+  try {
+    st = fs.statSync(abs)
+  } catch {
+    throw new HttpError(404, 'directorio no encontrado')
+  }
+  if (!st.isDirectory()) throw new HttpError(400, 'no es un directorio')
+
+  const realDir = fs.realpathSync(dir)
+  const entries: FsEntry[] = []
+  for (const d of fs.readdirSync(abs, { withFileTypes: true })) {
+    if (d.name === '.git') continue
+    const target = path.join(abs, d.name)
+    try {
+      // statSync sigue symlinks; los que escapan del root no se listan
+      if (d.isSymbolicLink() && !insideDir(fs.realpathSync(target), realDir)) continue
+      const s = fs.statSync(target)
+      if (!s.isDirectory() && !s.isFile()) continue // sockets, fifos, etc.
+      entries.push({ name: d.name, type: s.isDirectory() ? 'dir' : 'file', size: s.size })
+    } catch {
+      continue // symlink roto o sin permisos
+    }
+  }
+  entries.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1))
+  const truncated = entries.length > FS_LIST_MAX
+  return { root: realDir, path: rel, entries: truncated ? entries.slice(0, FS_LIST_MAX) : entries, truncated }
+}
+
+function fsReadFile(dir: string, rel: string) {
+  const abs = checkRepoPath(dir, rel)
+  let st: fs.Stats
+  try {
+    st = fs.statSync(abs)
+  } catch {
+    throw new HttpError(404, 'archivo no encontrado')
+  }
+  if (!st.isFile()) throw new HttpError(400, 'no es un archivo')
+
+  const truncated = st.size > FS_FILE_LIMIT
+  const buf = Buffer.alloc(Math.min(st.size, FS_FILE_LIMIT))
+  const fd = fs.openSync(abs, 'r')
+  try {
+    fs.readSync(fd, buf, 0, buf.length, 0)
+  } finally {
+    fs.closeSync(fd)
+  }
+  const binary = buf.subarray(0, 8192).includes(0)
+  return { path: rel, size: st.size, binary, truncated, content: binary ? '' : buf.toString('utf8') }
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +603,18 @@ app.get('/api/git/log', async (c) => {
   return c.json(await gitLog(dir, n))
 })
 
+// File browser (solo lectura). ?path= relativo a la raíz de la sesión;
+// vacío → la raíz misma.
+app.get('/api/fs/list', async (c) => {
+  const dir = await resolveFsDir(c.req.query('session'))
+  return c.json(fsList(dir, c.req.query('path') || ''))
+})
+
+app.get('/api/fs/file', async (c) => {
+  const dir = await resolveFsDir(c.req.query('session'))
+  return c.json(fsReadFile(dir, c.req.query('path') || ''))
+})
+
 // Estáticos (con auth, servidos desde public/)
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -535,7 +640,9 @@ app.get('*', (c) => {
 })
 
 // ---------------------------------------------------------------------------
-// WebSocket: /ws/term?target=claude|shell&session=<nombre>
+// WebSocket: /ws/term?session=<nombre>
+// (el target=shell de la v1 se retiró con la pestaña Shell; kill/rename siguen
+// limpiando pares <name>-shell que hayan quedado de esa época)
 // ---------------------------------------------------------------------------
 const wss = new WebSocketServer({ noServer: true })
 
@@ -546,13 +653,12 @@ function clampInt(v: unknown, min: number, max: number): number | null {
 }
 
 async function handleTerm(ws: WebSocket, url: URL) {
-  const target = url.searchParams.get('target') === 'shell' ? 'shell' : 'claude'
   const session = url.searchParams.get('session') || TMUX_SESSION
   if (!SESSION_RE.test(session)) {
     ws.close(1008, 'nombre de sesión inválido')
     return
   }
-  const tmuxName = target === 'shell' ? `${session}-shell` : session
+  const tmuxName = session
   const existed = await tmuxHasSession(tmuxName)
 
   const env = { ...process.env, TERM: 'xterm-256color' } as Record<string, string>

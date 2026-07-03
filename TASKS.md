@@ -6,11 +6,6 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 
 ## Backlog
 
-### 9. File browser section (replaces the Shell tab)
-
-- [ ] New section that lists **all files of the session's working directory** (the root the deck session is running in), like an `ls` — similar to how files are shown in the Changes section but for the whole tree, not just modified files. If possible, render it as a **nested folder tree in the VS Code style** (collapsible folders, folders first, file-type icons or at least distinct styling; see `docs/`-worthy reference: user's screenshot of the VS Code explorer). Tapping a file should open/read it (read-only view is fine for v1).
-- [ ] This section **replaces the Shell tab** — the Claude tab already works as a shell, so the third tab slot goes to the file browser. Remove/retire the shell terminal UI accordingly (server-side `-shell` session handling can stay or be cleaned up, implementer's call — check what ws-test relies on before ripping it out).
-
 ### 11. Garbled terminal rendering (hard to reproduce)
 
 - [ ] Bug seen occasionally on the phone (screenshot from 2026-07-02 20:21): the Claude terminal renders corrupted — lines interleaved/overlapping (words mashed together like "toaupdate.Now verifyt heendpointcworksoend-to-end"), spinner/status lines duplicated, and a large block of repeated tmux status-bar lines (`[deck] 0:2.1.198*` many times) painted with the copy-mode/selection highlight in the middle of the scrollback. No known repro yet.
@@ -19,6 +14,31 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)
+
+### 9c. Markdown render toggle in the Archivos header — DONE (2026-07-03)
+
+Follow-up requested after 9b ("it looks great").
+
+- [x] Eye button `#btn-md-render` in the Archivos header, left of the refresh button, **visible only while a non-binary `.md` file is open** (hidden in tree view, for other extensions, and again on back/refresh). Tap toggles between the raw source view (`.file-pre` + hljs) and rendered markdown (`.md-body`), repainting from the in-memory `openedFile` — no refetch. Amber `.active` state on the button while rendered; default stays source.
+- [x] Rendering: `marked@15.0.12` + `dompurify@3.2.6` from jsdelivr. Output is **always sanitized** (`DOMPurify.sanitize(marked.parse(...))` — the browser can open node_modules READMEs, so raw markdown HTML would be an XSS into the app origin) and links get `target="_blank" rel="noopener noreferrer"` via an `afterSanitizeAttributes` hook. If the CDN globals are missing (offline), the button just stays hidden. Dark-theme `.md-body` styles in `style.css` (bordered h1/h2, accent links, panel-bg code/pre with internal h-scroll, tables, blockquotes).
+
+Verified (subagent scratch puppeteer, 22/22 PASS): button hidden in tree/non-md/back, visible on HANDOFF.md, toggle both ways repeatedly, scroll reset, and a real XSS probe — a scratch `.md` with `<script>` + `<img onerror>` opened rendered: `window.__pwned` stayed undefined, no script/onerror in the DOM, probe file deleted after. ui-test +5 checks (→ **45**, updated NOT run — user runs it). Task-9 regression (17/17) and hljs (6/6) suites re-run clean after the change. Pending: user's look on the phone.
+
+### 9b. File browser polish: syntax highlighting + VS Code-style icons — DONE (2026-07-02)
+
+Follow-up requested after task 9 shipped ("is working perfectly").
+
+- [x] **Syntax highlighting** in the file view: highlight.js 11.11.1 from jsdelivr (common bundle + `github-dark` theme, background overridden to the app's). `HLJS_LANGS` in `app.js` maps ~40 extensions to bundle languages; unmapped extensions and files > 200 KB (`HL_SIZE_LIMIT`, hljs is slow on phones) fall back to plain text, as does any hljs error.
+- [x] **VS Code-style icons** in the tree (replaced the colored dots): hand-rolled inline SVGs in `FT_ICONS` (`app.js`), stroke style matching the app's existing button SVGs, tinted via the existing `ft-*` color classes (`currentColor`). Folders get closed/open variants that swap on expand/collapse; files get per-type icons (JS/TS badges, `{}` json, `M↓` md, `#` css, `<>` html/svg/xml, photo, terminal for sh/env-ext) plus filename special cases (package box for package*.json, git branch for `.git*`, key for `.env*`) and a generic page icon as default. No new dependencies for the icons.
+
+Verified: ui-test +2 checks (→ **40**; hljs spans present on a highlightable file, every tree row has an SVG icon — updated, NOT run: the user runs it). Headless scratch scripts: hljs suite 6/6 (real spans on .md/.js, transparent background, plain-text fallback for `.gitignore`), icons suite 13/13 by the subagent that drew them (per-type icons, folder swap on expand/collapse, 40px rows, dir/file name alignment), plus the task-9 regression suite 17/17 re-run after both changes. Screenshots eyeballed. Pending: user's look on the phone.
+
+### 9. File browser section (replaces the Shell tab) — DONE (2026-07-02)
+
+- [x] New tab **Archivos** (replaces Shell): VS Code-style tree of the session's root — collapsible folders (carets ▸/▾), folders first, per-extension colored dot icons, lazy loading per level (`GET /api/fs/list`, non-recursive, excludes `.git`, 500-entry cap). Tapping a file opens a read-only view (`GET /api/fs/file`, 512 KB cap, binary detection); ← returns to the tree with expanded state preserved. Root = the pane's git toplevel (stable even if the shell cd'd), or the pane dir if not a repo; everything confined to `WORKSPACES_ROOT` and `checkRepoPath` (no absolute paths, no `..`, no escaping symlinks).
+- [x] Shell retired: `#view-shell`/`shellConn`/`KEYS.enter` removed from the frontend, `target=shell` branch removed from the WS handler (`/ws/term?session=` only). Kill/rename still clean up legacy `<name>-shell` pairs and the `-shell` suffix stays reserved/excluded from the session list — existing deck-shell sessions on the Mac die with their pair instead of leaking. Tree state is per session: invalidated on select/kill (and remapped on rename).
+
+Verified: ws-test replaced the shell-WS check with a 9c fs section (+6 → **36 checks**; 35 PASS + the known gotcha-13 noise `created=true`, run from inside `deck`). ui-test rewritten for the Files tab (**38 checks**, updated but NOT run — the user runs it himself); instead a scratch puppeteer script (not committed) passed 17/17: tab swap, tree renders, folders first, expand/collapse/re-expand of `public`, open `HANDOFF.md` with real content, back preserves expansion, terminal still connected, 0 JS errors. Endpoint edge cases curl-checked: traversal → 400, missing → 404, list-a-file → 400. Pending: user's look on the phone. `test/shot-shell.png` deleted (ui-test now saves `shot-files.png`).
 
 ### 10. Per-deck model switcher state — DONE (2026-07-02)
 

@@ -13,6 +13,7 @@
   <!-- CDN: jsdelivr (cdnjs ya no hostea @xterm/addon-fit ni los bundles de diff2html) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3.4.52/bundles/css/diff2html.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/styles/github-dark.min.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -85,18 +86,20 @@
       <div id="diff-view" class="scroll hidden"></div>
     </section>
 
-    <!-- ============ Pestaña Shell ============ -->
-    <section id="view-shell" class="view">
-      <div class="quickkeys" data-term="shell">
-        <button data-k="esc">Esc</button>
-        <button data-k="up">&#8593;</button>
-        <button data-k="down">&#8595;</button>
-        <button data-k="tab">Tab</button>
-        <button data-k="ctrlc">Ctrl+C</button>
-        <button data-k="enter">Enter</button>
-        <span class="conn" id="conn-shell"><span class="dot"></span></span>
+    <!-- ============ Pestaña Archivos ============ -->
+    <section id="view-files" class="view">
+      <div class="changes-header">
+        <button id="btn-file-back" class="icon-btn hidden">&#8592;</button>
+        <div class="branch-info">
+          <span id="files-title">Archivos</span>
+        </div>
+        <button id="btn-md-render" class="icon-btn hidden" title="Vista renderizada">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.2 9.5-6.2S21.5 12 21.5 12s-3.5 6.2-9.5 6.2S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3.1"/></svg>
+        </button>
+        <button id="btn-files-refresh" class="icon-btn">&#10227;</button>
       </div>
-      <div id="term-shell" class="term-wrap"></div>
+      <div id="file-tree" class="scroll"></div>
+      <div id="file-view" class="scroll hidden"></div>
     </section>
 
     <!-- ============ Tab bar ============ -->
@@ -108,8 +111,8 @@
         <span class="tab-icon">&#916;</span><span>Cambios</span>
         <span id="tab-changes-badge" class="tab-badge hidden"></span>
       </button>
-      <button class="tab" data-tab="shell">
-        <span class="tab-icon">&gt;_</span><span>Shell</span>
+      <button class="tab" data-tab="files">
+        <span class="tab-icon">&#9636;</span><span>Archivos</span>
       </button>
     </nav>
   </div>
@@ -117,6 +120,9 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.52/bundles/js/diff2html.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/highlight.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

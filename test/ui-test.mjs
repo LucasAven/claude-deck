@@ -69,14 +69,13 @@ await page.$eval('.quickkeys[data-term="claude"] [data-k="esc"]', (b) => {
 ok('tecla rápida Esc enviada sin errores', consoleErrors.length === 0);
 // orden de la barra de Claude: "nl" primero (acceso rápido, pedido del usuario),
 // "/" segundo. El botón nl (newline suave, ESC+CR) no se tapea: mandaría un
-// salto de línea al prompt de la sesión deck real. Tampoco existe en Shell.
+// salto de línea al prompt de la sesión deck real.
 const keyOrder = await page.$$eval(
   '.quickkeys[data-term="claude"] button[data-k]',
   (bs) => bs.map((b) => b.dataset.k),
 );
 ok('teclas "nl" y "/" primeras en la barra de Claude', keyOrder[0] === 'nl' && keyOrder[1] === 'slash');
-ok('botón nl solo en Claude, no en Shell',
-  (await page.$('.quickkeys[data-term="shell"] [data-k="nl"]')) === null);
+ok('una sola barra de teclas (Shell retirado)', (await page.$$('.quickkeys')).length === 1);
 
 // 5b. adjuntar imagen = solo preview (dos pasos): el chip queda pendiente con
 // el hint de "tocá para enviar" y NO se sube nada hasta confirmar con un tap
@@ -182,11 +181,80 @@ await page.click('#btn-diff-back');
 await new Promise((r) => setTimeout(r, 300));
 ok('botón ← vuelve a la lista', !(await page.$eval('#file-list', (el) => el.classList.contains('hidden'))));
 
-// 9. pestaña Shell: terminal conectada
-await page.click('.tab[data-tab="shell"]');
-await new Promise((r) => setTimeout(r, 2500));
-ok('xterm montado en pestaña Shell', !!(await page.$('#term-shell .xterm')));
-ok('shell conectada (indicador ON)', await page.$eval('#conn-shell', (el) => el.classList.contains('on')));
+// 9. pestaña Archivos (reemplazó a Shell): árbol read-only del dir de la sesión
+await page.click('.tab[data-tab="files"]');
+await page.waitForSelector('#file-tree .ft-row', { timeout: 8000 }).catch(() => {});
+const ftRows = await page.$$('#file-tree .ft-row');
+ok('árbol de archivos renderiza filas', ftRows.length > 0);
+// iconos SVG estilo VS Code: carpeta en dirs, icono por tipo en files
+const icoStats = await page.evaluate(() => ({
+  dirs: document.querySelectorAll('#file-tree .ft-row.dir').length,
+  dirSvgs: document.querySelectorAll('#file-tree .ft-row.dir .ft-ico svg').length,
+  files: document.querySelectorAll('#file-tree .ft-row.file').length,
+  fileSvgs: document.querySelectorAll('#file-tree .ft-row.file .ft-ico svg').length,
+}));
+ok('todas las filas tienen icono SVG', icoStats.dirs > 0 && icoStats.dirs === icoStats.dirSvgs
+  && icoStats.files > 0 && icoStats.files === icoStats.fileSvgs);
+// dirs primero en el nivel raíz (los hijos van en .ft-kids, no son hijos directos)
+const topTypes = await page.$$eval('#file-tree > .ft-row', (rows) => rows.map((r) => r.classList.contains('dir')));
+ok('carpetas primero en el árbol', topTypes.length > 0
+  && topTypes.every((isDir, i) => i === 0 || topTypes[i - 1] || !isDir));
+// expandir la primera carpeta → carga lazy de hijos (solo lectura)
+await page.click('#file-tree > .ft-row.dir');
+await new Promise((r) => setTimeout(r, 1000));
+ok('expandir carpeta carga sus hijos', (await page.$$('#file-tree .ft-kids .ft-row, #file-tree .ft-kids .empty-state')).length > 0);
+await page.screenshot({ path: new URL('./shot-files.png', import.meta.url).pathname });
+// el botón de vista renderizada no aparece en el árbol (solo con un .md abierto)
+ok('botón markdown oculto en la vista de árbol', await page.$eval('#btn-md-render', (el) => el.classList.contains('hidden')));
+// abrir un archivo del nivel raíz → vista de contenido; ← vuelve al árbol
+// (se elige uno de texto con extensión resaltable: el primero podría ser
+// binario —.DS_Store— o texto plano sin lenguaje)
+const fileIdx = await page.$$eval('#file-tree > .ft-row.file .ft-name', (ns) => {
+  const i = ns.findIndex((n) => /\.(md|json|mjs|js|ts|css|html|yml|yaml)$/i.test(n.textContent));
+  return i === -1 ? 0 : i;
+});
+await (await page.$$('#file-tree > .ft-row.file'))[fileIdx].click();
+await page.waitForSelector('#file-view .file-pre', { timeout: 8000 }).catch(() => {});
+const fileOpen = await page.evaluate(() => ({
+  viewShown: !document.querySelector('#file-view').classList.contains('hidden'),
+  treeHidden: document.querySelector('#file-tree').classList.contains('hidden'),
+  content: (document.querySelector('#file-view .file-pre') || {}).textContent || '',
+  hlSpans: document.querySelectorAll('#file-view .file-pre code.hljs span').length,
+}));
+ok('tap en un archivo abre la vista con contenido', fileOpen.viewShown && fileOpen.treeHidden && fileOpen.content.length > 0);
+ok('contenido con syntax highlighting (hljs)', fileOpen.hlSpans > 0);
+// 9b. toggle de vista renderizada de markdown: asegurarse de tener un .md
+// abierto (el regex de arriba puede haber elegido otro tipo)
+const openedIsMd = await page.$eval('#files-title', (el) => /\.md$/i.test(el.textContent));
+if (!openedIsMd) {
+  await page.click('#btn-file-back');
+  await new Promise((r) => setTimeout(r, 300));
+  const mdIdx = await page.$$eval('#file-tree > .ft-row.file .ft-name', (ns) =>
+    ns.findIndex((n) => /\.md$/i.test(n.textContent)));
+  await (await page.$$('#file-tree > .ft-row.file'))[mdIdx].click();
+  await page.waitForSelector('#file-view .file-pre', { timeout: 8000 }).catch(() => {});
+}
+ok('botón markdown visible con un .md abierto', !(await page.$eval('#btn-md-render', (el) => el.classList.contains('hidden'))));
+await page.click('#btn-md-render');
+await new Promise((r) => setTimeout(r, 300));
+const mdRendered = await page.evaluate(() => ({
+  body: !!document.querySelector('#file-view .md-body'),
+  elems: document.querySelectorAll('#file-view .md-body h1, #file-view .md-body h2, #file-view .md-body h3, #file-view .md-body p').length,
+  active: document.querySelector('#btn-md-render').classList.contains('active'),
+}));
+ok('toggle → markdown renderizado (.md-body con elementos)', mdRendered.body && mdRendered.elems > 0);
+ok('botón markdown marcado como activo', mdRendered.active);
+await page.click('#btn-md-render');
+await new Promise((r) => setTimeout(r, 300));
+const mdSource = await page.evaluate(() => ({
+  pre: !!document.querySelector('#file-view .file-pre'),
+  body: !!document.querySelector('#file-view .md-body'),
+  active: document.querySelector('#btn-md-render').classList.contains('active'),
+}));
+ok('segundo toggle vuelve a la fuente', mdSource.pre && !mdSource.body && !mdSource.active);
+await page.click('#btn-file-back');
+await new Promise((r) => setTimeout(r, 300));
+ok('botón ← vuelve al árbol', !(await page.$eval('#file-tree', (el) => el.classList.contains('hidden'))));
 
 // 10. service worker registrado + manifest
 const swReg = await page.evaluate(async () => {
@@ -199,7 +267,6 @@ ok('service worker registrado', swReg);
 ok(`sin errores JS en consola (${consoleErrors.length})`, consoleErrors.length === 0);
 if (consoleErrors.length) console.log('ERRORES:', consoleErrors.slice(0, 5).join('\n'));
 
-await page.screenshot({ path: new URL('./shot-shell.png', import.meta.url).pathname });
 await page.click('.tab[data-tab="claude"]');
 await new Promise((r) => setTimeout(r, 800));
 await page.screenshot({ path: new URL('./shot-claude.png', import.meta.url).pathname });

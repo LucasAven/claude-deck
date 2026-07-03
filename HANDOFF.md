@@ -1,15 +1,15 @@
 # HANDOFF — claude-deck
 
-**Fecha:** 2026-07-02 (7ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + rename de sesiones (tarea 6) + dev script con watch y puerto pineado (tarea 7) + **badge de cambios en la tab Cambios (tarea 8, verificada headless; falta el vistazo del usuario en el celu)** + **fix del label de switchers tras matar la sesión activa (tarea 10 — el tracking per-sesión ya existía; el leak era `killSession`)**. **Backlog en `TASKS.md`: quedan las tareas 9 y 11 (file browser que reemplaza a Shell, bug de render corrupto)** — ese archivo es la fuente de verdad del backlog y de qué se hizo; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
+**Fecha:** 2026-07-02 (8ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + rename de sesiones (tarea 6) + dev script con watch y puerto pineado (tarea 7) + badge de cambios (tarea 8) + fix del label de switchers al matar la sesión activa (tarea 10) + **file browser "Archivos" que reemplaza a la pestaña Shell (tarea 9, confirmada por el usuario: "working perfectly") + syntax highlighting e iconos estilo VS Code en el árbol (tarea 9b) + botón de render de .md en el header de Archivos (tarea 9c — verificadas headless; falta el vistazo del usuario en el celu)**. **Backlog en `TASKS.md`: queda la tarea 11 (bug de render corrupto)** — ese archivo es la fuente de verdad del backlog y de qué se hizo; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
 
 ## Qué es y dónde está todo
 
-Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tmux, vía Tailscale. No dupliques contexto: requisitos en `SPEC.md`, uso/seguridad/API en `README.md` (la tabla de API está al día, incluye los endpoints nuevos).
+Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tmux, vía Tailscale. No dupliques contexto: requisitos en `SPEC.md`, uso/seguridad/API en `README.md` (la tabla de API está al día, incluye los endpoints nuevos). Las 3 pestañas actuales: **Claude** (terminal), **Cambios** (git) y **Archivos** (file browser read-only — la pestaña Shell se retiró en la tarea 9; el WS ya no acepta `target=shell`, pero kill/rename siguen limpiando pares `<name>-shell` legacy y el sufijo sigue reservado).
 
 - `server/index.ts` — todo el backend (Hono + ws + node-pty, un solo archivo)
 - `public/` — frontend vanilla: `index.html`, `app.js`, `style.css`, PWA (`manifest.json`, `sw.js` passthrough sin caché, `icon.svg`)
-- `test/ws-test.mjs` — E2E de WS/tmux/API (**31 checks**; sección 9b —stage/unstage— y 12b —rename— son de la 5ª/6ª sesión; acepta `DECK_PORT` para apuntar a otro puerto)
-- `test/ui-test.mjs` — smoke de UI en Chromium headless, viewport iPhone (**35 checks**; deja `test/shot-*.png`. Ver `TASKS.md` para el backlog de features y lo ya hecho.)
+- `test/ws-test.mjs` — E2E de WS/tmux/API (**36 checks**; sección 9c —fs endpoints— es de la 8ª sesión; acepta `DECK_PORT` para apuntar a otro puerto)
+- `test/ui-test.mjs` — smoke de UI en Chromium headless, viewport iPhone (**45 checks**; deja `test/shot-*.png`. Ver `TASKS.md` para el backlog de features y lo ya hecho.)
 - `test/shot-diff.mjs` — helper que screenshotea el diff (normal / h-scroll / v-scroll) para iterar UI sin celular
 - `.claude/settings.example.json` + `scripts/notify.sh` — hooks ntfy (bonus §12), **inactivos** hasta que el usuario los renombre a `settings.json`
 
@@ -45,7 +45,7 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 ## Gotchas (los 7 de la v1 siguen valiendo; ver git log de este archivo si hace falta... no hay commits: quedan acá)
 
 1. **node-pty 1.1.0**: prebuild sin bit de ejecución en `spawn-helper` → `posix_spawnp failed`; hay `postinstall` que lo arregla.
-2. **CDN jsdelivr** (cdnjs no hostea estos paquetes): `@xterm/xterm@5.5.0`, `@xterm/addon-fit@0.10.0`, `diff2html@3.4.52`. Globals: `Terminal`, `FitAddon.FitAddon`, `Diff2Html`.
+2. **CDN jsdelivr** (cdnjs no hostea estos paquetes): `@xterm/xterm@5.5.0`, `@xterm/addon-fit@0.10.0`, `diff2html@3.4.52`, `@highlightjs/cdn-assets@11.11.1` (bundle common + tema github-dark), `marked@15.0.12` + `dompurify@3.2.6` (render de .md — **siempre sanitizar**: el browser abre READMEs de node_modules). Globals: `Terminal`, `FitAddon.FitAddon`, `Diff2Html`, `hljs`, `marked`, `DOMPurify`.
 3. **tmux 3.7b targets**: `has-session`/`kill-session` aceptan `=nombre`, pero `show-options`, `capture-pane` y `send-keys` **no** — para comandos de pane usar `=nombre:` (así está en `tmuxPaneDir` y en paste-image). `display-message -p -t '=inexistente:'` devuelve vacío con exit 0 → por eso `resolveGitDir` hace `has-session` antes.
 4. **Sandbox de Claude Code**: node-pty no crea ptys bajo el sandbox de Bash → correr server/tests con `dangerouslyDisableSandbox: true`.
 5. **RTK** (hook del usuario): filtra output (usar `rtk proxy <cmd>` para JSON crudo) y **puede romper comandos compuestos con `;`** (síntoma: `(eval):1: ... not found`). Ante eso: comandos de a uno, o meterlos en un script `.sh` y ejecutarlo.
@@ -56,14 +56,14 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 10. **diff2html**: la tabla necesita `border-collapse: separate` (sticky no funciona con collapse) y el wrapper `position: relative` (si no, los números absolute/sticky se desalinean del scroll vertical — se probó y falló con `left: 0`).
 11. **tmux `mouse on`** queda seteado en toda sesión que la app toque (incluye sesiones del usuario si las selecciona en la UI): en la terminal de la Mac, seleccionar texto pasa a necesitar Shift/Option.
 12. **Server viejo = 404 fantasma** (mordió en la 5ª y 6ª sesión) — **ARREGLADO en la tarea 7** para servers lanzados con el script nuevo: `npm run dev` ahora es `tsx watch` — editar `server/index.ts` reinicia el server solo (verificado: 0 ptys/clientes tmux leakeados; la PWA reconecta sola). Y el server lee **`DECK_PORT`** (`.env` o entorno; default 7433) en vez de `PORT`, así el `export PORT=7434` del perfil de shell del usuario ya no puede secuestrar el puerto (`PORT` se ignora del todo; mismo nombre de variable que usa ws-test para el cliente). El síntoma viejo solo puede volver si el proceso vivo es anterior al script nuevo: diagnóstico rápido, `ps -p <pid> -o lstart` vs mtime de `server/index.ts`.
-13. **⚠️ SUICIDIO POR tmux kill (mató VARIAS sesiones el 2026-07-02)**: si esta sesión de Claude fue lanzada **desde el celular vía deck**, corre ADENTRO de la sesión tmux `deck` — el patrón de la gotcha 9 (`tmux kill-session =deck` antes de ws-test) **mata a la propia sesión de Claude** a mitad de tarea. Así "crashearon" repetidamente las sesiones que trabajaban la tarea 6 (el transcript muere 1 segundo antes de que la PWA recree `deck`). Antes de matar `deck`: chequear `echo $TMUX` — si NO está vacío, estás adentro: no matar; correr `ws-test` igual aceptando que el check `created=true` de la primera conexión falle (ruido conocido; el resto de la suite no depende de eso — la sección 12b de rename usa su propio par `deck-rn`), o pedirle al usuario que corra el test desde la Mac.
+13. **⚠️ SUICIDIO POR tmux kill (mató VARIAS sesiones el 2026-07-02)**: si esta sesión de Claude fue lanzada **desde el celular vía deck**, corre ADENTRO de la sesión tmux `deck` — el patrón de la gotcha 9 (`tmux kill-session =deck` antes de ws-test) **mata a la propia sesión de Claude** a mitad de tarea. Así "crashearon" repetidamente las sesiones que trabajaban la tarea 6 (el transcript muere 1 segundo antes de que la PWA recree `deck`). Antes de matar `deck`: chequear `echo $TMUX` — si NO está vacío, estás adentro: no matar; correr `ws-test` igual aceptando que el check `created=true` de la primera conexión falle (ruido conocido; el resto de la suite no depende de eso — la sección 12b de rename usa su propio par `deck-rn`), o pedirle al usuario que corra el test desde la Mac. Otro efecto de correrlo desde adentro: el test manda `echo hola-deck` a la sesión `deck` — te aparece como "mensaje del usuario" en tu propio prompt; es ruido del test, ignoralo.
 
 ## Cómo correr y verificar
 
 ```bash
 npm run dev                    # server en http://127.0.0.1:7433, con watch; el server lee DECK_PORT, ignora PORT (gotcha 12; banner: gotcha 6)
-node test/ws-test.mjs          # 31 checks (server arriba; ver gotchas 8, 9 y 13; DECK_PORT para otro puerto)
-node test/ui-test.mjs          # 35 checks + screenshots test/shot-*.png (correrlo lo prefiere el usuario)
+node test/ws-test.mjs          # 36 checks (server arriba; ver gotchas 8, 9 y 13; DECK_PORT para otro puerto)
+node test/ui-test.mjs          # 45 checks + screenshots test/shot-*.png (correrlo lo prefiere el usuario)
 node test/shot-diff.mjs        # screenshots del diff view
 ```
 
