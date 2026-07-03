@@ -65,10 +65,11 @@ const r2 = await session(c2);
 ok('reconexión attach a la misma sesión (created=false)', r2.meta?.created === false);
 ok('la sesión conserva el contenido anterior', r2.out.includes('hola-deck'));
 
-// 5. multi-sesión: session=deck-2
-const c3 = connect('target=claude&session=deck-2');
+// 5. multi-sesión: session=deck-2 (create=1: sin él, un attach a una sesión
+// inexistente ya no la crea — ver 5c)
+const c3 = connect('target=claude&session=deck-2&create=1');
 const r3 = await session(c3);
-ok('sesión deck-2 creada vía ?session=', r3.meta?.created === true && r3.meta?.session === 'deck-2');
+ok('sesión deck-2 creada vía ?session=&create=1', r3.meta?.created === true && r3.meta?.session === 'deck-2');
 
 // 5b. {t:'refresh'} fuerza un repaint completo de tmux (fix tarea 11: el
 // frontend lo manda al volver de background; un pane idle no emite nada,
@@ -82,6 +83,15 @@ const gotRepaint = await new Promise((resolve) => {
   c3.send(JSON.stringify({ t: 'refresh' }));
 });
 ok('refresh → tmux repinta (llega out en pane idle)', gotRepaint);
+
+// 5c. attach sin create=1 a una sesión inexistente NO la crea (guard
+// anti-resurrección: el retry de un cliente desactualizado no debe revivir
+// una sesión recién matada) — el server contesta meta gone y cierra
+const cg = connect('target=claude&session=deck-nope');
+const rg = await session(cg);
+ok('attach sin create a sesión inexistente → meta gone', rg.meta?.gone === true);
+const afterGone = await (await fetch(`${HTTP}/api/tmux/sessions`, { headers: { 'x-deck-token': TOKEN } })).json();
+ok('la sesión inexistente NO fue creada', !afterGone.some((s) => s.name === 'deck-nope'));
 
 // 6. sesión inválida rechazada
 await new Promise((resolve) => {

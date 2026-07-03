@@ -9,6 +9,7 @@ const state = {
   session: null,        // sesión tmux seleccionada (pestaña Claude + Cambios)
   activeTab: 'claude',
   inDiff: false,
+  expectCreate: null,   // nombre que ESTE cliente pidió crear (botón +): exime al guard anti-resurrección
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -100,7 +101,11 @@ function createTermConnection(containerId, connId, getSession) {
     }
     wantedSession = getSession();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws/term?session=${encodeURIComponent(wantedSession)}`;
+    // create=1 solo cuando ESTE cliente pidió crear (botón +); la default la
+    // permite el server. Un retry/resume nunca crea: si la sesión murió en
+    // otro lado, el server contesta meta gone y caemos a una viva.
+    const create = wantedSession === state.expectCreate ? '&create=1' : '';
+    const url = `${proto}://${location.host}/ws/term?session=${encodeURIComponent(wantedSession)}${create}`;
     const sock = new WebSocket(url);
     ws = sock;
 
@@ -124,7 +129,24 @@ function createTermConnection(containerId, connId, getSession) {
           refreshTimer = null;
         }
         term.write(m.d);
-      } else if (m.t === 'meta' && m.created) showHint();
+      } else if (m.t === 'meta') {
+        if (m.gone) {
+          // la sesión ya no existe (matada en otro tab/dispositivo, o reboot
+          // de la Mac): no insistir con retries — caer a una sesión viva
+          fallbackToLiveSession();
+        } else if (m.created && m.session !== state.defaultSession && m.session !== state.expectCreate) {
+          // Este cliente no pidió crear nada: la sesión fue matada en otro
+          // tab/dispositivo y este reconnect la acaba de resucitar (attach-or-
+          // create). Sin este guard, "borrar" una sesión la respawnea al toque
+          // mientras haya otro cliente mirándola. Matarla de vuelta y caer a
+          // una viva; la default queda exenta (recrearla siempre es deseado).
+          api(`/api/tmux/sessions/${encodeURIComponent(m.session)}`, { method: 'DELETE' }).catch(() => {});
+          fallbackToLiveSession();
+        } else {
+          state.expectCreate = null;
+          if (m.created) showHint();
+        }
+      }
     };
 
     sock.onclose = () => {
@@ -734,22 +756,29 @@ async function killSession(name) {
   try { localStorage.removeItem(`deck-switch:${name}`); } catch (_) {}
 
   if (state.session === name) {
-    // caer a otra sesión viva; si no queda ninguna, la default (se recrea vacía)
-    let names = [];
-    try {
-      names = (await (await api('/api/tmux/sessions')).json()).map((s) => s.name);
-    } catch (_) {}
-    state.session = names.includes(state.defaultSession)
-      ? state.defaultSession
-      : (names[0] || state.defaultSession);
-    hideHint();
-    closeSwitchMenu();
-    renderSwitchPills(); // sin esto la pill queda con el modelo de la sesión muerta
-    claudeConn.reconnect();
-    refreshGit();
-    treeSession = null; // el fallback puede reusar el nombre muerto: refetch siempre
-    if (state.activeTab === 'files') refreshTree(false);
+    await fallbackToLiveSession();
+  } else {
+    refreshSessions();
   }
+}
+
+// Caer a otra sesión viva (la default si existe; se recrea vacía si no queda
+// ninguna). Usado al matar la sesión activa y por el guard anti-resurrección.
+async function fallbackToLiveSession() {
+  let names = [];
+  try {
+    names = (await (await api('/api/tmux/sessions')).json()).map((s) => s.name);
+  } catch (_) {}
+  state.session = names.includes(state.defaultSession)
+    ? state.defaultSession
+    : (names[0] || state.defaultSession);
+  hideHint();
+  closeSwitchMenu();
+  renderSwitchPills(); // sin esto la pill queda con el modelo de la sesión muerta
+  claudeConn.reconnect();
+  refreshGit();
+  treeSession = null; // el fallback puede reusar el nombre muerto: refetch siempre
+  if (state.activeTab === 'files') refreshTree(false);
   refreshSessions();
 }
 
@@ -809,7 +838,9 @@ async function createSession() {
     existing = (await (await api('/api/tmux/sessions')).json()).map((s) => s.name);
   } catch (_) {}
   if (state.session && !existing.includes(state.session)) existing.push(state.session);
-  selectSession(nextSessionName(existing));
+  const name = nextSessionName(existing);
+  state.expectCreate = name; // creación pedida por el usuario: el guard no debe revertirla
+  selectSession(name);
 }
 
 // ---------------------------------------------------------------------------

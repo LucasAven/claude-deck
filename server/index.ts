@@ -30,6 +30,11 @@ try {
   /* sin .env: se usan las variables de entorno del proceso */
 }
 
+// Bajo launchd no hay locale en el entorno: tmux en locale C sanitiza output
+// (tabs → "_", ver tmuxListSessions) y los shells de los ptys heredan un
+// entorno sin UTF-8. Defaultear acá cubre al proceso y a todo lo que spawnea.
+if (!process.env.LANG) process.env.LANG = 'en_US.UTF-8'
+
 const REPO_DIR = process.env.REPO_DIR || ''
 const AUTH_TOKEN = process.env.AUTH_TOKEN || ''
 const TMUX_SESSION = process.env.TMUX_SESSION || 'deck'
@@ -122,14 +127,19 @@ async function tmuxPaneDir(name: string): Promise<string> {
 async function tmuxListSessions(): Promise<Array<{ name: string; attached: boolean; dir: string }>> {
   let stdout = ''
   try {
-    stdout = (await execFileP('tmux', ['list-sessions', '-F', '#{session_name}\t#{session_attached}'])).stdout
+    // separador: ESPACIO, nunca \t — sin LANG en el entorno (launchd), tmux
+    // sanitiza los caracteres de control del output y el tab se vuelve "_",
+    // fusionando nombre y flag en "deck_0"; la UI listaba esos nombres
+    // fantasma y attach-or-create los CREABA. El espacio es imprimible en
+    // cualquier locale y SESSION_RE garantiza que un nombre no lo contiene.
+    stdout = (await execFileP('tmux', ['list-sessions', '-F', '#{session_name} #{session_attached}'])).stdout
   } catch {
     return [] // no hay servidor tmux corriendo
   }
   const out: Array<{ name: string; attached: boolean; dir: string }> = []
   for (const line of stdout.split('\n')) {
     if (!line.trim()) continue
-    const [name, attached] = line.split('\t')
+    const [name, attached] = line.split(' ')
     if (!name || name.endsWith('-shell')) continue
     let dir = ''
     try {
@@ -537,6 +547,7 @@ app.delete('/api/tmux/sessions/:name', async (c) => {
   if (await tmuxKillSession(name)) killed.push(name)
   if (await tmuxKillSession(`${name}-shell`)) killed.push(`${name}-shell`)
   if (!killed.length) throw new HttpError(404, `sesión tmux no encontrada: ${name}`)
+  console.log(`[deck] ${new Date().toISOString()} kill ${killed.join(', ')}`)
   return c.json({ ok: true, killed })
 })
 
@@ -570,6 +581,7 @@ app.patch('/api/tmux/sessions/:name', async (c) => {
     await tmuxRenameSession(`${name}-shell`, `${newName}-shell`)
     renamed.push(`${newName}-shell`)
   }
+  console.log(`[deck] ${new Date().toISOString()} rename ${name} -> ${renamed.join(', ')}`)
   return c.json({ ok: true, renamed })
 })
 
@@ -675,6 +687,18 @@ async function handleTerm(ws: WebSocket, url: URL) {
   const tmuxName = session
   const existed = await tmuxHasSession(tmuxName)
 
+  // Solo un attach con intención explícita puede CREAR (create=1: botón + de
+  // la UI; la default se recrea siempre). Sin esto, attach-or-create convertía
+  // el retry de cualquier cliente desactualizado en una resurrección de la
+  // sesión recién matada ("borro una y aparece otra").
+  const allowCreate = url.searchParams.get('create') === '1' || tmuxName === TMUX_SESSION
+  if (!existed && !allowCreate) {
+    console.log(`[deck] ${new Date().toISOString()} ws attach session=${tmuxName} rechazado (no existe, sin create=1)`)
+    ws.send(JSON.stringify({ t: 'meta', gone: true, session: tmuxName }))
+    ws.close(1000, 'la sesión no existe')
+    return
+  }
+
   const env = { ...process.env, TERM: 'xterm-256color' } as Record<string, string>
   delete env.TMUX // permitir attach aunque el server corra dentro de tmux
 
@@ -698,6 +722,9 @@ async function handleTerm(ws: WebSocket, url: URL) {
     return
   }
 
+  // log de attaches: si vuelven a aparecer sesiones fantasma (p. ej. nombres
+  // con _0), acá queda QUIÉN pidió qué nombre y si eso la creó
+  console.log(`[deck] ${new Date().toISOString()} ws attach session=${tmuxName} created=${!existed}`)
   ws.send(JSON.stringify({ t: 'meta', created: !existed, session: tmuxName }))
 
   p.onData((d) => {

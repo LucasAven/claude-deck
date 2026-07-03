@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+# claude-deck — modo remoto en un comando. `deck help` explica el uso completo.
+set -euo pipefail
+
+# NUNCA como root: launchctl bootstrap de un dominio gui falla corriendo como
+# root ("Domain does not support specified action"); el sudo que hace falta
+# (sudoers/pmset) el script lo pide solo, puntualmente.
+if [ "$(id -u)" = "0" ]; then
+  printf '❌ no corras esto con sudo — corrélo como tu usuario; el script pide sudo solo cuando lo necesita\n' >&2
+  exit 1
+fi
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LABEL="com.claude-deck"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/Library/Logs/claude-deck.log"
+SUDOERS_FILE="/etc/sudoers.d/claude-deck"
+GUI="gui/$(id -u)"
+
+# el server ignora PORT a propósito; el puerto real sale de DECK_PORT en .env
+PORT="$(grep -m1 '^DECK_PORT=' "$REPO/.env" 2>/dev/null | cut -d= -f2 || true)"
+PORT="${PORT:-7433}"
+
+info() { printf '%s\n' "$*"; }
+warn() { printf '⚠️  %s\n' "$*"; }
+die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
+
+server_alive() {
+  # cualquier código HTTP (401 sin token incluido) = server vivo; 000 = nada escuchando
+  [ "$(curl -m 3 -so /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/config" 2>/dev/null || true)" != "000" ]
+}
+
+agent_loaded() { launchctl print "$GUI/$LABEL" >/dev/null 2>&1; }
+
+serve_url() {
+  # primera línea de `tailscale serve status`: "https://host.tailnet.ts.net (tailnet only)"
+  tailscale serve status 2>/dev/null | awk 'NR==1 && $1 ~ /^https/ { print $1 }'
+}
+
+sleep_disabled() { pmset -g 2>/dev/null | awk '/SleepDisabled/ { print $2; found=1 } END { if (!found) print 0 }'; }
+
+on_ac() { pmset -g batt 2>/dev/null | head -1 | grep -q 'AC Power'; }
+
+pm_sleep() { # pm_sleep 1|0 → disablesleep on/off (sudoers de `deck install` evita el password)
+  if ! sudo -n /usr/bin/pmset -a disablesleep "$1" 2>/dev/null; then
+    if [ -t 0 ]; then
+      info "(sudo te va a pedir el password — \`deck install\` configura sudoers para que no haga falta)"
+      sudo /usr/bin/pmset -a disablesleep "$1"
+    else
+      die "sudo necesita password y no hay terminal interactiva: corré \`scripts/deck install\` una vez"
+    fi
+  fi
+}
+
+wait_for_server() {
+  for _ in $(seq 1 20); do
+    server_alive && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+write_plist() {
+  local node_bin node_dir
+  node_bin="$(command -v node)" || die "no encuentro node en el PATH"
+  node_dir="$(dirname "$node_bin")"
+  mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+  # node directo sobre el cli de tsx (sin shebang de por medio); PATH incluye el
+  # bin de node (nvm) y homebrew para que el server encuentre tmux/git/osascript
+  cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$node_bin</string>
+    <string>$REPO/node_modules/tsx/dist/cli.mjs</string>
+    <string>$REPO/server/index.ts</string>
+  </array>
+  <key>WorkingDirectory</key><string>$REPO</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>$node_dir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LANG</key><string>en_US.UTF-8</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$LOG</string>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict>
+</plist>
+EOF
+  plutil -lint "$PLIST" >/dev/null || die "plist inválido: $PLIST"
+}
+
+install_sudoers() {
+  local tmp
+  tmp="$(mktemp)"
+  printf '%s ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0\n' "$USER" > "$tmp"
+  visudo -cf "$tmp" >/dev/null || { rm -f "$tmp"; die "regla sudoers inválida (bug del script)"; }
+  if sudo -n true 2>/dev/null || [ -t 0 ]; then
+    sudo install -o root -g wheel -m 0440 "$tmp" "$SUDOERS_FILE"
+    info "✓ sudoers configurado ($SUDOERS_FILE): pmset disablesleep sin password"
+  else
+    warn "no pude configurar sudoers sin terminal interactiva — corré \`scripts/deck install\` de nuevo en tu terminal"
+  fi
+  rm -f "$tmp"
+}
+
+cmd_install() {
+  [ -f "$REPO/.env" ] || die "falta $REPO/.env (el server no arranca sin AUTH_TOKEN)"
+  write_plist
+  info "✓ LaunchAgent escrito ($PLIST)"
+  install_sudoers
+  if server_alive && ! agent_loaded; then
+    warn "ya hay un server en el puerto $PORT (¿tu \`npm run dev\` manual?)."
+    warn "cuando lo cierres, corré \`scripts/deck start\` — desde ahí el agente lo mantiene siempre corriendo"
+  else
+    cmd_start
+  fi
+  info ""
+  info "tip: alias deck='$REPO/scripts/deck'   (agregalo a tu ~/.zshrc)"
+}
+
+cmd_start() {
+  [ -f "$PLIST" ] || die "no está instalado: corré \`scripts/deck install\`"
+  if agent_loaded; then
+    launchctl bootout "$GUI/$LABEL" 2>/dev/null || true
+    # el unload es asincrónico: bootstrapear enseguida da "Input/output error"
+    for _ in $(seq 1 20); do
+      agent_loaded || break
+      sleep 0.5
+    done
+    agent_loaded && die "no pude descargar el agente anterior — esperá unos segundos y probá de nuevo"
+  fi
+  local i out=''
+  for i in 1 2 3 4 5; do
+    out="$(launchctl bootstrap "$GUI" "$PLIST" 2>&1)" && break
+    if [ "$i" = 5 ]; then
+      die "launchctl bootstrap falló 5 veces: ${out:-sin detalle}"
+    fi
+    sleep 1 # launchd a veces tarda en soltar el label recién descargado
+  done
+  if wait_for_server; then
+    info "✓ server corriendo (agente launchd, puerto $PORT)"
+  else
+    die "el agente no levantó el server — mirá el log: scripts/deck log"
+  fi
+}
+
+cmd_stop() {
+  launchctl bootout "$GUI/$LABEL" 2>/dev/null || warn "el agente no estaba cargado"
+  info "✓ agente parado — el puerto $PORT queda libre (para volver: scripts/deck start)"
+}
+
+cmd_away() {
+  # 1. server
+  if ! server_alive; then
+    if agent_loaded; then
+      launchctl kickstart -k "$GUI/$LABEL"
+      wait_for_server || die "no pude levantar el server — mirá el log: scripts/deck log"
+    else
+      cmd_start # bootstrap robusto; muere con mensaje claro si no está instalado
+    fi
+  fi
+  if ! agent_loaded; then
+    warn "el server corre a mano (¿npm run dev?): si esa terminal se cierra, se muere."
+    warn "para que quede siempre corriendo: scripts/deck install"
+  fi
+  # 2. tailscale (config persistente: solo verificar que responda de punta a punta)
+  local url
+  url="$(serve_url)"
+  if [ -z "$url" ]; then
+    warn "tailscale serve no está configurado — corré: tailscale serve --bg $PORT"
+  elif [ "$(curl -m 6 -so /dev/null -w '%{http_code}' "$url/api/config" 2>/dev/null || true)" = "000" ]; then
+    warn "$url no responde — ¿tailscale caído? probá: tailscale up"
+  else
+    info "✓ accesible desde el tailnet: $url"
+  fi
+  # 3. energía
+  on_ac || warn "estás a BATERÍA: tapa cerrada + despierta come batería en serio — enchufala"
+  pm_sleep 1
+  [ "$(sleep_disabled)" = "1" ] || die "pmset no quedó aplicado (SleepDisabled != 1)"
+  info "✓ la Mac no va a dormir ni con la tapa cerrada"
+  info ""
+  info "🚀 listo, cerrá la tapa y seguí desde el celu. Al volver: scripts/deck back"
+}
+
+cmd_back() {
+  pm_sleep 0
+  [ "$(sleep_disabled)" = "0" ] || die "pmset no quedó aplicado (SleepDisabled != 0)"
+  info "✓ sueño normal restaurado (el server sigue corriendo, eso no gasta nada)"
+}
+
+cmd_status() {
+  server_alive && info "server:    ✓ vivo (127.0.0.1:$PORT)" || info "server:    ✗ no responde"
+  agent_loaded && info "agente:    ✓ cargado ($LABEL)" || info "agente:    ✗ no cargado"
+  local url; url="$(serve_url)"
+  [ -n "$url" ] && info "tailscale: ✓ $url" || info "tailscale: ✗ serve sin configurar"
+  [ "$(sleep_disabled)" = "1" ] && info "sueño:     despierta con tapa cerrada (modo away)" || info "sueño:     normal"
+  info "energía:   $(pmset -g batt 2>/dev/null | tail -1 | sed 's/^[[:space:]]*//' || echo '?')"
+}
+
+cmd_log() { touch "$LOG"; tail -n 50 -f "$LOG"; }
+
+cmd_uninstall() {
+  pm_sleep 0 2>/dev/null || true
+  launchctl bootout "$GUI/$LABEL" 2>/dev/null || true
+  rm -f "$PLIST"
+  if sudo -n true 2>/dev/null || [ -t 0 ]; then
+    sudo rm -f "$SUDOERS_FILE"
+  else
+    warn "no pude borrar $SUDOERS_FILE sin terminal interactiva — borralo con sudo a mano"
+  fi
+  info "✓ agente y sudoers removidos; el sueño quedó normal"
+}
+
+usage() {
+  cat <<'EOF'
+claude-deck — modo remoto en un comando
+
+Para trabajar desde el celu hacen falta tres cosas: el server corriendo,
+Tailscale sirviéndolo y la Mac despierta con la tapa cerrada. Tailscale queda
+configurado para siempre y el server arranca solo con la Mac — lo único que
+cambia día a día es el sueño, y para eso son `away` y `back`.
+
+UNA SOLA VEZ:
+  deck install    Deja el server instalado como servicio de macOS (arranca al
+                  prender la Mac, se relevanta solo si se cae) y configura el
+                  permiso de sueño sin password. Después, olvidate de esto.
+
+USO DIARIO (lo único que importa):
+  deck away       "Me voy": chequea que todo ande y deja la Mac despierta.
+                  → cerrás la tapa (¡enchufada!) y seguís desde el celu.
+  deck back       "Volví": la Mac vuelve a dormir normalmente.
+
+SI ALGO ANDA RARO:
+  deck status     ¿Server vivo? ¿agente cargado? ¿tailscale? ¿sueño? ¿batería?
+  deck log        Ver el log del server en vivo (attaches, kills, errores).
+
+SOLO PARA DESARROLLAR claude-deck (el servicio no tiene watch):
+  deck stop       Apaga el servicio y libera el puerto → npm run dev
+  deck start      Al terminar, le devolvés el server al servicio.
+
+Y SI UN DÍA NO LO QUERÉS MÁS:
+  deck uninstall  Saca servicio + permisos y restaura el sueño.
+
+Tips: nunca lo corras con sudo (pide sudo solo cuando hace falta). Alias cómodo
+para tu ~/.zshrc:  alias deck='<repo>/scripts/deck'
+EOF
+}
+
+case "${1:-}" in
+  install)        cmd_install ;;
+  away)           cmd_away ;;
+  back)           cmd_back ;;
+  status)         cmd_status ;;
+  start)          cmd_start ;;
+  stop)           cmd_stop ;;
+  log)            cmd_log ;;
+  uninstall)      cmd_uninstall ;;
+  help|--help|-h) usage ;;
+  *)              usage; exit 1 ;;
+esac

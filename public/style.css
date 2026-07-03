@@ -58,18 +58,26 @@ body {
 .muted { color: var(--muted); }
 
 /* ---------- chips de sesión ---------- */
+/* Solo la tira de chips scrollea; el + y el indicador de conexión quedan
+   pineados a la derecha, siempre visibles aunque haya muchas sesiones (antes
+   scrolleaba la fila entera y quedaban fuera de vista o pisando chips). */
 .session-row {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 8px 10px 4px;
-  overflow-x: auto;
   flex: none;
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
   scrollbar-width: none;
 }
-.session-row::-webkit-scrollbar { display: none; }
-
-.chips { display: flex; gap: 6px; }
+.chips::-webkit-scrollbar { display: none; }
 
 .chip {
   flex: none;

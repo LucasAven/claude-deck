@@ -67,6 +67,31 @@ cd ../proyecto-feature-x && claude
 
 Cada `claude` corre en su worktree, con su propio árbol de archivos y su propia rama. Los endpoints git de claude-deck resuelven el directorio de cada sesión automáticamente (limitado a `WORKSPACES_ROOT`, por defecto el directorio padre de `REPO_DIR`).
 
+## Modo remoto: "me voy, sigo desde el celu" (`scripts/deck`)
+
+Para irte y seguir trabajando desde el teléfono hacen falta tres cosas: el server corriendo, tailscale sirviéndolo y la Mac despierta con la tapa cerrada. `tailscale serve --bg` ya es persistente (queda configurado hasta que lo apagues), así que `scripts/deck` automatiza las otras dos.
+
+**Una vez** (pide el password de sudo):
+
+```bash
+scripts/deck install
+# tip: alias deck='<repo>/scripts/deck' en ~/.zshrc
+```
+
+Instala el server como **LaunchAgent** (`~/Library/LaunchAgents/com.claude-deck.plist`): arranca al iniciar sesión, se relevanta solo si se cae, loguea en `~/Library/Logs/claude-deck.log`. Ya no hay que "prender" nada. También agrega una regla sudoers acotada (`/etc/sudoers.d/claude-deck`) para poder alternar `pmset disablesleep` sin password — es lo único que requiere root y solo cubre esos dos comandos exactos.
+
+**Cada vez que te vas** (esto sí es el "un comando"):
+
+```bash
+deck away    # verifica server + URL del tailnet de punta a punta, y desactiva el sueño
+# ... cerrás la tapa y te vas. Al volver:
+deck back    # la Mac vuelve a dormir normalmente
+```
+
+⚠️ Con la tapa cerrada, **enchufada**: mantenerla despierta a batería la come rápido ( `away` avisa si estás a batería). `disablesleep` es el mismo mecanismo que usa Amphetamine con su "Closed-Display Mode" — no hace falta Amphetamine si usás `deck away`.
+
+Otros subcomandos: `deck status` (server / agente / tailscale / sueño / batería), `deck stop` + `deck start` (liberar el puerto para desarrollar claude-deck con `npm run dev` y devolvérselo al agente), `deck log`, `deck uninstall`.
+
 ## Configuración (`.env`)
 
 | Variable          | Obligatoria | Default                  | Descripción                                        |
@@ -114,7 +139,7 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 
 | Ruta | Descripción |
 |---|---|
-| `WS /ws/term?session=<s>` | Terminal (attach tmux). Mensajes JSON: `{"t":"in","d":…}`, `{"t":"resize","cols":N,"rows":N}`, `{"t":"refresh"}` (repaint completo, lo manda la PWA al volver de background) ⇄ `{"t":"out","d":…}` |
+| `WS /ws/term?session=<s>&create=1` | Terminal (attach tmux). Solo crea la sesión si falta con `create=1` (o si es la default); sin él, una sesión inexistente contesta `{"t":"meta","gone":true}` y cierra — así el retry de un cliente viejo no resucita una sesión recién matada. Mensajes JSON: `{"t":"in","d":…}`, `{"t":"resize","cols":N,"rows":N}`, `{"t":"refresh"}` (repaint completo, lo manda la PWA al volver de background) ⇄ `{"t":"out","d":…}` |
 | `GET /api/tmux/sessions` | Sesiones tmux activas (excluye `*-shell`, legacy de la pestaña Shell) |
 | `DELETE /api/tmux/sessions/:name` | Mata la sesión tmux (y su `*-shell` acompañante si quedó de la v1) |
 | `PATCH /api/tmux/sessions/:name` | Renombra la sesión (y su `*-shell` si existe). Body JSON: `{ "newName": "<nombre>" }` (letras/números/`-`/`_`, máx 32, sufijo `-shell` reservado). 409 si el nombre ya existe |
