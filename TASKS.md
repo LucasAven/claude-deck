@@ -12,6 +12,14 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 
 (move completed items here, with a one-line note on how they were verified)
 
+### 12. Scrolling the quickkeys row no longer triggers the button under the thumb — DONE (2026-07-03)
+
+User report: placing the thumb on a shortcut button to scroll the horizontal quickkeys row fired that button even though no tap was intended.
+
+- [x] Cause: all control buttons fired on **`pointerdown`** (chosen so `preventDefault()` keeps the virtual keyboard open), so the first touch of a scroll gesture was already a "click". Fix: new `onTap(el, fn)` helper in `app.js` — still `preventDefault()`s on pointerdown (keyboard stays open) but fires on **pointerup**, only if the finger moved ≤ `TAP_SLOP` (12 px) and the gesture wasn't `pointercancel`ed (iOS fires that when the scroll takes over). Applied to the 5 pointerdown users: quickkeys, mode pill, model pill, model menu items, effort buttons. The document-level close-menu-on-outside-tap stays on pointerdown (correct there).
+
+Verified: scratch puppeteer script (not committed) 8/8 PASS with `claudeConn.sendKeys` spied (nothing reached the real session): tap fires exactly once, micro-movement (<slop) still counts as tap, horizontal drag from a quickkey fires nothing, tap/drag on the mode pill fire/don't-fire, model menu still opens and closes on outside tap, 0 page errors. ui-test updated (→ **47 checks**, NOT run — user runs it): +2 checks (tap-with-slop fires once / drag doesn't, via the same spy) and the existing simulated taps (`esc`, `pd()` helper) now dispatch the pointerdown+pointerup pair the new handler needs. Pending: user's feel check on the phone.
+
 ### 11. Garbled terminal rendering after backgrounding — DONE (2026-07-03)
 
 Original report: the Claude terminal occasionally renders corrupted — lines interleaved/overlapping (words mashed like "toaupdate.Nowverify…"), duplicated spinner/status lines, repeated tmux status-bar blocks. User's decisive clue: it happens **when coming back to the app after switching apps / locking the phone**, and it **fixes itself when the virtual keyboard opens**.

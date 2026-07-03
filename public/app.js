@@ -269,10 +269,29 @@ const KEYS = {
   nl: '\x1b\r',
 };
 
+// Tap con tolerancia al scroll: preventDefault en pointerdown mantiene el foco
+// (no se cierra el teclado virtual), pero la acción recién dispara en pointerup
+// y solo si el dedo no se movió — apoyar el pulgar en un botón para scrollear
+// la fila ya no lo dispara (antes: disparo inmediato en pointerdown).
+const TAP_SLOP = 12; // px de movimiento tolerado para seguir contando como tap
+function onTap(el, fn) {
+  let start = null;
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    start = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  });
+  el.addEventListener('pointerup', (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+    start = null;
+    if (moved <= TAP_SLOP) fn(e);
+  });
+  el.addEventListener('pointercancel', () => { start = null; }); // el scroll se quedó con el gesto
+}
+
 function wireQuickKeys() {
   document.querySelectorAll('.quickkeys button[data-k]').forEach((btn) => {
-    btn.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); // no robar el foco (que no se cierre el teclado)
+    onTap(btn, () => {
       if (claudeConn) claudeConn.sendKeys(KEYS[btn.dataset.k]);
     });
   });
@@ -345,10 +364,7 @@ function menuItem(label, selected, onPick) {
     check.textContent = '✓';
     btn.appendChild(check);
   }
-  btn.addEventListener('pointerdown', (e) => {
-    e.preventDefault(); // no cerrar el teclado virtual
-    onPick();
-  });
+  onTap(btn, () => onPick());
   return btn;
 }
 
@@ -386,8 +402,7 @@ function openModelMenu() {
     const btn = document.createElement('button');
     btn.className = e.id === sw.effort ? 'sel' : '';
     btn.textContent = e.label;
-    btn.addEventListener('pointerdown', (ev) => {
-      ev.preventDefault();
+    onTap(btn, () => {
       sendSlashCommand(`/effort ${e.id}`);
       sw.effort = e.id;
       saveSwitch(sw);
@@ -402,14 +417,8 @@ function openModelMenu() {
 }
 
 function wireSwitchers() {
-  $('#btn-mode').addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    cycleMode();
-  });
-  $('#btn-model').addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    openModelMenu();
-  });
+  onTap($('#btn-mode'), () => cycleMode());
+  onTap($('#btn-model'), () => openModelMenu());
   // tap afuera cierra el menú
   document.addEventListener('pointerdown', (e) => {
     if (!e.target.closest('#switch-menu, #btn-mode, #btn-model')) closeSwitchMenu();

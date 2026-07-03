@@ -62,11 +62,33 @@ const geo = await page.evaluate(() => ({
 }));
 ok('controles debajo de la terminal y arriba de las tabs', geo.term < geo.bar && geo.bar < geo.tabs);
 
-// teclas rápidas: Esc no rompe (envía por WS); la barra de Claude tiene "/"
+// teclas rápidas: Esc no rompe (envía por WS). Desde la tarea 12 la acción
+// dispara en pointerup (tap con slop), no en pointerdown: hay que mandar el par
 await page.$eval('.quickkeys[data-term="claude"] [data-k="esc"]', (b) => {
   b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
 });
 ok('tecla rápida Esc enviada sin errores', consoleErrors.length === 0);
+
+// 5-tap. tap vs scroll (tarea 12): apoyar el dedo en un botón y arrastrar para
+// scrollear la fila NO debe dispararlo; el tap (aun con micro-movimiento) sí.
+// Se espía claudeConn.sendKeys para que nada llegue a la sesión real.
+const sentKeys = await page.evaluate(() => {
+  window.__sentKeys = [];
+  const orig = claudeConn.sendKeys;
+  claudeConn.sendKeys = (d) => { window.__sentKeys.push(d); };
+  const b = document.querySelector('.quickkeys[data-term="claude"] [data-k="esc"]');
+  const r = b.getBoundingClientRect();
+  const fire = (type, x) => b.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: r.y + 10 }));
+  fire('pointerdown', r.x + 10);
+  fire('pointerup', r.x + 14);   // micro-movimiento < slop: cuenta como tap
+  fire('pointerdown', r.x + 10);
+  fire('pointerup', r.x + 60);   // drag (scroll de la fila): no dispara
+  claudeConn.sendKeys = orig;
+  return window.__sentKeys;
+});
+ok('tap con micro-movimiento dispara la tecla (1 sola vez)', sentKeys.length === 1 && sentKeys[0] === '\x1b');
+ok('drag sobre un quickkey NO dispara (scroll de la fila)', !sentKeys[1]);
 // orden de la barra de Claude: "nl" primero (acceso rápido, pedido del usuario),
 // "/" segundo. El botón nl (newline suave, ESC+CR) no se tapea: mandaría un
 // salto de línea al prompt de la sesión deck real.
@@ -102,7 +124,11 @@ await new Promise((r) => setTimeout(r, 300));
 ok('✕ descarta el preview sin enviar', await page.$eval('#img-chip', (el) => el.classList.contains('hidden')) && pasteReqs === 0);
 
 // 5c. switchers de modo y modelo/esfuerzo (pills arriba de la fila de teclas)
-const pd = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+// pd = tap completo: desde la tarea 12 las pills disparan en pointerup
+const pd = (el) => {
+  el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+};
 const swGeo = await page.evaluate(() => ({
   pills: document.querySelector('.switchrow').getBoundingClientRect().top,
   keys: document.querySelector('.quickkeys[data-term="claude"]').getBoundingClientRect().top,
