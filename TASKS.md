@@ -6,10 +6,6 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 
 ## Backlog
 
-### 8. Changes-tab badge (dot or count)
-
-- [ ] Show a small dot or number on the "Cambios" tab in the tab bar indicating whether the current session's repo has pending changes (and ideally how many files). Should update when the git state changes (e.g. piggyback on the existing `refreshGit()` polling/refresh path) and clear when the tree is clean.
-
 ### 9. File browser section (replaces the Shell tab)
 
 - [ ] New section that lists **all files of the session's working directory** (the root the deck session is running in), like an `ls` — similar to how files are shown in the Changes section but for the whole tree, not just modified files. If possible, render it as a **nested folder tree in the VS Code style** (collapsible folders, folders first, file-type icons or at least distinct styling; see `docs/`-worthy reference: user's screenshot of the VS Code explorer). Tapping a file should open/read it (read-only view is fine for v1).
@@ -28,6 +24,12 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)
+
+### 8. Changes-tab badge (dot or count) — DONE (2026-07-02)
+
+- [x] Amber count pill (`#tab-changes-badge`, `.tab-badge` in `style.css`) on the "Cambios" tab, top-right of the Δ icon. `refreshGit()` sets it via `setChangesBadge(data.files.length)` — hidden when 0 or on fetch error, `99+` cap. To keep it fresh outside the Cambios tab, the 8 s poll and the visibilitychange handler now call `refreshGit()` on **every** tab (before: only when Cambios was active; the summary endpoint is cheap and the hidden file-list re-render is harmless), plus one `refreshGit()` at init so the badge shows on load. Stale-while-in-diff is accepted: `refreshGit` still early-returns when `state.inDiff`.
+
+Verified with a scratch puppeteer script (not committed): badge visible with the right count from the Claude tab on load, count == number of `.file-row`s after switching to Cambios, badge inside the tab bounds, 0 JS console errors. ui-test gained 2 checks (→ 35): badge visible before entering Cambios, and badge == row count after (compared post-switch, NOT against the pre-switch value — the test overwrites tracked `shot-*.png`s mid-run so the count can move). Pending: user's visual check on the phone.
 
 ### 7. Dev server watch mode + pinned port — DONE (2026-07-02)
 

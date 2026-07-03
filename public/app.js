@@ -711,6 +711,18 @@ function sessionQuery() {
   return state.session ? `session=${encodeURIComponent(state.session)}` : '';
 }
 
+// badge sobre la tab Cambios: cantidad de archivos con cambios (0 u error → oculto)
+function setChangesBadge(count) {
+  const b = $('#tab-changes-badge');
+  if (!count) {
+    b.classList.add('hidden');
+    b.textContent = '';
+    return;
+  }
+  b.textContent = count > 99 ? '99+' : String(count);
+  b.classList.remove('hidden');
+}
+
 async function refreshGit() {
   if (state.inDiff) return; // no pisar la vista de diff
   let data;
@@ -721,8 +733,11 @@ async function refreshGit() {
     data = await res.json();
   } catch (e) {
     if (String(e.message) !== '401') $('#git-branch').textContent = '(sin datos git)';
+    setChangesBadge(0);
     return;
   }
+
+  setChangesBadge(data.files.length);
 
   $('#git-branch').textContent = `⎇ ${data.branch || '?'}`;
   const ab = [];
@@ -901,6 +916,7 @@ async function init() {
   wireTouchScroll('term-shell', () => shellConn);
   wireImagePaste();
   refreshSessions();
+  refreshGit(); // primer fetch del badge de Cambios sin esperar el intervalo
 
   // tabs
   document.querySelectorAll('.tab').forEach((t) => {
@@ -912,16 +928,17 @@ async function init() {
   $('#btn-new-session').addEventListener('click', createSession);
   $('#hint-claude .hint-close').addEventListener('click', hideHint);
 
-  // auto-refresh cada 8 s mientras la pestaña esté visible
+  // auto-refresh cada 8 s mientras la pestaña esté visible; refreshGit corre
+  // en cualquier tab para mantener al día el badge de Cambios
   setInterval(() => {
     if (document.visibilityState !== 'visible') return;
-    if (state.activeTab === 'changes') refreshGit();
+    refreshGit();
     if (state.activeTab === 'claude') refreshSessions();
   }, 8000);
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      if (state.activeTab === 'changes') refreshGit();
+      refreshGit();
       refreshSessions();
       // iOS suele matar los WS en background: reconectar sin esperar backoff
       claudeConn.resume();

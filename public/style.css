@@ -568,6 +568,7 @@ body {
    la tabbar se oculta para que la terminal gane esas filas */
 body.kb-open .tabbar { display: none; }
 .tab {
+  position: relative; /* ancla del .tab-badge */
   flex: 1;
   min-height: 56px;
   display: flex;
@@ -585,6 +586,22 @@ body.kb-open .tabbar { display: none; }
 }
 .tab .tab-icon { font-size: 16px; }
 .tab.active { color: var(--accent); }
+/* badge de archivos con cambios sobre la tab Cambios (lo actualiza refreshGit) */
+.tab-badge {
+  position: absolute;
+  top: 6px;
+  left: calc(50% + 8px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
 
 /* overlay 401 */
 #auth-error {

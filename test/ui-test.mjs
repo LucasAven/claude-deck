@@ -148,12 +148,25 @@ ok('body.kb-open oculta la tabbar (simulado)',
   kbSim.before > 0 && kbSim.hidden === 0 && kbSim.after === kbSim.before);
 
 // 6. pestaña Cambios: header + lista de archivos
+// 6-pre. badge de la tab Cambios: refreshGit corre desde cualquier tab (init +
+// polling de 8 s), así que el badge debe estar visible ANTES de entrar a
+// Cambios (asume árbol sucio, igual que "lista archivos modificados" de abajo)
+const badgePre = await page.$eval('#tab-changes-badge', (el) => ({
+  hidden: el.classList.contains('hidden'),
+  n: Number(el.textContent),
+}));
+ok('badge de Cambios visible desde la pestaña Claude', !badgePre.hidden && badgePre.n > 0);
 await page.click('.tab[data-tab="changes"]');
 await new Promise((r) => setTimeout(r, 1500));
 const branch = await page.$eval('#git-branch', (el) => el.textContent);
 ok('header muestra la rama', branch.includes('main'));
 const rows = await page.$$('#file-list .file-row');
 ok('lista archivos modificados', rows.length > 0);
+// badge y lista salen del mismo refreshGit (el de switchTab), tienen que coincidir;
+// no se compara contra badgePre: correr el test pisa los shot-*.png trackeados
+// y el conteo puede moverse entre el init y esta sección
+const badgeN = await page.$eval('#tab-changes-badge', (el) => Number(el.textContent));
+ok('badge coincide con la cantidad de archivos listados', badgeN === rows.length);
 // 6b. cada fila tiene su botón de stage/unstage (no se clickea: tocaría el repo real)
 const actBtns = await page.$$('#file-list .file-act');
 ok('cada fila tiene botón stage/unstage (+/−)', rows.length > 0 && actBtns.length === rows.length);

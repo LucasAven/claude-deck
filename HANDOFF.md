@@ -1,6 +1,6 @@
 # HANDOFF — claude-deck
 
-**Fecha:** 2026-07-02 (6ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + **rename de sesiones (tarea 6, verificada por ws-test y por el usuario desde el celu)**. + **dev script con watch y puerto pineado (tarea 7)**. **Backlog en `TASKS.md` con 4 tareas nuevas (8–11: badge de cambios en la tab, file browser que reemplaza a Shell, estado del model switcher por deck, bug de render corrupto)** — ese archivo es la fuente de verdad del backlog y de qué se hizo; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
+**Fecha:** 2026-07-02 (7ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + rename de sesiones (tarea 6) + dev script con watch y puerto pineado (tarea 7) + **badge de cambios en la tab Cambios (tarea 8, verificada headless; falta el vistazo del usuario en el celu)**. **Backlog en `TASKS.md`: quedan las tareas 9–11 (file browser que reemplaza a Shell, estado del model switcher por deck, bug de render corrupto)** — ese archivo es la fuente de verdad del backlog y de qué se hizo; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
 
 ## Qué es y dónde está todo
 
@@ -9,7 +9,7 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 - `server/index.ts` — todo el backend (Hono + ws + node-pty, un solo archivo)
 - `public/` — frontend vanilla: `index.html`, `app.js`, `style.css`, PWA (`manifest.json`, `sw.js` passthrough sin caché, `icon.svg`)
 - `test/ws-test.mjs` — E2E de WS/tmux/API (**31 checks**; sección 9b —stage/unstage— y 12b —rename— son de la 5ª/6ª sesión; acepta `DECK_PORT` para apuntar a otro puerto)
-- `test/ui-test.mjs` — smoke de UI en Chromium headless, viewport iPhone (**33 checks**; deja `test/shot-*.png`. Ver `TASKS.md` para el backlog de features y lo ya hecho.)
+- `test/ui-test.mjs` — smoke de UI en Chromium headless, viewport iPhone (**35 checks**; deja `test/shot-*.png`. Ver `TASKS.md` para el backlog de features y lo ya hecho.)
 - `test/shot-diff.mjs` — helper que screenshotea el diff (normal / h-scroll / v-scroll) para iterar UI sin celular
 - `.claude/settings.example.json` + `scripts/notify.sh` — hooks ntfy (bonus §12), **inactivos** hasta que el usuario los renombre a `settings.json`
 
@@ -63,7 +63,7 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 ```bash
 npm run dev                    # server en http://127.0.0.1:7433, con watch; el server lee DECK_PORT, ignora PORT (gotcha 12; banner: gotcha 6)
 node test/ws-test.mjs          # 31 checks (server arriba; ver gotchas 8, 9 y 13; DECK_PORT para otro puerto)
-node test/ui-test.mjs          # 33 checks + screenshots test/shot-*.png (correrlo lo prefiere el usuario)
+node test/ui-test.mjs          # 35 checks + screenshots test/shot-*.png (correrlo lo prefiere el usuario)
 node test/shot-diff.mjs        # screenshots del diff view
 ```
 
