@@ -3,7 +3,7 @@ import WebSocket from 'ws';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 
-const TOKEN = fs.readFileSync('/path/to/claude-deck/.env', 'utf8')
+const TOKEN = fs.readFileSync(new URL('../.env', import.meta.url), 'utf8')
   .match(/AUTH_TOKEN=(.+)/)[1].trim();
 const PORT = process.env.DECK_PORT || '7433';
 const BASE = `ws://127.0.0.1:${PORT}/ws/term`;

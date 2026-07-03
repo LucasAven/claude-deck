@@ -38,7 +38,7 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 
 - **Repo con historia** (6 commits al cierre de la 6ª sesión, árbol limpio). No commitear sin que lo pida. Los commits deben parecer del usuario: imperativo corto en minúsculas, **sin** Co-Authored-By.
 - `.env` funciona (`AUTH_TOKEN` real adentro — no imprimirlo ni commitearlo). No define `PORT`.
-- `tailscale serve --bg 7433` activo → `https://<maquina>.<tailnet>.ts.net`.
+- `tailscale serve --bg 7433` activo → `https://<maquina>.<tailnet>.ts.net` (la URL real sale de `tailscale serve status`; no commitearla — el repo es público).
 - El server corre como **LaunchAgent** (`com.claude-deck`, tarea 15) — **sin watch**: editar `server/index.ts` requiere `launchctl kickstart -k gui/$(id -u)/com.claude-deck` para que tome los cambios (los clientes reconectan solos). Log en `~/Library/Logs/claude-deck.log` (attaches/kills/renames con timestamp, tarea 16). Para desarrollar con watch: `scripts/deck stop` + `npm run dev`, y `scripts/deck start` al terminar.
 - `puppeteer-core` ya está instalado como devDependency (antes faltaba).
 - El celular del usuario suele tener la PWA abierta: **recrea `deck`/`deck-shell` al toque de matarlas** (reconexión WS). Para correr `ws-test` limpio, matar las sesiones y correr el test en el MISMO comando (ver gotcha 9).

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TOKEN = fs.readFileSync('/path/to/claude-deck/.env', 'utf8')
+const TOKEN = fs.readFileSync(new URL('../.env', import.meta.url), 'utf8')
   .match(/AUTH_TOKEN=(.+)/)[1].trim();
 
 const shell = path.join(

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const ROOT = '/path/to/claude-deck';
+const ROOT = new URL('..', import.meta.url).pathname;
 const TOKEN = fs.readFileSync(path.join(ROOT, '.env'), 'utf8').match(/AUTH_TOKEN=(.+)/)[1].trim();
 const OUT = process.argv[2] || path.join(ROOT, 'test');
 
