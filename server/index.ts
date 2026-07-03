@@ -96,6 +96,10 @@ async function tmuxKillSession(name: string): Promise<boolean> {
   }
 }
 
+async function tmuxRenameSession(oldName: string, newName: string): Promise<void> {
+  await execFileP('tmux', ['rename-session', '-t', `=${oldName}`, newName])
+}
+
 async function tmuxPaneDir(name: string): Promise<string> {
   const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{pane_current_path}'])
   return stdout.trim()
@@ -427,6 +431,39 @@ app.delete('/api/tmux/sessions/:name', async (c) => {
   if (await tmuxKillSession(`${name}-shell`)) killed.push(`${name}-shell`)
   if (!killed.length) throw new HttpError(404, `sesión tmux no encontrada: ${name}`)
   return c.json({ ok: true, killed })
+})
+
+// Renombra la sesión y su shell acompañante (la convención <name>-shell debe
+// sobrevivir al rename). Los attaches vivos NO se cortan: tmux nunca desconecta
+// clientes al renombrar, así que el pty sigue andando; el frontend solo tiene
+// que actualizar el nombre con el que habla la API.
+app.patch('/api/tmux/sessions/:name', async (c) => {
+  const name = c.req.param('name')
+  if (!SESSION_RE.test(name) || name.endsWith('-shell')) throw new HttpError(400, 'nombre de sesión inválido')
+  let body: { newName?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const newName = typeof body.newName === 'string' ? body.newName.trim() : ''
+  if (!SESSION_RE.test(newName)) {
+    throw new HttpError(400, 'nuevo nombre inválido (letras, números, "-" y "_", máx 32)')
+  }
+  if (newName.endsWith('-shell')) throw new HttpError(400, "el sufijo '-shell' está reservado")
+  if (!(await tmuxHasSession(name))) throw new HttpError(404, `sesión tmux no encontrada: ${name}`)
+  if (newName === name) return c.json({ ok: true, renamed: [] })
+  if ((await tmuxHasSession(newName)) || (await tmuxHasSession(`${newName}-shell`))) {
+    throw new HttpError(409, `ya existe una sesión llamada ${newName}`)
+  }
+  const renamed: string[] = []
+  await tmuxRenameSession(name, newName)
+  renamed.push(newName)
+  if (await tmuxHasSession(`${name}-shell`)) {
+    await tmuxRenameSession(`${name}-shell`, `${newName}-shell`)
+    renamed.push(`${newName}-shell`)
+  }
+  return c.json({ ok: true, renamed })
 })
 
 app.get('/api/git/summary', async (c) => {

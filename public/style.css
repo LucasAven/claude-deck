@@ -98,6 +98,11 @@ body {
   color: var(--accent);
   background: var(--panel-2);
 }
+/* el nombre del chip activo es tocable (renombrar): subrayado punteado como pista */
+.chip.active .chip-name {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
 .chip-add { min-width: 40px; font-size: 16px; }
 
 /* ---------- barra de teclas rápidas ---------- */

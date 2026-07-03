@@ -4,12 +4,6 @@ Feature requests from the user (2026-07-02). A new session should read `HANDOFF.
 
 Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `public/style.css`, `server/index.ts` (backend). Verify with `node test/ui-test.mjs` (+ update it if you add UI) and let the user confirm touch/keyboard behavior on the phone — headless Chromium can't simulate the iOS virtual keyboard.
 
-## 6. Rename deck sessions
-
-- [ ] In the session chips row, tapping the session **name** (as opposed to the ✕, which kills it) should let the user rename the session, to make it easier to distinguish multiple sessions.
-
-Context: chips render into `#session-chips` (`app.js:425`); the ✕ kill handler calls `DELETE /api/tmux/sessions/:name` (`app.js:461`) — the new name-tap handler must not conflict with it (the ✕ already uses `stopPropagation` patterns elsewhere, follow that). Needs a new server endpoint, e.g. `PATCH /api/tmux/sessions/:name` with `{ newName }`, that runs `tmux rename-session`. **Important:** every deck session has a paired `<name>-shell` session (see the DELETE handler in `server/index.ts`, which kills both) — rename both to keep the pairing convention, and validate the new name (no spaces/colons/dots; tmux rejects `.` and `:` in names, and the `=name:` target syntax from HANDOFF gotcha 3 depends on clean names). Also make sure open WS terminals survive or reconnect after the rename (the WS attach targets the session by name — likely need the frontend to re-attach with the new name). Simple UX: `prompt()` on tap, or an inline input in the chip.
-
 ## 7. Dev server has no watch mode → stale-server 404s (improve later)
 
 - [ ] `npm run dev` is plain `tsx server/index.ts` — **no watch/reload**. After editing `server/index.ts` the running server keeps serving the OLD code (static files in `public/` ARE fresh, they're read per request), so new endpoints 404 from the phone while the UI already shows the new buttons. This bit us on 2026-07-02 testing task 2.
@@ -20,6 +14,16 @@ Context: chips render into `#session-chips` (`app.js:425`); the ✕ kill handler
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)
+
+### 6. Rename deck sessions — DONE (2026-07-02)
+
+- [x] Tapping the active chip's **name** (dotted underline as affordance) opens a `prompt()` and renames the session via `PATCH /api/tmux/sessions/:name` with `{ newName }`; the paired `<name>-shell` is renamed too. ✕ still kills; inactive chips still just select.
+
+Implementation: `tmuxRenameSession()` + PATCH handler in `server/index.ts` (validates both names with `SESSION_RE`, rejects the reserved `-shell` suffix, 404 if missing, 409 if `newName` or `newName-shell` already exists, returns `{ renamed: [...] }`). Frontend: `renameSession()` in `app.js` — client-side validation mirrors the server, migrates the per-session switcher state in localStorage, updates `state.session` and refreshes chips/git. **No WS reconnect needed**: tmux does not disconnect attached clients on rename, so the live pty keeps flowing; only the name the API talks to changes.
+
+Verified: ws-test section 12b (+5 checks → 31: rename ok + shell pair, 409 duplicate, 400 invalid, 400 `-shell` suffix, 404 missing; uses its own `deck-rn`/`deck-rn-shell` pair and cleans up in a `finally`). ui-test asserts the active chip name has the rename affordance without clicking (+1 → 33; clicking would open a real `prompt()`). Confirmed by the user renaming from the phone ("rename works from the phone").
+
+Note: this task was implemented by a session that then **killed itself** verifying it — it ran the gotcha-9 "kill deck + run ws-test" pattern while itself running inside the `deck` tmux session (launched from the phone). See HANDOFF gotcha 13.
 
 ### 5. Newline (line break) input on mobile — DONE (2026-07-02)
 

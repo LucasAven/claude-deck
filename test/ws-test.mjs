@@ -154,6 +154,42 @@ const up404 = await fetch(`${HTTP}/api/paste-image?session=no-existe`, {
 });
 ok('paste-image sesión inexistente → 404', up404.status === 404);
 
+// 12b. PATCH /api/tmux/sessions/:name renombra la sesión y su -shell
+// (par propio deck-rn/deck-rn-shell para no tocar deck ni deck-2)
+execFileSync('tmux', ['new-session', '-d', '-s', 'deck-rn', '-c', '/tmp']);
+execFileSync('tmux', ['new-session', '-d', '-s', 'deck-rn-shell', '-c', '/tmp']);
+const patchName = (name, body) => fetch(`${HTTP}/api/tmux/sessions/${name}`, {
+  method: 'PATCH',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+try {
+  const rn = await patchName('deck-rn', { newName: 'deck-rn2' });
+  const rnJson = await rn.json();
+  let oldGone = false;
+  try { execFileSync('tmux', ['has-session', '-t', '=deck-rn'], { stdio: 'ignore' }); } catch { oldGone = true; }
+  let bothRenamed = true;
+  try {
+    execFileSync('tmux', ['has-session', '-t', '=deck-rn2'], { stdio: 'ignore' });
+    execFileSync('tmux', ['has-session', '-t', '=deck-rn2-shell'], { stdio: 'ignore' });
+  } catch { bothRenamed = false; }
+  ok('rename → 200 y renombra sesión + shell', rn.status === 200
+    && rnJson.renamed?.length === 2 && oldGone && bothRenamed);
+
+  const rnDup = await patchName('deck-rn2', { newName: 'deck' });
+  ok('rename a nombre existente → 409', rnDup.status === 409);
+  const rnBad = await patchName('deck-rn2', { newName: 'mal nombre' });
+  ok('rename a nombre inválido → 400', rnBad.status === 400);
+  const rnShell = await patchName('deck-rn2', { newName: 'algo-shell' });
+  ok("rename a *-shell → 400 (sufijo reservado)", rnShell.status === 400);
+  const rn404 = await patchName('no-existe-x', { newName: 'da-igual' });
+  ok('rename sesión inexistente → 404', rn404.status === 404);
+} finally {
+  for (const s of ['deck-rn', 'deck-rn-shell', 'deck-rn2', 'deck-rn2-shell']) {
+    try { execFileSync('tmux', ['kill-session', '-t', `=${s}`], { stdio: 'ignore' }); } catch {}
+  }
+}
+
 // 13. DELETE /api/tmux/sessions/:name mata la sesión
 const del = await fetch(`${HTTP}/api/tmux/sessions/deck-2`, { method: 'DELETE', headers: { 'x-deck-token': TOKEN } });
 ok('DELETE sesión existente → 200', del.status === 200);

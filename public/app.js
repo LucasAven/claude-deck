@@ -588,6 +588,14 @@ async function refreshSessions() {
     label.textContent = name;
     chip.appendChild(label);
     if (name === state.session) {
+      // tap en el nombre del chip activo → renombrar (el chip entero ya no
+      // hace nada al estar activo: selectSession retorna temprano)
+      label.className = 'chip-name';
+      label.title = 'Renombrar sesión';
+      label.addEventListener('click', (e) => {
+        e.stopPropagation();
+        renameSession(name);
+      });
       const x = document.createElement('span');
       x.className = 'chip-x';
       x.textContent = '✕';
@@ -634,6 +642,48 @@ async function killSession(name) {
     refreshGit();
   }
   refreshSessions();
+}
+
+const SESSION_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/; // igual que SESSION_RE del server
+
+async function renameSession(name) {
+  const input = window.prompt('Nuevo nombre para la sesión:', name);
+  if (input === null) return;
+  const newName = input.trim();
+  if (!newName || newName === name) return;
+  if (!SESSION_NAME_RE.test(newName) || newName.endsWith('-shell')) {
+    alert('Nombre inválido: letras, números, "-" y "_" (máx 32), sin terminar en -shell');
+    return;
+  }
+  try {
+    const res = await api(`/api/tmux/sessions/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ newName }),
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch (_) {}
+      alert(`No se pudo renombrar: ${msg}`);
+      return;
+    }
+  } catch (_) { return; }
+
+  // el attach tmux sobrevive al rename (tmux no desconecta clientes): no hace
+  // falta reconectar el WS, solo actualizar el nombre con el que habla la API
+  if (state.session === name) {
+    state.session = newName;
+    try {
+      // el estado de switchers se guarda por sesión: migrarlo al nuevo nombre
+      const sw = localStorage.getItem(`deck-switch:${name}`);
+      if (sw !== null) {
+        localStorage.setItem(`deck-switch:${newName}`, sw);
+        localStorage.removeItem(`deck-switch:${name}`);
+      }
+    } catch (_) {}
+  }
+  refreshSessions();
+  refreshGit();
 }
 
 function nextSessionName(existing) {

@@ -117,6 +117,7 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 | `WS /ws/term?target=claude\|shell&session=<s>` | Terminal (attach tmux). Mensajes JSON: `{"t":"in","d":…}`, `{"t":"resize","cols":N,"rows":N}` ⇄ `{"t":"out","d":…}` |
 | `GET /api/tmux/sessions` | Sesiones tmux activas (excluye `*-shell`) |
 | `DELETE /api/tmux/sessions/:name` | Mata la sesión tmux y su `*-shell` acompañante |
+| `PATCH /api/tmux/sessions/:name` | Renombra la sesión y su `*-shell` acompañante. Body JSON: `{ "newName": "<nombre>" }` (letras/números/`-`/`_`, máx 32, sufijo `-shell` reservado). 409 si el nombre ya existe |
 | `POST /api/paste-image?session=<s>` | Sube una imagen (PNG/JPEG, máx 15 MB): la pone en el clipboard de la Mac y manda `Ctrl+V` a la sesión — Claude Code la ingiere como `[Image #N]`. Fallback: escribe la ruta del archivo en el prompt |
 | `GET /api/git/summary?session=<s>` | Rama, upstream, ahead/behind, archivos |
 | `GET /api/git/diff?path=<rel>&staged=0\|1&session=<s>` | Diff unificado (`text/plain`, truncado a 500 KB) |

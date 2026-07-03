@@ -45,6 +45,12 @@ ok('la terminal muestra contenido de la sesión tmux', termText.trim().length > 
 const chips = await page.$$eval('#session-chips .chip', (els) => els.map((e) => e.querySelector('span').textContent));
 ok('chip de sesión "deck" presente y activo', chips.includes('deck'));
 ok('chip activo tiene botón ✕ (matar sesión)', (await page.$('#session-chips .chip.active .chip-x')) !== null);
+// el nombre del chip activo renombra al tocarlo — no se clickea (abriría un
+// prompt() que headless descarta y no queremos renombrar la sesión real)
+ok('nombre del chip activo tocable para renombrar', await page.$eval(
+  '#session-chips .chip.active .chip-name',
+  (el) => el.title === 'Renombrar sesión',
+).catch(() => false));
 ok('botón 📷 de enviar imagen presente', (await page.$('#btn-img')) !== null);
 ok('botón pegar del portapapeles presente', (await page.$('#btn-paste')) !== null);
 
