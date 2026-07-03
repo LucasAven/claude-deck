@@ -48,7 +48,7 @@ Desde el celular abrí `https://<maquina>.<tailnet>.ts.net/?token=<AUTH_TOKEN>`.
 1. En la PC: `tmux new -A -s deck` y adentro corrés `claude`.
 2. En VS Code: la terminal integrada corre `tmux attach -t deck`. Ves lo mismo.
 3. En el celular: pestaña **Claude** → la misma sesión, en vivo. La barra de teclas rápidas (`\n` `/` `esc` `↑` `↓` `tab` `ctrl+c`) te deja aprobar permisos y navegar los menús de Claude Code. `\n` inserta un salto de línea en el prompt **sin enviarlo** (manda ESC+CR, el alt+enter de Claude Code); shift+enter en un teclado Bluetooth hace lo mismo.
-4. Pestaña **Cambios**: rama, ahead/behind y archivos modificados; tap en un archivo para ver su diff. Se refresca solo cada 8 s.
+4. Pestaña **Cambios**: rama, ahead/behind y archivos modificados; tap en un archivo para ver su diff, `+`/`−` para stagearlo/sacarlo del stage. Se refresca solo cada 8 s, y la tab muestra un badge con la cantidad de archivos con cambios (visible desde cualquier pestaña).
 5. Pestaña **Shell**: terminal libre parada en `REPO_DIR` (también en tmux: sobrevive a desconexiones).
 
 Si la pestaña Claude muestra una sesión tmux recién creada (vacía), escribí `claude --continue` para retomar la última conversación del repo.
