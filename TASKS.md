@@ -4,6 +4,27 @@ Feature requests from the user (2026-07-02). A new session should read `HANDOFF.
 
 Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `public/style.css`, `server/index.ts` (backend). Verify with `node test/ui-test.mjs` (+ update it if you add UI) and let the user confirm touch/keyboard behavior on the phone — headless Chromium can't simulate the iOS virtual keyboard.
 
+## Backlog
+
+### 8. Changes-tab badge (dot or count)
+
+- [ ] Show a small dot or number on the "Cambios" tab in the tab bar indicating whether the current session's repo has pending changes (and ideally how many files). Should update when the git state changes (e.g. piggyback on the existing `refreshGit()` polling/refresh path) and clear when the tree is clean.
+
+### 9. File browser section (replaces the Shell tab)
+
+- [ ] New section that lists **all files of the session's working directory** (the root the deck session is running in), like an `ls` — similar to how files are shown in the Changes section but for the whole tree, not just modified files. If possible, render it as a **nested folder tree in the VS Code style** (collapsible folders, folders first, file-type icons or at least distinct styling; see `docs/`-worthy reference: user's screenshot of the VS Code explorer). Tapping a file should open/read it (read-only view is fine for v1).
+- [ ] This section **replaces the Shell tab** — the Claude tab already works as a shell, so the third tab slot goes to the file browser. Remove/retire the shell terminal UI accordingly (server-side `-shell` session handling can stay or be cleaned up, implementer's call — check what ws-test relies on before ripping it out).
+
+### 10. Per-deck model switcher state
+
+- [ ] Bug: the model/effort switcher label is global. Set a model in `deck1`, create `deck2`, change the model there → switching back to `deck1` still shows `deck2`'s model. The switcher label should be **tracked per deck session** and restored when switching chips.
+- [ ] User's suggestion: localStorage keyed by deck/session name (note: `renameSession()` already migrates some per-session switcher state in localStorage — extend that same mechanism). Feel free to propose something better if there is one, but keep it simple. Caveat to keep in mind (from task 3): `/model <alias>` saves as the **global default** for new sessions, so the per-deck label is UI-side tracking of what was last sent to each deck, not a real per-session model in Claude itself.
+
+### 11. Garbled terminal rendering (hard to reproduce)
+
+- [ ] Bug seen occasionally on the phone (screenshot from 2026-07-02 20:21): the Claude terminal renders corrupted — lines interleaved/overlapping (words mashed together like "toaupdate.Now verifyt heendpointcworksoend-to-end"), spinner/status lines duplicated, and a large block of repeated tmux status-bar lines (`[deck] 0:2.1.198*` many times) painted with the copy-mode/selection highlight in the middle of the scrollback. No known repro yet.
+- [ ] Likely suspects to investigate: resize/re-fit races (cols/rows mismatch between xterm and tmux after keyboard open/close or backgrounding), a stale/duplicate WS attach slipping past the `gen` guard (this exact symptom — doubled/flickering text — was a duplicate-attach bug fixed in session 2, see HANDOFF), or tmux copy-mode entered via the touch-scroll SGR sequences leaving the pane in a weird state. Worth adding cheap diagnostics (e.g. log attach gen + resize events) if it can't be reproduced directly.
+
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)

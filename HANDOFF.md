@@ -1,6 +1,6 @@
 # HANDOFF — claude-deck
 
-**Fecha:** 2026-07-02 (6ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + **rename de sesiones (tarea 6, verificada por ws-test y por el usuario desde el celu)**. + **dev script con watch y puerto pineado (tarea 7)**. **Backlog en `TASKS.md` vacío** — ese archivo es la fuente de verdad de qué se hizo; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
+**Fecha:** 2026-07-02 (6ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + **rename de sesiones (tarea 6, verificada por ws-test y por el usuario desde el celu)**. + **dev script con watch y puerto pineado (tarea 7)**. **Backlog en `TASKS.md` con 4 tareas nuevas (8–11: badge de cambios en la tab, file browser que reemplaza a Shell, estado del model switcher por deck, bug de render corrupto)** — ese archivo es la fuente de verdad del backlog y de qué se hizo; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
 
 ## Qué es y dónde está todo
 
