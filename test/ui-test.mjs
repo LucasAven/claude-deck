@@ -51,8 +51,8 @@ ok('nombre del chip activo tocable para renombrar', await page.$eval(
   '#session-chips .chip.active .chip-name',
   (el) => el.title === 'Renombrar sesión',
 ).catch(() => false));
-ok('botón 📷 de enviar imagen presente', (await page.$('#btn-img')) !== null);
-ok('botón pegar del portapapeles presente', (await page.$('#btn-paste')) !== null);
+ok('botón + (adjuntar) presente', (await page.$('#btn-attach')) !== null);
+ok('botones viejos de cámara/pegar retirados', (await page.$('#btn-img')) === null && (await page.$('#btn-paste')) === null);
 
 // 5. barra de control abajo (zona del pulgar), entre la terminal y la tab bar
 const geo = await page.evaluate(() => ({
@@ -122,6 +122,53 @@ await page.screenshot({ path: new URL('./shot-img-pending.png', import.meta.url)
 await page.click('#img-chip-close');
 await new Promise((r) => setTimeout(r, 300));
 ok('✕ descarta el preview sin enviar', await page.$eval('#img-chip', (el) => el.classList.contains('hidden')) && pasteReqs === 0);
+
+// 5b2. botón + (tarea 13): chooser cámara/pegar en el popover compartido, y
+// pegar texto del portapapeles → term.paste (bracketed paste: no submitea).
+// Los taps disparan en pointerup (tarea 12): hay que mandar el par.
+const tapSel = (sel) => page.$eval(sel, (b) => {
+  b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+});
+await tapSel('#btn-attach');
+const attachMenu = await page.evaluate(() => {
+  const menu = document.querySelector('#switch-menu');
+  return {
+    open: !menu.classList.contains('hidden') && menu.dataset.kind === 'attach',
+    labels: [...menu.querySelectorAll('.mi span')].map((s) => s.textContent),
+    icons: menu.querySelectorAll('.mi svg').length,
+  };
+});
+ok('tap en + abre el chooser de adjuntar', attachMenu.open);
+ok('chooser con Cámara y Pegar (con íconos)', attachMenu.labels.length === 2
+  && /Cámara/.test(attachMenu.labels[0]) && /Pegar/.test(attachMenu.labels[1]) && attachMenu.icons === 2);
+await page.evaluate(() => document.querySelector('#term-claude')
+  .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+ok('tap afuera cierra el chooser', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
+
+// texto en el portapapeles → "Pegar" lo mete en el prompt vía term.paste
+// (clipboard.read mockeado y term.paste espiado: nada llega a la sesión real)
+const pastedTexts = await page.evaluate(async () => {
+  const orig = claudeConn.term.paste.bind(claudeConn.term);
+  const calls = [];
+  claudeConn.term.paste = (t) => calls.push(t);
+  navigator.clipboard.read = async () => [{
+    types: ['text/plain'],
+    getType: async () => new Blob(['hola texto pegado']),
+  }];
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
+  tap(document.querySelector('#btn-attach'));
+  tap([...document.querySelectorAll('#switch-menu .mi')].find((m) => m.textContent.includes('Pegar')));
+  await new Promise((r) => setTimeout(r, 300));
+  claudeConn.term.paste = orig;
+  return calls;
+});
+ok('pegar texto llama term.paste con el texto del portapapeles',
+  pastedTexts.length === 1 && pastedTexts[0] === 'hola texto pegado');
+ok('el chooser se cierra al elegir una opción', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
 
 // 5c. switchers de modo y modelo/esfuerzo (pills arriba de la fila de teclas)
 // pd = tap completo: desde la tarea 12 las pills disparan en pointerup

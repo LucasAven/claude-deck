@@ -377,11 +377,14 @@ function menuHeader(text) {
 
 function openModelMenu() {
   const menu = $('#switch-menu');
-  if (!menu.classList.contains('hidden')) {
+  // si ya está abierto CON este contenido, el tap lo cierra (toggle); si
+  // muestra otro menú (adjuntar), se re-renderiza con este
+  if (!menu.classList.contains('hidden') && menu.dataset.kind === 'model') {
     closeSwitchMenu();
     return;
   }
   menu.innerHTML = '';
+  menu.dataset.kind = 'model';
   const sw = loadSwitch();
 
   menu.appendChild(menuHeader('Modelo'));
@@ -421,7 +424,7 @@ function wireSwitchers() {
   onTap($('#btn-model'), () => openModelMenu());
   // tap afuera cierra el menú
   document.addEventListener('pointerdown', (e) => {
-    if (!e.target.closest('#switch-menu, #btn-mode, #btn-model')) closeSwitchMenu();
+    if (!e.target.closest('#switch-menu, #btn-mode, #btn-model, #btn-attach')) closeSwitchMenu();
   });
   renderSwitchPills();
 }
@@ -524,8 +527,17 @@ async function sendPendingImage() {
   }
 }
 
+// Texto del portapapeles → prompt de Claude. term.paste() normaliza los \n a
+// \r y respeta el bracketed paste que Claude Code activa (y tmux propaga), así
+// un texto multilínea entra como pegado y NO submitea el prompt.
+function pasteTextToPrompt(text) {
+  if (!claudeConn) return;
+  claudeConn.term.paste(text);
+}
+
 // Clipboard API asíncrona: requiere HTTPS (tailscale ✓) y un tap real del
 // usuario; iOS muestra el globito de permiso "Pegar" la primera vez.
+// Prioridad imagen > texto (una captura copiada puede traer ambos types).
 async function pasteFromClipboard() {
   if (!navigator.clipboard || !navigator.clipboard.read) {
     alert('Este navegador no permite leer el portapapeles');
@@ -544,17 +556,65 @@ async function pasteFromClipboard() {
       return;
     }
   }
-  alert('No hay ninguna imagen en el portapapeles');
+  for (const item of items) {
+    if (item.types.includes('text/plain')) {
+      const text = await (await item.getType('text/plain')).text();
+      if (text) {
+        pasteTextToPrompt(text);
+        return;
+      }
+    }
+  }
+  alert('No hay imagen ni texto en el portapapeles');
+}
+
+// --- botón único + : chooser cámara / pegar (popover, mismo patrón que el
+// menú de modelo — un modal taparía la terminal para elegir entre 2 opciones) ---
+const ATTACH_OPTS = [
+  {
+    icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 7l1.6-2.4h3.8L15.5 7"/><circle cx="12" cy="13.2" r="3.4"/></svg>',
+    label: 'Cámara o galería',
+    pick: () => $('#img-input').click(),
+  },
+  {
+    icon: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4.5" width="14" height="17" rx="2.5"/><path d="M9 4.5a3 3 0 0 1 6 0"/><path d="M9.3 13.5l2 2 3.4-3.8"/></svg>',
+    label: 'Pegar del portapapeles',
+    pick: () => pasteFromClipboard(),
+  },
+];
+
+function openAttachMenu() {
+  const menu = $('#switch-menu');
+  if (!menu.classList.contains('hidden') && menu.dataset.kind === 'attach') {
+    closeSwitchMenu();
+    return;
+  }
+  menu.innerHTML = '';
+  menu.dataset.kind = 'attach';
+  menu.appendChild(menuHeader('Adjuntar'));
+  for (const opt of ATTACH_OPTS) {
+    const btn = document.createElement('button');
+    btn.className = 'mi';
+    btn.innerHTML = opt.icon; // SVG estático de ATTACH_OPTS, no hay input del usuario
+    const span = document.createElement('span');
+    span.textContent = opt.label;
+    btn.appendChild(span);
+    onTap(btn, () => {
+      closeSwitchMenu();
+      opt.pick(); // corre dentro del pointerup: sigue habiendo user activation
+    });
+    menu.appendChild(btn);
+  }
+  menu.classList.remove('hidden');
 }
 
 function wireImagePaste() {
   const input = $('#img-input');
-  $('#btn-img').addEventListener('click', () => input.click());
+  onTap($('#btn-attach'), () => openAttachMenu());
   input.addEventListener('change', () => {
     if (input.files && input.files[0]) attachImage(input.files[0], 'Imagen adjunta');
     input.value = ''; // permitir re-elegir el mismo archivo
   });
-  $('#btn-paste').addEventListener('click', pasteFromClipboard);
   $('#img-chip').addEventListener('click', sendPendingImage);
   $('#img-chip-close').addEventListener('click', (e) => {
     e.stopPropagation(); // que el ✕ no cuente como tap de "enviar"
@@ -568,6 +628,15 @@ function wireImagePaste() {
     if (img) {
       e.preventDefault();
       attachImage(img.getAsFile(), 'Imagen del portapapeles');
+      return;
+    }
+    // texto: solo si el foco NO está en la terminal — ahí xterm ya pega solo
+    // (interceptarlo duplicaría el pegado)
+    if (e.target.closest && e.target.closest('.term-wrap')) return;
+    const text = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (text) {
+      e.preventDefault();
+      pasteTextToPrompt(text);
     }
   });
 }

@@ -12,6 +12,15 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 
 (move completed items here, with a one-line note on how they were verified)
 
+### 13. Unified attach button (+) replacing camera + paste, and text paste support — DONE (2026-07-03)
+
+Requested 2026-07-03. Two related changes to the Claude controlbar attach flow:
+
+- [x] **Single `+` button** (`#btn-attach`, plus-glyph SVG matching the reference image) replaces `#btn-img`/`#btn-paste` in the quickkeys row. Tapping it opens a **popover chooser** (chosen over a modal: it reuses the `#switch-menu` element/pattern the model switcher already has, and a modal would cover the terminal to pick between 2 options) with two `.mi` items carrying the old buttons' icons: **Cámara o galería** (→ `#img-input` click) and **Pegar del portapapeles** (→ `pasteFromClipboard()`). The menu element now tracks `dataset.kind` (`attach`/`model`) so each opener toggles its own menu and replaces the other's; `#btn-attach` was added to the outside-tap-close exclusion selector. Button and menu items use `onTap` (task 12), so scrolling the row over the `+` doesn't fire it.
+- [x] **Text paste**: `pasteFromClipboard()` falls back to `text/plain` when the clipboard has no image (image wins if both types are present, e.g. some copied screenshots) → `pasteTextToPrompt()` → `claudeConn.term.paste(text)`. xterm's `paste()` normalizes `\n`→`\r` and wraps in **bracketed paste** when the inner app enabled it (Claude Code does; tmux propagates), so multi-line text lands in the prompt WITHOUT submitting. The Cmd+V document handler also pastes text now, but only when focus is outside the terminal (xterm already handles the focused case natively — intercepting would double-paste). Images keep the two-step chip preview flow untouched.
+
+Verified: scratch puppeteer script (not committed) **19/19 PASS** — button present/old ones gone, chooser opens with both options+icons, toggle + outside-tap close, model-menu interplay (each opener replaces the other's content), Cámara fires the file input, image-attach regression (chip pending, 0 uploads), mocked clipboard text → `term.paste` called with the text, image+text clipboard prioritizes the image, Cmd+V text with focus outside the term, and a REAL end-to-end paste against a scratch tmux session `deck13`: `term.paste('echo A\necho B')` through the live WS landed both lines at the zsh prompt **unexecuted** (bracketed paste passthrough confirmed via `capture-pane`), 0 page errors. ui-test updated (→ **52 checks**, NOT run — user runs it): the 2 old button checks became `#btn-attach` present + old buttons gone, and new section 5b2 (+5) covers chooser open/items/outside-close and the mocked text-paste path. Pending: user's look on the phone (incl. the iOS "Pegar" permission bubble on the new menu item).
+
 ### 12. Scrolling the quickkeys row no longer triggers the button under the thumb — DONE (2026-07-03)
 
 User report: placing the thumb on a shortcut button to scroll the horizontal quickkeys row fired that button even though no tap was intended.
