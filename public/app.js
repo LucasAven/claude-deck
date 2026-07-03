@@ -628,6 +628,9 @@ async function killSession(name) {
     await api(`/api/tmux/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' });
   } catch (_) { return; }
 
+  // el estado de switchers es por sesión: muere con ella
+  try { localStorage.removeItem(`deck-switch:${name}`); } catch (_) {}
+
   if (state.session === name) {
     // caer a otra sesión viva; si no queda ninguna, la default (se recrea vacía)
     let names = [];
@@ -638,6 +641,8 @@ async function killSession(name) {
       ? state.defaultSession
       : (names[0] || state.defaultSession);
     hideHint();
+    closeSwitchMenu();
+    renderSwitchPills(); // sin esto la pill queda con el modelo de la sesión muerta
     claudeConn.reconnect();
     refreshGit();
   }

@@ -11,11 +11,6 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 - [ ] New section that lists **all files of the session's working directory** (the root the deck session is running in), like an `ls` — similar to how files are shown in the Changes section but for the whole tree, not just modified files. If possible, render it as a **nested folder tree in the VS Code style** (collapsible folders, folders first, file-type icons or at least distinct styling; see `docs/`-worthy reference: user's screenshot of the VS Code explorer). Tapping a file should open/read it (read-only view is fine for v1).
 - [ ] This section **replaces the Shell tab** — the Claude tab already works as a shell, so the third tab slot goes to the file browser. Remove/retire the shell terminal UI accordingly (server-side `-shell` session handling can stay or be cleaned up, implementer's call — check what ws-test relies on before ripping it out).
 
-### 10. Per-deck model switcher state
-
-- [ ] Bug: the model/effort switcher label is global. Set a model in `deck1`, create `deck2`, change the model there → switching back to `deck1` still shows `deck2`'s model. The switcher label should be **tracked per deck session** and restored when switching chips.
-- [ ] User's suggestion: localStorage keyed by deck/session name (note: `renameSession()` already migrates some per-session switcher state in localStorage — extend that same mechanism). Feel free to propose something better if there is one, but keep it simple. Caveat to keep in mind (from task 3): `/model <alias>` saves as the **global default** for new sessions, so the per-deck label is UI-side tracking of what was last sent to each deck, not a real per-session model in Claude itself.
-
 ### 11. Garbled terminal rendering (hard to reproduce)
 
 - [ ] Bug seen occasionally on the phone (screenshot from 2026-07-02 20:21): the Claude terminal renders corrupted — lines interleaved/overlapping (words mashed together like "toaupdate.Now verifyt heendpointcworksoend-to-end"), spinner/status lines duplicated, and a large block of repeated tmux status-bar lines (`[deck] 0:2.1.198*` many times) painted with the copy-mode/selection highlight in the middle of the scrollback. No known repro yet.
@@ -24,6 +19,13 @@ Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)
+
+### 10. Per-deck model switcher state — DONE (2026-07-02)
+
+- [x] The per-session tracking **already existed and works** (`deck-switch:${state.session}` in localStorage since task 3; `selectSession()` re-renders the pills) — verified with a scratch puppeteer repro switching between two scratch tmux sessions: labels restore correctly per chip. The reproducible leak was **`killSession()`**: killing the ACTIVE session falls back to another session by mutating `state.session` directly, without `renderSwitchPills()` → the pill keeps showing the dead session's model (repro: pick Haiku in `swtest-b`, tap ✕ → falls back to `deck`, label still "Haiku 4.5"). That matches the reported "create deck2, change model, back in deck1 it shows deck2's model" if the way back was the ✕.
+- [x] Fix in `killSession()` (`app.js`): after the fallback, `closeSwitchMenu()` + `renderSwitchPills()`; also `localStorage.removeItem('deck-switch:<name>')` on every kill so dead sessions don't leave orphan keys.
+
+Verified with two scratch puppeteer scripts (not committed) against scratch tmux sessions `swtest-a/b` running plain bash — picking models there is harmless (`/model` lands in a bash prompt, and no real Claude default gets changed). Chip-switch restore: PASS before and after the fix. Kill-fallback: BUG before (label stuck on dead session's model), fixed after (label shows the fallback session's state). No ui-test change: the flow needs killing sessions and picking real models, neither is safe against the live deck. Reminder from task 3 stands: the label tracks what was last SENT per deck; `/model` itself saves a global default in Claude.
 
 ### 8. Changes-tab badge (dot or count) — DONE (2026-07-02)
 
