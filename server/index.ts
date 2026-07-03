@@ -33,7 +33,7 @@ try {
 const REPO_DIR = process.env.REPO_DIR || ''
 const AUTH_TOKEN = process.env.AUTH_TOKEN || ''
 const TMUX_SESSION = process.env.TMUX_SESSION || 'deck'
-const PORT = Number(process.env.PORT || 7433)
+const PORT = Number(process.env.DECK_PORT || 7433)
 const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || (REPO_DIR ? path.dirname(REPO_DIR) : '')
 
 function die(msg: string): never {

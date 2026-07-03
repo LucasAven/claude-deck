@@ -1,6 +1,6 @@
 # HANDOFF — claude-deck
 
-**Fecha:** 2026-07-02 (6ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + **rename de sesiones (tarea 6, verificada por ws-test y por el usuario desde el celu)**. **Backlog activo en `TASKS.md`** (queda tarea 7) — ese archivo es la fuente de verdad de qué se hizo y qué falta; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
+**Fecha:** 2026-07-02 (6ª sesión) · **Estado:** v1 + fixes de UI + envío de imágenes en dos pasos + rediseño de controles + switchers de modo/modelo + stage/unstage desde Cambios + botón `\n` y shift+enter + **rename de sesiones (tarea 6, verificada por ws-test y por el usuario desde el celu)**. + **dev script con watch y puerto pineado (tarea 7)**. **Backlog en `TASKS.md` vacío** — ese archivo es la fuente de verdad de qué se hizo; este archivo cubre arquitectura y gotchas. **⚠️ Leer gotcha 13 ANTES de correr ws-test** — varias sesiones lanzadas desde el celu se suicidaron por saltearla.
 
 ## Qué es y dónde está todo
 
@@ -55,13 +55,13 @@ Panel remoto móvil (PWA) para controlar sesiones de Claude Code corriendo en tm
 9. **Carrera con la PWA del celu**: los checks `created=true` de ws-test fallan si el celular recrea las sesiones antes de que corra el test. Patrón que funciona: script que hace `tmux kill-session =deck` + `=deck-shell` y `exec node test/ws-test.mjs` en el mismo proceso.
 10. **diff2html**: la tabla necesita `border-collapse: separate` (sticky no funciona con collapse) y el wrapper `position: relative` (si no, los números absolute/sticky se desalinean del scroll vertical — se probó y falló con `left: 0`).
 11. **tmux `mouse on`** queda seteado en toda sesión que la app toque (incluye sesiones del usuario si las selecciona en la UI): en la terminal de la Mac, seleccionar texto pasa a necesitar Shift/Option.
-12. **Server viejo = 404 fantasma** (mordió en la 5ª sesión): `npm run dev` es `tsx` SIN watch — tras editar `server/index.ts`, el proceso vivo sigue sirviendo el código viejo (los estáticos de `public/` sí salen frescos) → la UI muestra features nuevas pero sus endpoints dan 404. Además el perfil de shell del usuario exporta **`PORT=7434`** (lo hereda cualquier terminal, incluida la de Claude), así que un `npm run dev` descuidado bindea 7434 mientras tailscale apunta a 7433. Receta y fix propuesto: TASKS.md tarea 7. Relanzar siempre con `PORT=7433 npm run dev`.
+12. **Server viejo = 404 fantasma** (mordió en la 5ª y 6ª sesión) — **ARREGLADO en la tarea 7** para servers lanzados con el script nuevo: `npm run dev` ahora es `tsx watch` — editar `server/index.ts` reinicia el server solo (verificado: 0 ptys/clientes tmux leakeados; la PWA reconecta sola). Y el server lee **`DECK_PORT`** (`.env` o entorno; default 7433) en vez de `PORT`, así el `export PORT=7434` del perfil de shell del usuario ya no puede secuestrar el puerto (`PORT` se ignora del todo; mismo nombre de variable que usa ws-test para el cliente). El síntoma viejo solo puede volver si el proceso vivo es anterior al script nuevo: diagnóstico rápido, `ps -p <pid> -o lstart` vs mtime de `server/index.ts`.
 13. **⚠️ SUICIDIO POR tmux kill (mató VARIAS sesiones el 2026-07-02)**: si esta sesión de Claude fue lanzada **desde el celular vía deck**, corre ADENTRO de la sesión tmux `deck` — el patrón de la gotcha 9 (`tmux kill-session =deck` antes de ws-test) **mata a la propia sesión de Claude** a mitad de tarea. Así "crashearon" repetidamente las sesiones que trabajaban la tarea 6 (el transcript muere 1 segundo antes de que la PWA recree `deck`). Antes de matar `deck`: chequear `echo $TMUX` — si NO está vacío, estás adentro: no matar; correr `ws-test` igual aceptando que el check `created=true` de la primera conexión falle (ruido conocido; el resto de la suite no depende de eso — la sección 12b de rename usa su propio par `deck-rn`), o pedirle al usuario que corra el test desde la Mac.
 
 ## Cómo correr y verificar
 
 ```bash
-PORT=7433 npm run dev          # server en http://127.0.0.1:7433 (PORT explícito: ver gotcha 12; banner: gotcha 6)
+npm run dev                    # server en http://127.0.0.1:7433, con watch; el server lee DECK_PORT, ignora PORT (gotcha 12; banner: gotcha 6)
 node test/ws-test.mjs          # 31 checks (server arriba; ver gotchas 8, 9 y 13; DECK_PORT para otro puerto)
 node test/ui-test.mjs          # 33 checks + screenshots test/shot-*.png (correrlo lo prefiere el usuario)
 node test/shot-diff.mjs        # screenshots del diff view

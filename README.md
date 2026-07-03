@@ -33,7 +33,7 @@ cp .env.example .env
 npm run dev
 ```
 
-La consola imprime la URL local, el comando de Tailscale y la URL con `?token=` lista para abrir.
+La consola imprime la URL local, el comando de Tailscale y la URL con `?token=` lista para abrir. `dev` corre con **watch**: editar `server/index.ts` reinicia el server solo (la PWA reconecta). El puerto se configura con `DECK_PORT` (en `.env` o como variable de entorno) — el server ignora `PORT` a propósito, porque los perfiles de shell suelen exportarlo.
 
 Exponer al tailnet (HTTPS automático, visible solo para tus dispositivos):
 
@@ -74,7 +74,7 @@ Cada `claude` corre en su worktree, con su propio árbol de archivos y su propia
 | `REPO_DIR`        | sí          | —                        | Ruta absoluta del repo a monitorear                 |
 | `AUTH_TOKEN`      | sí          | —                        | String aleatorio largo (≥32 chars)                  |
 | `TMUX_SESSION`    | no          | `deck`                   | Nombre de la sesión tmux de Claude                  |
-| `PORT`            | no          | `7433`                   | Puerto local                                        |
+| `DECK_PORT`       | no          | `7433`                   | Puerto local  |
 | `WORKSPACES_ROOT` | no          | padre de `REPO_DIR`      | Raíz permitida para repos de otras sesiones tmux    |
 | `NTFY_TOPIC`      | no          | —                        | Topic secreto de ntfy.sh para push (ver abajo)      |
 

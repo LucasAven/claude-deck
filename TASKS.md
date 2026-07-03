@@ -4,16 +4,15 @@ Feature requests from the user (2026-07-02). A new session should read `HANDOFF.
 
 Key files: `public/index.html` (markup), `public/app.js` (all frontend logic), `public/style.css`, `server/index.ts` (backend). Verify with `node test/ui-test.mjs` (+ update it if you add UI) and let the user confirm touch/keyboard behavior on the phone — headless Chromium can't simulate the iOS virtual keyboard.
 
-## 7. Dev server has no watch mode → stale-server 404s (improve later)
-
-- [ ] `npm run dev` is plain `tsx server/index.ts` — **no watch/reload**. After editing `server/index.ts` the running server keeps serving the OLD code (static files in `public/` ARE fresh, they're read per request), so new endpoints 404 from the phone while the UI already shows the new buttons. This bit us on 2026-07-02 testing task 2.
-- Second trap from the same incident: the user's shell profile exports **`PORT=7434`** (inherited by any terminal, including Claude's), so a casual `npm run dev` binds 7434 while `tailscale serve` points at 7433 → phone hits a stale/absent server.
-- How we fixed it that day: kill whatever holds the ports (`lsof -tnP -iTCP:7433 -sTCP:LISTEN`), relaunch with `PORT=7433 npm run dev`, re-run `tailscale serve --bg 7433`, verify with `curl -s -o /dev/null -w "%{http_code}" https://<maquina>.<tailnet>.ts.net/api/config` → `401` = alive and reachable.
-- Proper fix ideas: change dev script to `tsx watch server/index.ts` (check node-pty/ws survive reloads without leaking ptys), and/or pin the port in the script (`PORT=7433 tsx …`) or in `.env` so the profile export can't hijack it. Quick diagnosis: compare the process start time (`ps -p <pid> -o lstart`) against the mtime of `server/index.ts` — if the file is newer, the server is stale.
-
 ## Done
 
 (move completed items here, with a one-line note on how they were verified)
+
+### 7. Dev server watch mode + pinned port — DONE (2026-07-02)
+
+- [x] `dev` script is now `tsx watch server/index.ts` (`start` same without watch): editing `server/index.ts` hot-restarts the server (no more stale-server 404s, HANDOFF gotcha 12). And the server reads **`DECK_PORT`** (from `.env` or the environment, default 7433) instead of `PORT`, so the shell profile's `PORT=7434` export can't hijack it — `PORT` is ignored entirely. Same variable name ws-test already uses for its client. (First iteration pinned `PORT` inside the npm script; renaming the server-side variable made that indirection unnecessary — user's call.)
+
+Verified with a scratch script (not committed): server started with `PORT=7434` exported → bound 7433 regardless (and `DECK_PORT=7436` → 7436); then WS attach → `touch server/index.ts` → old WS closes, server back up, **0 leaked tmux clients** (`tmux list-clients` empty — the pty's tmux attach exits when the master fd closes), re-attach to the same tmux session works with `created=false`. The phone PWA reconnects on its own after each reload (same retry path as backgrounding).
 
 ### 6. Rename deck sessions — DONE (2026-07-02)
 
