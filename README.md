@@ -45,7 +45,7 @@ Desde el celular abrí `https://<maquina>.<tailnet>.ts.net/?token=<AUTH_TOKEN>`.
 
 ## Flujo de trabajo
 
-1. En la PC: `tmux new -A -s deck` y adentro corrés `claude`.
+1. En la PC: `tmux new -A -s deck` y adentro corrés `claude` — o en un solo paso, **`scripts/deck claude [flags]`** (o `deck cc` / `deck ccw` si usás esos alias): crea/attachea una sesión tmux nombrada según el directorio actual, corre claude adentro y el celu la ve al instante como chip. Los flags van a claude (`deck claude --continue`); si la sesión del directorio ya existe attachea sin relanzar nada (salvo que esté en el shell: ahí relanza).
 2. En VS Code: la terminal integrada corre `tmux attach -t deck`. Ves lo mismo.
 3. En el celular: pestaña **Claude** → la misma sesión, en vivo. La barra de teclas rápidas (`\n` `/` `esc` `↑` `↓` `tab` `ctrl+c`) te deja aprobar permisos y navegar los menús de Claude Code. `\n` inserta un salto de línea en el prompt **sin enviarlo** (manda ESC+CR, el alt+enter de Claude Code); shift+enter en un teclado Bluetooth hace lo mismo.
 4. Pestaña **Cambios**: rama, ahead/behind y archivos modificados; tap en un archivo para ver su diff, `+`/`−` para stagearlo/sacarlo del stage. Se refresca solo cada 8 s, y la tab muestra un badge con la cantidad de archivos con cambios (visible desde cualquier pestaña).
@@ -78,7 +78,7 @@ scripts/deck install
 # tip: alias deck='<repo>/scripts/deck' en ~/.zshrc
 ```
 
-Instala el server como **LaunchAgent** (`~/Library/LaunchAgents/com.claude-deck.plist`): arranca al iniciar sesión, se relevanta solo si se cae, loguea en `~/Library/Logs/claude-deck.log`. Ya no hay que "prender" nada. También agrega una regla sudoers acotada (`/etc/sudoers.d/claude-deck`) para poder alternar `pmset disablesleep` sin password — es lo único que requiere root y solo cubre esos dos comandos exactos.
+Instala el server como **LaunchAgent** (`~/Library/LaunchAgents/com.claude-deck.plist`): arranca al iniciar sesión, se relevanta solo si se cae, loguea en `~/Library/Logs/claude-deck.log`. Ya no hay que "prender" nada. También agrega una regla sudoers acotada (`/etc/sudoers.d/claude-deck`) para poder alternar `pmset disablesleep` sin password — es lo único que requiere root y solo cubre esos dos comandos exactos —, configura `tailscale serve` si falta y termina imprimiendo la URL del panel con token (**`deck url`** la muestra cuando quieras, con un QR escaneable si instalaste `qrencode` — así el celular se configura escaneando en vez de tipear la URL).
 
 **Cada vez que te vas** (esto sí es el "un comando"):
 

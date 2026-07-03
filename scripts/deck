@@ -37,6 +37,52 @@ serve_url() {
   tailscale serve status 2>/dev/null | awk 'NR==1 && $1 ~ /^https/ { print $1 }'
 }
 
+# configura `tailscale serve` si falta (es persistente: una sola vez). Devuelve
+# 1 con warn si tailscale no está instalado/conectado — el panel queda solo local
+ensure_serve() {
+  if ! command -v tailscale >/dev/null 2>&1; then
+    warn "tailscale no está instalado (https://tailscale.com/download) — el panel queda solo local"
+    return 1
+  fi
+  if ! tailscale status --json 2>/dev/null | grep -q '"BackendState": "Running"'; then
+    warn "tailscale no está conectado — abrí la app de Tailscale (o corré: tailscale up) y repetí"
+    return 1
+  fi
+  if [ -z "$(serve_url)" ]; then
+    if tailscale serve --bg "$PORT" >/dev/null 2>&1; then
+      info "✓ tailscale serve configurado (queda persistente): puerto $PORT expuesto solo a tu tailnet"
+    else
+      warn "no pude configurar tailscale serve — corré a mano: tailscale serve --bg $PORT"
+      return 1
+    fi
+  fi
+}
+
+token_from_env() { grep -m1 '^AUTH_TOKEN=' "$REPO/.env" 2>/dev/null | cut -d= -f2; }
+
+cmd_url() {
+  local url token full
+  url="$(serve_url)"
+  if [ -z "$url" ]; then
+    ensure_serve || die "sin tailscale serve no hay URL para el teléfono"
+    url="$(serve_url)"
+    [ -n "$url" ] || die "tailscale serve no reporta URL — probá: tailscale serve status"
+  fi
+  token="$(token_from_env)"
+  [ -n "$token" ] || die "no encuentro AUTH_TOKEN en $REPO/.env"
+  full="$url/?token=$token"
+  info "URL para el teléfono (la primera visita deja cookie: después no hace falta el token):"
+  info ""
+  info "  $full"
+  info ""
+  if command -v qrencode >/dev/null 2>&1; then
+    qrencode -t ANSIUTF8 "$full"
+    info "Escaneala con la cámara del teléfono y agregá la PWA con «Add to Home Screen»."
+  else
+    info "tip: brew install qrencode → deck url muestra un QR escaneable con la cámara"
+  fi
+}
+
 sleep_disabled() { pmset -g 2>/dev/null | awk '/SleepDisabled/ { print $2; found=1 } END { if (!found) print 0 }'; }
 
 on_ac() { pmset -g batt 2>/dev/null | head -1 | grep -q 'AC Power'; }
@@ -120,6 +166,10 @@ cmd_install() {
   else
     cmd_start
   fi
+  if ensure_serve; then
+    info ""
+    cmd_url
+  fi
   info ""
   info "tip: alias deck='$REPO/scripts/deck'   (agregalo a tu ~/.zshrc)"
 }
@@ -169,11 +219,15 @@ cmd_away() {
     warn "el server corre a mano (¿npm run dev?): si esa terminal se cierra, se muere."
     warn "para que quede siempre corriendo: scripts/deck install"
   fi
-  # 2. tailscale (config persistente: solo verificar que responda de punta a punta)
+  # 2. tailscale (config persistente: verificar de punta a punta, configurando serve si falta)
   local url
   url="$(serve_url)"
   if [ -z "$url" ]; then
-    warn "tailscale serve no está configurado — corré: tailscale serve --bg $PORT"
+    ensure_serve || true
+    url="$(serve_url)"
+  fi
+  if [ -z "$url" ]; then
+    warn "sin tailscale serve el panel queda solo local — corré: tailscale serve --bg $PORT"
   elif [ "$(curl -m 6 -so /dev/null -w '%{http_code}' "$url/api/config" 2>/dev/null || true)" = "000" ]; then
     warn "$url no responde — ¿tailscale caído? probá: tailscale up"
   else
@@ -205,6 +259,42 @@ cmd_status() {
 
 cmd_log() { touch "$LOG"; tail -n 50 -f "$LOG"; }
 
+# --- lanzar Claude Code adentro de una sesión tmux visible en el panel -------
+
+# nombre de sesión tmux derivado del directorio actual, ajustado a lo que el
+# server acepta (SESSION_RE: [A-Za-z0-9_-]{1,32}, sufijo -shell reservado)
+session_name_for_cwd() {
+  local n
+  n="$(printf '%s' "$(basename "$PWD")" | sed 's/[^A-Za-z0-9_-]/-/g' | cut -c1-32)"
+  case "$n" in *-shell) n="${n%-shell}-s" ;; esac
+  printf '%s' "${n:-deck}"
+}
+
+cmd_launch() { # $1 = alias/comando a tipear en el pane (cc | ccw), resto = flags
+  # dentro de tmux no se anida un attach: ahí el comando se corre directo
+  [ -n "${TMUX:-}" ] && die "ya estás adentro de una sesión tmux — corré '$*' directo"
+  local name
+  name="$(session_name_for_cwd)"
+  if ! tmux has-session -t "=$name" 2>/dev/null; then
+    tmux new-session -d -s "$name" -c "$PWD"
+    info "✓ sesión tmux '$name' creada — ya aparece como chip en el panel del celu"
+    # se tipea el ALIAS, no su expansión: el pane corre tu zsh interactivo (con
+    # tu ~/.zshrc cargado), así cc/ccw significan lo mismo acá y en tu terminal
+    tmux send-keys -t "=$name:" "$*" Enter
+  else
+    # sesión del mismo directorio ya viva: attach. Si quedó en el shell (claude
+    # cerrado o recién reiniciada la Mac), relanzar el comando pedido.
+    local pane_cmd
+    pane_cmd="$(tmux display-message -p -t "=$name:" '#{pane_current_command}' 2>/dev/null || true)"
+    case "$pane_cmd" in
+      zsh|bash|sh) tmux send-keys -t "=$name:" "$*" Enter
+                   info "✓ sesión '$name' estaba en el shell: relanzando '$*'" ;;
+      *)           info "✓ attach a '$name' (ya hay algo corriendo: no se relanza nada)" ;;
+    esac
+  fi
+  exec tmux attach -t "=$name"
+}
+
 cmd_uninstall() {
   pm_sleep 0 2>/dev/null || true
   launchctl bootout "$GUI/$LABEL" 2>/dev/null || true
@@ -228,13 +318,26 @@ cambia día a día es el sueño, y para eso son `away` y `back`.
 
 UNA SOLA VEZ:
   deck install    Deja el server instalado como servicio de macOS (arranca al
-                  prender la Mac, se relevanta solo si se cae) y configura el
-                  permiso de sueño sin password. Después, olvidate de esto.
+                  prender la Mac, se relevanta solo si se cae), configura el
+                  permiso de sueño sin password y el tailscale serve, y muestra
+                  la URL del teléfono. Después, olvidate de esto.
+  deck url        URL del panel con token (+ QR si tenés qrencode instalado):
+                  escaneás con la cámara del teléfono e instalás la PWA.
 
 USO DIARIO (lo único que importa):
-  deck away       "Me voy": chequea que todo ande y deja la Mac despierta.
-                  → cerrás la tapa (¡enchufada!) y seguís desde el celu.
-  deck back       "Volví": la Mac vuelve a dormir normalmente.
+  deck cc [flags]   Lanza TU claude (alias cc, cuenta propia) adentro de una
+                    sesión tmux nombrada según el directorio actual — se ve al
+                    instante como chip en el celu. Mismo look que correr cc
+                    directo; los flags van a claude: deck cc --continue
+  deck ccw [flags]  Ídem con tu alias ccw (plan del trabajo).
+  deck claude [flags]
+                    Ídem corriendo claude directo (la variante sin alias, por
+                    si no tenés cc/ccw definidos).
+                    Si la sesión del directorio ya existe, attachea (y si claude
+                    no está corriendo ahí, lo relanza).
+  deck away         "Me voy": chequea que todo ande y deja la Mac despierta.
+                    → cerrás la tapa (¡enchufada!) y seguís desde el celu.
+  deck back         "Volví": la Mac vuelve a dormir normalmente.
 
 SI ALGO ANDA RARO:
   deck status     ¿Server vivo? ¿agente cargado? ¿tailscale? ¿sueño? ¿batería?
@@ -260,7 +363,9 @@ case "${1:-}" in
   start)          cmd_start ;;
   stop)           cmd_stop ;;
   log)            cmd_log ;;
+  url)            cmd_url ;;
   uninstall)      cmd_uninstall ;;
+  cc|ccw|claude)  cmd_launch "$@" ;;
   help|--help|-h) usage ;;
   *)              usage; exit 1 ;;
 esac
