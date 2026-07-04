@@ -1343,6 +1343,23 @@ async function init() {
   } catch (_) {}
   state.session = state.defaultSession;
 
+  // Deep-link del push (tarea 1): ?session=<name> selecciona esa sesión antes
+  // del primer attach. Sin create=1 (expectCreate queda null): si la sesión
+  // murió, el server contesta meta gone y caemos a una viva — nunca resucita.
+  // El param se saca de la URL para que un reload manual no pinee una vieja.
+  try {
+    const qs = new URLSearchParams(location.search);
+    const wanted = qs.get('session');
+    if (wanted !== null) {
+      if (SESSION_NAME_RE.test(wanted) && !wanted.endsWith('-shell')) {
+        state.session = wanted;
+      }
+      qs.delete('session');
+      const rest = qs.toString();
+      history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : ''));
+    }
+  } catch (_) {}
+
   claudeConn = createTermConnection('term-claude', 'conn-claude', () => state.session);
 
   wireQuickKeys();

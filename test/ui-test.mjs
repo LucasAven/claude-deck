@@ -351,6 +351,19 @@ ok('service worker registrado', swReg);
 ok(`sin errores JS en consola (${consoleErrors.length})`, consoleErrors.length === 0);
 if (consoleErrors.length) console.log('ERRORES:', consoleErrors.slice(0, 5).join('\n'));
 
+// 12. deep-link del push (tarea 1): ?session= selecciona la sesión antes del
+// primer attach e history.replaceState limpia la URL (un reload posterior no
+// queda pineado). Se usa la default —existe seguro—; la selección de una
+// no-default, el rechazo de nombres inválidos y el fallback sin resurrección
+// de una muerta los cubre el scratch puppeteer del agente.
+await page.goto('http://127.0.0.1:7433/?session=deck', { waitUntil: 'networkidle2', timeout: 20000 });
+await new Promise((r) => setTimeout(r, 1500));
+const deepLink = await page.evaluate(() => ({
+  urlClean: !location.search.includes('session='),
+  active: (document.querySelector('#session-chips .chip.active span') || {}).textContent,
+}));
+ok('deep-link ?session= selecciona la sesión y limpia la URL', deepLink.urlClean && deepLink.active === 'deck');
+
 await page.click('.tab[data-tab="claude"]');
 await new Promise((r) => setTimeout(r, 800));
 await page.screenshot({ path: new URL('./shot-claude.png', import.meta.url).pathname });

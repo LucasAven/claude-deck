@@ -86,11 +86,13 @@ Para recibir un push en el teléfono cuando Claude pide un permiso o termina una
    mv .claude/settings.example.json .claude/settings.json
    ```
 
-   Para tener push en **cualquier** repo, en cambio, definir los hooks `Notification` y `Stop` en el `settings.json` global (`~/.claude/settings.json`) apuntando a la ruta absoluta de `scripts/notify.sh` (no combinar ambos: el hook local y el global mandarían la notificación dos veces).
+   Para tener push en **cualquier** repo, en cambio, definir los hooks `Notification`, `PermissionRequest` y `Stop` en el `settings.json` global (`~/.claude/settings.json`) apuntando a la ruta absoluta de `scripts/notify.sh` (no combinar ambos: el hook local y el global mandarían la notificación dos veces). `PermissionRequest` es el que hace que el push diga el comando exacto que Claude quiere correr; con `Notification` solo, el cuerpo queda genérico.
 
 3. Suscribirse al topic en el teléfono: con la app [ntfy](https://ntfy.sh), o sin instalar nada abriendo `https://ntfy.sh/<topic>` en el navegador y tocando **Subscribe** (en iPhone hace falta *Add to Home Screen* primero — iOS solo entrega web push a PWAs instaladas).
 
 Probar con `TMUX=1 scripts/notify.sh 'prueba'`: la notificación debe llegar al teléfono. Nota: `notify.sh` solo notifica sesiones que corren dentro de tmux (las controlables remoto); un `claude` en una terminal común no manda push.
+
+El push lleva la sesión tmux como título y, si `DECK_URL` está en el `.env` (la escriben solos `deck install`/`deck url`), un deep-link que abre el panel con esa sesión seleccionada. Ojo en iOS (confirmado): con ntfy por web push, "Abrir enlace" cae en un navegador interno de la PWA de ntfy con cookies propias → 401 siempre. Para que el deep-link funcione hace falta la app nativa de ntfy (el tap abre Safari) y haber abierto la URL de `deck url` una vez en Safari.
 
 ## 8. Seguridad
 

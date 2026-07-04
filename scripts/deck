@@ -37,6 +37,24 @@ serve_url() {
   tailscale serve status 2>/dev/null | awk 'NR==1 && $1 ~ /^https/ { print $1 }'
 }
 
+# guarda DECK_URL en .env para el deep-link de notify.sh (header Click del
+# push → PWA con la sesión seleccionada). Se re-escribe sola si cambió el
+# hostname del tailnet (basta re-correr install/away/url).
+persist_deck_url() {
+  local url cur
+  url="$(serve_url)"
+  [ -n "$url" ] || return 0
+  [ -f "$REPO/.env" ] || return 0
+  cur="$(grep -m1 '^DECK_URL=' "$REPO/.env" | cut -d= -f2- || true)"
+  [ "$cur" = "$url" ] && return 0
+  if grep -q '^DECK_URL=' "$REPO/.env"; then
+    sed -i '' "s|^DECK_URL=.*|DECK_URL=$url|" "$REPO/.env"
+  else
+    printf 'DECK_URL=%s\n' "$url" >> "$REPO/.env"
+  fi
+  info "✓ DECK_URL guardada en .env ($url) — los push llevan deep-link a la sesión"
+}
+
 # configura `tailscale serve` si falta (es persistente: una sola vez). Devuelve
 # 1 con warn si tailscale no está instalado/conectado — el panel queda solo local
 ensure_serve() {
@@ -56,6 +74,7 @@ ensure_serve() {
       return 1
     fi
   fi
+  persist_deck_url
 }
 
 token_from_env() { grep -m1 '^AUTH_TOKEN=' "$REPO/.env" 2>/dev/null | cut -d= -f2; }
@@ -68,6 +87,7 @@ cmd_url() {
     url="$(serve_url)"
     [ -n "$url" ] || die "tailscale serve no reporta URL — probá: tailscale serve status"
   fi
+  persist_deck_url
   token="$(token_from_env)"
   [ -n "$token" ] || die "no encuentro AUTH_TOKEN en $REPO/.env"
   full="$url/?token=$token"

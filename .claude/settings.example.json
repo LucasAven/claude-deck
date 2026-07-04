@@ -10,6 +10,16 @@
         ]
       }
     ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/notify.sh 'Claude pide un permiso'"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

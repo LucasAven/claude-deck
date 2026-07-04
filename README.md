@@ -104,6 +104,7 @@ Otros subcomandos: `deck status` (server / agente / tailscale / sueño / baterí
 | `TMUX_SESSION`    | no          | `deck`                   | Nombre de la sesión tmux de Claude                  |
 | `DECK_PORT`       | no          | `7433`                   | Puerto local  |
 | `NTFY_TOPIC`      | no          | —                        | Topic secreto de ntfy.sh para push (ver abajo)      |
+| `DECK_URL`        | no          | —                        | URL pública del panel (la escriben solos `deck install`/`deck url`); habilita el deep-link del push |
 
 ## Notificaciones push cuando Claude te necesita (ntfy)
 
@@ -119,9 +120,13 @@ Para enterarte en el celular cuando Claude pide un permiso o termina una tarea:
    mv .claude/settings.example.json .claude/settings.json
    ```
 
-   Eso registra hooks en los eventos `Notification` (Claude espera tu input) y `Stop` (Claude terminó), que ejecutan `scripts/notify.sh` → `curl` a `ntfy.sh/$NTFY_TOPIC`. Ver "Hooks" en la doc oficial de Claude Code.
+   Eso registra hooks en los eventos `Notification` (Claude espera tu input), `PermissionRequest` (Claude pide un permiso) y `Stop` (Claude terminó), que ejecutan `scripts/notify.sh` → `curl` a `ntfy.sh/$NTFY_TOPIC`. Ver "Hooks" en la doc oficial de Claude Code.
 
    > Nota: los hooks aplican al `claude` que corras **en este repo**. Para tener push trabajando en cualquier repo, definí los hooks en el `settings.json` global (`~/.claude/settings.json`) con la ruta absoluta de `scripts/notify.sh` — el script es autocontenido, lee el topic del `.env` de este repo.
+
+El push es **contextual**: el título es el nombre de la sesión tmux, y el cuerpo dice qué pasa — con el hook `PermissionRequest`, el tool y el comando exacto que Claude quiere correr (`Bash: npm publish` + su descripción); con `Notification` solo, el mensaje genérico del evento; con `Stop`, un resumen de la última respuesta. Si ambos eventos de permiso están hookeados no hay push doble: el genérico se suprime solo (marcador con TTL en `$TMPDIR`). Si `DECK_URL` está en el `.env` (la escriben `deck install`/`deck url` al configurar tailscale serve), tocar la notificación abre el panel **con esa sesión ya seleccionada** (`?session=`).
+
+> Limitación en iOS (confirmada en el teléfono): cada contexto tiene su propio "cookie jar". Con ntfy por **web push**, "Abrir enlace" abre un navegador interno dentro de la PWA de ntfy que nunca vio `?token=` → 401, y no hay forma de sembrarle la cookie. El deep-link funcional necesita la **app nativa de ntfy** (el tap abre Safari) + haber abierto la URL de `deck url` una vez en Safari para dejarle la cookie.
 
 `notify.sh` solo notifica sesiones que corren **dentro de tmux** (las que podés controlar remoto); un `claude` en una terminal común no manda push, porque estás mirando la pantalla. Cuando llegue la notificación, entrás a claude-deck y aprobás desde la pestaña Claude.
 
