@@ -100,6 +100,18 @@ body {
   padding: 6px 2px 6px 6px;  /* área táctil generosa dentro del chip */
   margin: -6px -6px -6px 0;
 }
+/* semáforo por sesión (tarea 4): verde=working, ámbar=waiting, gris=idle;
+   sin estado (shell pelado / claude sin hooks) no se renderiza punto */
+.chip-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: -2px; /* el gap del chip queda grande para un punto */
+}
+.chip-dot-working { background: #8fbe6b; }
+.chip-dot-waiting { background: var(--accent); }
+.chip-dot-idle { background: var(--muted); }
 .chip-x:active { color: var(--accent); }
 .chip.active {
   border-color: var(--accent);

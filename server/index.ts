@@ -131,7 +131,32 @@ async function tmuxPaneDir(name: string): Promise<string> {
   return stdout.trim()
 }
 
-async function tmuxListSessions(): Promise<Array<{ name: string; attached: boolean; dir: string }>> {
+// --- estado por sesión (semáforo de chips, tarea 4) -------------------------
+// Los hooks globales de Claude Code escriben ~/.claude-deck/state/<sesión> vía
+// scripts/state.sh (contenido = estado, mtime = ts). Sesión sin registro (shell
+// pelado, claude sin hooks) → null: la UI no pinta punto.
+const STATE_DIR = path.join(os.homedir(), '.claude-deck', 'state')
+// TTL solo para `working`: un claude matado con kill/kill-session nunca emite
+// Stop y quedaría verde para siempre. `waiting`/`idle` NO decaen: son estados
+// de reposo legítimos por horas (el caso de uso es justamente volver tarde a
+// un prompt pendiente y ver el chip en ámbar).
+const STATE_TTL_MS = 5 * 60 * 1000
+type SessionState = 'working' | 'waiting' | 'idle'
+
+function sessionState(name: string): SessionState | null {
+  if (!SESSION_RE.test(name)) return null // nunca joinear nombres raros al path
+  try {
+    const file = path.join(STATE_DIR, name)
+    const raw = fs.readFileSync(file, 'utf8').trim()
+    if (raw !== 'working' && raw !== 'waiting' && raw !== 'idle') return null
+    if (raw === 'working' && Date.now() - fs.statSync(file).mtimeMs > STATE_TTL_MS) return null
+    return raw
+  } catch {
+    return null
+  }
+}
+
+async function tmuxListSessions(): Promise<Array<{ name: string; attached: boolean; dir: string; state: SessionState | null }>> {
   let stdout = ''
   try {
     // separador: ESPACIO, nunca \t — sin LANG en el entorno (launchd), tmux
@@ -143,7 +168,7 @@ async function tmuxListSessions(): Promise<Array<{ name: string; attached: boole
   } catch {
     return [] // no hay servidor tmux corriendo
   }
-  const out: Array<{ name: string; attached: boolean; dir: string }> = []
+  const out: Array<{ name: string; attached: boolean; dir: string; state: SessionState | null }> = []
   for (const line of stdout.split('\n')) {
     if (!line.trim()) continue
     const [name, attached] = line.split(' ')
@@ -154,7 +179,7 @@ async function tmuxListSessions(): Promise<Array<{ name: string; attached: boole
     } catch {
       /* la sesión pudo morir entre medio */
     }
-    out.push({ name, attached: Number(attached) > 0, dir })
+    out.push({ name, attached: Number(attached) > 0, dir, state: sessionState(name) })
   }
   return out
 }

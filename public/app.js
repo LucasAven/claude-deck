@@ -698,7 +698,13 @@ async function refreshSessions() {
   if (!names.includes(state.session)) names.push(state.session);
   names.sort();
 
-  const key = names.join('|') + '@' + state.session;
+  // semáforo (tarea 4): estado por sesión escrito por los hooks (working /
+  // waiting / idle; null = sin registro → sin punto). Va DENTRO de la key:
+  // si no, un cambio de estado sin cambio de sesiones no repintaría nunca.
+  const stateByName = {};
+  for (const s of sessions) stateByName[s.name] = s.state || null;
+
+  const key = names.map((n) => n + ':' + (stateByName[n] || '')).join('|') + '@' + state.session;
   if (key === chipsKey) return;
   chipsKey = key;
 
@@ -707,6 +713,11 @@ async function refreshSessions() {
   for (const name of names) {
     const chip = document.createElement('button');
     chip.className = 'chip' + (name === state.session ? ' active' : '');
+    if (stateByName[name]) {
+      const dot = document.createElement('span');
+      dot.className = 'chip-dot chip-dot-' + stateByName[name];
+      chip.appendChild(dot);
+    }
     const label = document.createElement('span');
     label.textContent = name;
     chip.appendChild(label);

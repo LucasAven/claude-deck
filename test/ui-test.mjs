@@ -41,8 +41,9 @@ ok('indicador de conexión ON', await page.$eval('#conn-claude', (el) => el.clas
 const termText = await page.$eval('#term-claude', (el) => el.innerText);
 ok('la terminal muestra contenido de la sesión tmux', termText.trim().length > 0);
 
-// 4. chips de sesión (el label es el primer span; el activo suma el ✕)
-const chips = await page.$$eval('#session-chips .chip', (els) => els.map((e) => e.querySelector('span').textContent));
+// 4. chips de sesión (el label es el primer span que no sea el dot del
+// semáforo — tarea 4 —; el activo suma el ✕)
+const chips = await page.$$eval('#session-chips .chip', (els) => els.map((e) => e.querySelector('span:not(.chip-dot)').textContent));
 ok('chip de sesión "deck" presente y activo', chips.includes('deck'));
 ok('chip activo tiene botón ✕ (matar sesión)', (await page.$('#session-chips .chip.active .chip-x')) !== null);
 // el nombre del chip activo renombra al tocarlo — no se clickea (abriría un
@@ -360,9 +361,47 @@ await page.goto('http://127.0.0.1:7433/?session=deck', { waitUntil: 'networkidle
 await new Promise((r) => setTimeout(r, 1500));
 const deepLink = await page.evaluate(() => ({
   urlClean: !location.search.includes('session='),
-  active: (document.querySelector('#session-chips .chip.active span') || {}).textContent,
+  active: (document.querySelector('#session-chips .chip.active span:not(.chip-dot)') || {}).textContent,
 }));
 ok('deep-link ?session= selecciona la sesión y limpia la URL', deepLink.urlClean && deepLink.active === 'deck');
+
+// 13. semáforo de chips (tarea 4): con un payload mockeado de
+// /api/tmux/sessions los chips pintan el punto según `state` (verde working /
+// ámbar waiting / gris idle) y sin state no hay punto. Después se restaura el
+// fetch real y se repinta con las sesiones vivas.
+const dots = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const mock = [
+    { name: 'deck', attached: true, dir: '/tmp', state: 'working' },
+    { name: 'zz-mock-espera', attached: false, dir: '/tmp', state: 'waiting' },
+    { name: 'zz-mock-idle', attached: false, dir: '/tmp', state: 'idle' },
+    { name: 'zz-mock-sin', attached: false, dir: '/tmp', state: null },
+  ];
+  window.fetch = (url, opts) => String(url).includes('/api/tmux/sessions')
+    ? Promise.resolve(new Response(JSON.stringify(mock), { status: 200 }))
+    : realFetch(url, opts);
+  await refreshSessions();
+  const dotOf = (name) => {
+    const chip = [...document.querySelectorAll('#session-chips .chip')]
+      .find((c) => c.querySelector('span:not(.chip-dot)').textContent === name);
+    const d = chip && chip.querySelector('.chip-dot');
+    return d ? d.className : null;
+  };
+  const out = {
+    working: dotOf('deck'),
+    waiting: dotOf('zz-mock-espera'),
+    idle: dotOf('zz-mock-idle'),
+    none: dotOf('zz-mock-sin'),
+  };
+  window.fetch = realFetch;
+  await refreshSessions(); // la key cambia (nombres mock ya no están) → repinta real
+  return out;
+});
+ok('semáforo: dots working/waiting/idle según state y sin dot cuando null',
+  dots.working === 'chip-dot chip-dot-working'
+  && dots.waiting === 'chip-dot chip-dot-waiting'
+  && dots.idle === 'chip-dot chip-dot-idle'
+  && dots.none === null);
 
 await page.click('.tab[data-tab="claude"]');
 await new Promise((r) => setTimeout(r, 800));

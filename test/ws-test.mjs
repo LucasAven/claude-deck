@@ -2,6 +2,7 @@
 import WebSocket from 'ws';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 
 const TOKEN = fs.readFileSync(new URL('../.env', import.meta.url), 'utf8')
   .match(/AUTH_TOKEN=(.+)/)[1].trim();
@@ -107,6 +108,38 @@ const names = sessions.map((s) => s.name);
 ok('sessions lista deck y deck-2', names.includes('deck') && names.includes('deck-2'));
 ok('sessions excluye *-shell', !names.some((n) => n.endsWith('-shell')));
 ok('sessions trae dir del pane', sessions.every((s) => s.dir.startsWith('/')));
+
+// 8b. semáforo por sesión (tarea 4): el server mezcla ~/.claude-deck/state/<s>
+// (escrito por scripts/state.sh desde los hooks) como campo `state`
+const STATE_DIR = `${os.homedir()}/.claude-deck/state`;
+const stFile = `${STATE_DIR}/deck-2`;
+const getSessions = async () =>
+  (await (await fetch(`${HTTP}/api/tmux/sessions`, { headers: { 'x-deck-token': TOKEN } })).json());
+try {
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.rmSync(stFile, { force: true });
+  let ss = await getSessions();
+  ok('state: sesión sin registro → null', ss.find((s) => s.name === 'deck-2')?.state === null);
+  fs.writeFileSync(stFile, 'waiting');
+  ss = await getSessions();
+  ok('state: registro waiting → "waiting"', ss.find((s) => s.name === 'deck-2')?.state === 'waiting');
+  const stale = new Date(Date.now() - 10 * 60 * 1000); // > TTL (5 min)
+  fs.writeFileSync(stFile, 'working');
+  fs.utimesSync(stFile, stale, stale);
+  ss = await getSessions();
+  ok('state: working con ts viejo decae a null (claude matado sin Stop)',
+    ss.find((s) => s.name === 'deck-2')?.state === null);
+  fs.writeFileSync(stFile, 'waiting');
+  fs.utimesSync(stFile, stale, stale);
+  ss = await getSessions();
+  ok('state: waiting viejo NO decae (prompt pendiente sigue ámbar)',
+    ss.find((s) => s.name === 'deck-2')?.state === 'waiting');
+  fs.writeFileSync(stFile, 'cualquier-cosa');
+  ss = await getSessions();
+  ok('state: contenido inválido → null', ss.find((s) => s.name === 'deck-2')?.state === null);
+} finally {
+  fs.rmSync(stFile, { force: true });
+}
 
 // 9. git endpoints con ?session=deck-2 (resuelve el dir del pane)
 const sum = await fetch(`${HTTP}/api/git/summary?session=deck-2`, { headers: { 'x-deck-token': TOKEN } });

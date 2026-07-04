@@ -120,15 +120,19 @@ Para enterarte en el celular cuando Claude pide un permiso o termina una tarea:
    mv .claude/settings.example.json .claude/settings.json
    ```
 
-   Eso registra hooks en los eventos `Notification` (Claude espera tu input), `PermissionRequest` (Claude pide un permiso) y `Stop` (Claude terminó), que ejecutan `scripts/notify.sh` → `curl` a `ntfy.sh/$NTFY_TOPIC`. Ver "Hooks" en la doc oficial de Claude Code.
+   Eso registra hooks en los eventos `Notification` (Claude espera tu input), `PermissionRequest` (Claude pide un permiso) y `Stop` (Claude terminó), que ejecutan `scripts/notify.sh` → `curl` a `ntfy.sh/$NTFY_TOPIC`. Además registra `UserPromptSubmit` y `PreToolUse` (y los mismos tres de arriba) ejecutando `scripts/state.sh`, que alimenta el semáforo de los chips (ver abajo) — no manda push. Ver "Hooks" en la doc oficial de Claude Code.
 
-   > Nota: los hooks aplican al `claude` que corras **en este repo**. Para tener push trabajando en cualquier repo, definí los hooks en el `settings.json` global (`~/.claude/settings.json`) con la ruta absoluta de `scripts/notify.sh` — el script es autocontenido, lee el topic del `.env` de este repo.
+   > Nota: los hooks aplican al `claude` que corras **en este repo**. Para tener push (y semáforo) trabajando en cualquier repo, definí los hooks en el `settings.json` global (`~/.claude/settings.json`) con las rutas absolutas de `scripts/notify.sh` y `scripts/state.sh` — los scripts son autocontenidos; notify.sh lee el topic del `.env` de este repo.
 
 El push es **contextual**: el título es el nombre de la sesión tmux, y el cuerpo dice qué pasa — con el hook `PermissionRequest`, el tool y el comando exacto que Claude quiere correr (`Bash: npm publish` + su descripción); con `Notification` solo, el mensaje genérico del evento; con `Stop`, un resumen de la última respuesta. Si ambos eventos de permiso están hookeados no hay push doble: el genérico se suprime solo (marcador con TTL en `$TMPDIR`). Si `DECK_URL` está en el `.env` (la escriben `deck install`/`deck url` al configurar tailscale serve), tocar la notificación abre el panel **con esa sesión ya seleccionada** (`?session=`).
 
 > Limitación en iOS (confirmada en el teléfono): cada contexto tiene su propio "cookie jar". Con ntfy por **web push**, "Abrir enlace" abre un navegador interno dentro de la PWA de ntfy que nunca vio `?token=` → 401, y no hay forma de sembrarle la cookie. El deep-link funcional necesita la **app nativa de ntfy** (el tap abre Safari) + haber abierto la URL de `deck url` una vez en Safari para dejarle la cookie.
 
 `notify.sh` solo notifica sesiones que corren **dentro de tmux** (las que podés controlar remoto); un `claude` en una terminal común no manda push, porque estás mirando la pantalla. Cuando llegue la notificación, entrás a claude-deck y aprobás desde la pestaña Claude.
+
+### Semáforo de sesiones (punto en el chip)
+
+Cada chip de sesión muestra un punto con lo que su Claude está haciendo: **verde = trabajando, ámbar = espera tu input, gris = idle**. Lo alimentan los mismos hooks: `scripts/state.sh` escribe el estado en `~/.claude-deck/state/<sesión>` (`UserPromptSubmit`/`PreToolUse` → working, `Notification`/`PermissionRequest` → waiting, `Stop` → idle) y el server lo mezcla en `GET /api/tmux/sessions`. Una sesión sin registro (un shell pelado, o un `claude` sin estos hooks) no muestra punto. Un `working` sin señales por más de 5 min decae a "sin punto" (un claude matado con `kill` nunca emite `Stop`); `waiting` e `idle` no decaen — un permiso pendiente sigue en ámbar aunque vuelvas horas después.
 
 ## Seguridad
 
@@ -149,7 +153,7 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 | Ruta | Descripción |
 |---|---|
 | `WS /ws/term?session=<s>&create=1` | Terminal (attach tmux). Solo crea la sesión si falta con `create=1` (o si es la default); sin él, una sesión inexistente contesta `{"t":"meta","gone":true}` y cierra — así el retry de un cliente viejo no resucita una sesión recién matada. Mensajes JSON: `{"t":"in","d":…}`, `{"t":"resize","cols":N,"rows":N}`, `{"t":"refresh"}` (repaint completo, lo manda la PWA al volver de background) ⇄ `{"t":"out","d":…}` |
-| `GET /api/tmux/sessions` | Sesiones tmux activas (excluye `*-shell`, legacy de la pestaña Shell) |
+| `GET /api/tmux/sessions` | Sesiones tmux activas (excluye `*-shell`, legacy de la pestaña Shell). Incluye `state` (`working`\|`waiting`\|`idle`\|`null`) leído de `~/.claude-deck/state/` — lo escriben los hooks vía `scripts/state.sh` |
 | `DELETE /api/tmux/sessions/:name` | Mata la sesión tmux (y su `*-shell` acompañante si quedó de la v1) |
 | `PATCH /api/tmux/sessions/:name` | Renombra la sesión (y su `*-shell` si existe). Body JSON: `{ "newName": "<nombre>" }` (letras/números/`-`/`_`, máx 32, sufijo `-shell` reservado). 409 si el nombre ya existe |
 | `POST /api/paste-image?session=<s>` | Sube una imagen (PNG/JPEG, máx 15 MB): la pone en el clipboard de la Mac y manda `Ctrl+V` a la sesión — Claude Code la ingiere como `[Image #N]`. Fallback: escribe la ruta del archivo en el prompt |

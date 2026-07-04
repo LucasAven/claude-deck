@@ -88,6 +88,8 @@ Para recibir un push en el teléfono cuando Claude pide un permiso o termina una
 
    Para tener push en **cualquier** repo, en cambio, definir los hooks `Notification`, `PermissionRequest` y `Stop` en el `settings.json` global (`~/.claude/settings.json`) apuntando a la ruta absoluta de `scripts/notify.sh` (no combinar ambos: el hook local y el global mandarían la notificación dos veces). `PermissionRequest` es el que hace que el push diga el comando exacto que Claude quiere correr; con `Notification` solo, el cuerpo queda genérico.
 
+   El mismo archivo de ejemplo registra también `scripts/state.sh` en `UserPromptSubmit`, `PreToolUse`, `Notification`, `PermissionRequest` y `Stop`: es el que alimenta el **semáforo** de los chips (verde = trabajando, ámbar = espera input, gris = idle) y no manda push. Para verlo en cualquier repo va igual que notify.sh: los mismos cinco eventos en el settings global, con la ruta absoluta (`state.sh working` en los dos primeros, `state.sh waiting` en los de permiso, `state.sh idle` en Stop).
+
 3. Suscribirse al topic en el teléfono: con la app [ntfy](https://ntfy.sh), o sin instalar nada abriendo `https://ntfy.sh/<topic>` en el navegador y tocando **Subscribe** (en iPhone hace falta *Add to Home Screen* primero — iOS solo entrega web push a PWAs instaladas).
 
 Probar con `TMUX=1 scripts/notify.sh 'prueba'`: la notificación debe llegar al teléfono. Nota: `notify.sh` solo notifica sesiones que corren dentro de tmux (las controlables remoto); un `claude` en una terminal común no manda push.
