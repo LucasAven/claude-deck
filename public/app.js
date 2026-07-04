@@ -664,6 +664,99 @@ function wireImagePaste() {
 }
 
 // ---------------------------------------------------------------------------
+// Composer de prompts (tarea 7): sheet a media pantalla con <textarea> nativo
+// — autocorrección, dictado del teclado iOS y cursor libre gratis. Enviar =
+// pasteTextToPrompt + \r diferido (mismo patrón que sendSlashCommand). El
+// borrador se guarda por sesión en localStorage (`draft:<sesión>`) y sobrevive
+// a que iOS mate la pestaña; Cancelar cierra pero LO CONSERVA.
+// ---------------------------------------------------------------------------
+const DRAFT_DEBOUNCE_MS = 500;
+let composerSession = null; // sesión para la que se abrió (dueña del borrador)
+let draftTimer = null;
+
+const draftKey = (name) => `draft:${name}`;
+
+function composerIsOpen() {
+  return !$('#composer').classList.contains('hidden');
+}
+
+// guarda (o borra, si quedó vacío) el borrador de composerSession
+function saveDraftNow() {
+  clearTimeout(draftTimer);
+  draftTimer = null;
+  if (composerSession === null) return;
+  const text = $('#composer-text').value;
+  try {
+    if (text) localStorage.setItem(draftKey(composerSession), text);
+    else localStorage.removeItem(draftKey(composerSession));
+  } catch (_) {}
+  $('#composer-saved').classList.toggle('hidden', !text);
+}
+
+function scheduleDraftSave() {
+  $('#composer-saved').classList.add('hidden'); // hay cambios sin guardar
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraftNow, DRAFT_DEBOUNCE_MS);
+}
+
+function openComposer() {
+  if (composerIsOpen()) { closeComposer(); return; } // el ✎ togglea
+  closeSwitchMenu();
+  composerSession = state.session;
+  $('#composer-session').textContent = composerSession;
+  const ta = $('#composer-text');
+  let draft = '';
+  try { draft = localStorage.getItem(draftKey(composerSession)) || ''; } catch (_) {}
+  ta.value = draft;
+  $('#composer-saved').classList.toggle('hidden', !draft);
+  $('#composer').classList.remove('hidden');
+  document.body.classList.add('composer-open');
+  // focus sincrónico dentro del gesto: iOS no abre el teclado desde un timer.
+  // El fit va en rAF (el sheet le comió filas a la terminal); si el teclado
+  // aparece, updateViewportGeometry re-fittea de nuevo con el alto final.
+  ta.focus();
+  requestAnimationFrame(() => claudeConn && claudeConn.fit());
+}
+
+function closeComposer() {
+  if (!composerIsOpen()) return;
+  saveDraftNow(); // Cancelar conserva el borrador; tras enviar guarda vacío → borra la key
+  composerSession = null;
+  $('#composer-text').blur(); // sin esto el teclado iOS queda abierto sobre la terminal
+  $('#composer').classList.add('hidden');
+  document.body.classList.remove('composer-open');
+  requestAnimationFrame(() => claudeConn && claudeConn.fit());
+}
+
+function sendComposer() {
+  const ta = $('#composer-text');
+  const text = ta.value;
+  if (!text.trim() || !claudeConn) return;
+  pasteTextToPrompt(text); // bracketed paste: el multilínea entra sin submitear
+  // Enter diferido, mismo patrón que sendSlashCommand: en el mismo tick el
+  // prompt se come el \r
+  setTimeout(() => claudeConn && claudeConn.sendKeys('\r'), 150);
+  ta.value = ''; // enviado: closeComposer guarda vacío → limpia el borrador
+  closeComposer();
+}
+
+// inserta un \n literal en el cursor del textarea — NO KEYS.nl: \x1b\r es un
+// concepto de terminal, acá es un textarea nativo
+function composerNewline() {
+  const ta = $('#composer-text');
+  ta.setRangeText('\n', ta.selectionStart, ta.selectionEnd, 'end');
+  scheduleDraftSave(); // setRangeText no dispara 'input'
+}
+
+function wireComposer() {
+  onTap($('#btn-composer'), () => openComposer());
+  onTap($('#composer-cancel'), () => closeComposer());
+  onTap($('#composer-send'), () => sendComposer());
+  onTap($('#composer-nl'), () => composerNewline());
+  $('#composer-text').addEventListener('input', scheduleDraftSave);
+}
+
+// ---------------------------------------------------------------------------
 // Fetch con manejo de 401
 // ---------------------------------------------------------------------------
 async function api(path, opts) {
@@ -750,6 +843,7 @@ function selectSession(name) {
   state.session = name;
   hideHint();
   closeSwitchMenu();
+  closeComposer(); // guarda el borrador de la sesión anterior (composerSession)
   renderSwitchPills(); // el estado de modo/modelo es por sesión
   claudeConn.reconnect();
   refreshSessions();
@@ -763,8 +857,11 @@ async function killSession(name) {
     await api(`/api/tmux/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' });
   } catch (_) { return; }
 
-  // el estado de switchers es por sesión: muere con ella
-  try { localStorage.removeItem(`deck-switch:${name}`); } catch (_) {}
+  // el estado de switchers y el borrador del composer son por sesión: mueren con ella
+  try {
+    localStorage.removeItem(`deck-switch:${name}`);
+    localStorage.removeItem(draftKey(name));
+  } catch (_) {}
 
   if (state.session === name) {
     await fallbackToLiveSession();
@@ -785,6 +882,7 @@ async function fallbackToLiveSession() {
     : (names[0] || state.defaultSession);
   hideHint();
   closeSwitchMenu();
+  closeComposer();
   renderSwitchPills(); // sin esto la pill queda con el modelo de la sesión muerta
   claudeConn.reconnect();
   refreshGit();
@@ -824,13 +922,26 @@ async function renameSession(name) {
     state.session = newName;
     if (treeSession === name) treeSession = newName; // mismo árbol, solo cambió el nombre
     try {
-      // el estado de switchers se guarda por sesión: migrarlo al nuevo nombre
-      const sw = localStorage.getItem(`deck-switch:${name}`);
-      if (sw !== null) {
-        localStorage.setItem(`deck-switch:${newName}`, sw);
-        localStorage.removeItem(`deck-switch:${name}`);
+      // el estado de switchers y el borrador del composer se guardan por
+      // sesión: migrarlos al nuevo nombre
+      const moves = [
+        [`deck-switch:${name}`, `deck-switch:${newName}`],
+        [draftKey(name), draftKey(newName)],
+      ];
+      for (const [oldKey, newKey] of moves) {
+        const val = localStorage.getItem(oldKey);
+        if (val !== null) {
+          localStorage.setItem(newKey, val);
+          localStorage.removeItem(oldKey);
+        }
       }
     } catch (_) {}
+    if (composerSession === name) {
+      // composer abierto para la sesión renombrada: seguirla (el borrador
+      // en curso debe guardarse bajo el nombre nuevo)
+      composerSession = newName;
+      $('#composer-session').textContent = newName;
+    }
   }
   refreshSessions();
   refreshGit();
@@ -1377,6 +1488,7 @@ async function init() {
   wireSwitchers();
   wireTouchScroll('term-claude', () => claudeConn);
   wireImagePaste();
+  wireComposer();
   refreshSessions();
   refreshGit(); // primer fetch del badge de Cambios sin esperar el intervalo
 

@@ -403,6 +403,98 @@ ok('semáforo: dots working/waiting/idle según state y sin dot cuando null',
   && dots.idle === 'chip-dot chip-dot-idle'
   && dots.none === null);
 
+// 14. composer de prompts (tarea 7): el ✎ abre un sheet a media pantalla con
+// textarea nativo; enviar = term.paste + \r diferido (espiados: nada llega a
+// la sesión real); borrador por sesión en localStorage (draft:<sesión>).
+// 14a. abrir: sheet visible, controlbar reemplazada, textarea con foco
+await tapSel('#btn-composer');
+await new Promise((r) => setTimeout(r, 300));
+const compOpen = await page.evaluate(() => ({
+  open: !document.querySelector('#composer').classList.contains('hidden'),
+  bodyOpen: document.body.classList.contains('composer-open'),
+  controlbarHidden: getComputedStyle(document.querySelector('.controlbar')).display === 'none',
+  focused: document.activeElement === document.querySelector('#composer-text'),
+  session: document.querySelector('#composer-session').textContent,
+}));
+ok('✎ abre el composer (sheet visible, controlbar oculta)',
+  compOpen.open && compOpen.bodyOpen && compOpen.controlbarHidden);
+ok('composer: textarea con foco y sesión en el header',
+  compOpen.focused && compOpen.session === 'deck');
+
+// 14b. tipear + botón \n + borrador con debounce (500 ms)
+await page.type('#composer-text', 'línea uno');
+await tapSel('#composer-nl');
+await page.type('#composer-text', 'línea dos');
+await new Promise((r) => setTimeout(r, 800));
+const compDraft = await page.evaluate(() => ({
+  value: document.querySelector('#composer-text').value,
+  stored: localStorage.getItem('draft:deck'),
+  savedShown: !document.querySelector('#composer-saved').classList.contains('hidden'),
+}));
+ok('botón \\n inserta salto de línea en el textarea', compDraft.value === 'línea uno\nlínea dos');
+ok('borrador persistido en draft:deck tras el debounce (indicador visible)',
+  compDraft.stored === 'línea uno\nlínea dos' && compDraft.savedShown);
+await page.screenshot({ path: new URL('./shot-composer.png', import.meta.url).pathname });
+
+// 14c. el borrador sobrevive a un reload (iOS matando la pestaña) y se
+// restaura al reabrir el composer para esa sesión
+await page.reload({ waitUntil: 'networkidle2', timeout: 20000 });
+await new Promise((r) => setTimeout(r, 1500));
+await tapSel('#btn-composer');
+await new Promise((r) => setTimeout(r, 300));
+ok('borrador restaurado tras reload',
+  (await page.$eval('#composer-text', (el) => el.value)) === 'línea uno\nlínea dos');
+
+// 14d. enviar: term.paste con el texto exacto y \r diferido ≥150 ms (patrón
+// sendSlashCommand); después limpia el borrador y cierra el sheet
+const compSend = await page.evaluate(async () => {
+  const pastes = [];
+  const keys = [];
+  const origPaste = claudeConn.term.paste.bind(claudeConn.term);
+  const origSend = claudeConn.sendKeys;
+  claudeConn.term.paste = (t) => pastes.push({ t, at: performance.now() });
+  claudeConn.sendKeys = (d) => keys.push({ d, at: performance.now() });
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
+  tap(document.querySelector('#composer-send'));
+  const keysEarly = keys.length; // el \r es diferido: acá todavía no debe estar
+  await new Promise((r) => setTimeout(r, 400));
+  claudeConn.term.paste = origPaste;
+  claudeConn.sendKeys = origSend;
+  return {
+    pastes, keys, keysEarly,
+    draft: localStorage.getItem('draft:deck'),
+    closed: document.querySelector('#composer').classList.contains('hidden'),
+    bodyOpen: document.body.classList.contains('composer-open'),
+  };
+});
+ok('enviar llama term.paste con el texto exacto (multilínea)',
+  compSend.pastes.length === 1 && compSend.pastes[0].t === 'línea uno\nlínea dos');
+ok('\\r diferido ≥150 ms después del paste (nada submitea en el mismo tick)',
+  compSend.keysEarly === 0 && compSend.keys.length === 1 && compSend.keys[0].d === '\r'
+  && compSend.keys[0].at - compSend.pastes[0].at >= 145);
+ok('enviar limpia el borrador y cierra el sheet',
+  compSend.draft === null && compSend.closed && !compSend.bodyOpen);
+
+// 14e. Cancelar cierra pero CONSERVA el borrador (ese es el punto); al final
+// se limpia la key para no dejarle residuo a la sesión deck real
+await tapSel('#btn-composer');
+await page.type('#composer-text', 'borrador vivo');
+await tapSel('#composer-cancel');
+await new Promise((r) => setTimeout(r, 300));
+const compCancel = await page.evaluate(() => {
+  const out = {
+    closed: document.querySelector('#composer').classList.contains('hidden'),
+    draft: localStorage.getItem('draft:deck'),
+  };
+  localStorage.removeItem('draft:deck');
+  return out;
+});
+ok('cancelar cierra el composer pero conserva el borrador',
+  compCancel.closed && compCancel.draft === 'borrador vivo');
+
 await page.click('.tab[data-tab="claude"]');
 await new Promise((r) => setTimeout(r, 800));
 await page.screenshot({ path: new URL('./shot-claude.png', import.meta.url).pathname });
