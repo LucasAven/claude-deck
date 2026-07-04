@@ -20,11 +20,13 @@ cp .env.example .env
 Editar `.env` con las dos variables obligatorias:
 
 ```bash
-REPO_DIR=/ruta/absoluta/del/repo/a/monitorear
-AUTH_TOKEN=<salida de: openssl rand -hex 32>   # mínimo 32 caracteres
+WORKSPACES_ROOT=/ruta/que/contiene/tus/proyectos   # ej: /Users/vos/proyectos
+AUTH_TOKEN=<salida de: openssl rand -hex 32>       # mínimo 32 caracteres
 ```
 
-Opcionales (una línea cada una): `DECK_PORT` (puerto local, default `7433`), `WORKSPACES_ROOT` (raíz permitida para multi-sesión, default el directorio padre de `REPO_DIR`), `TMUX_SESSION` (nombre de la sesión tmux, default `deck`).
+`WORKSPACES_ROOT` es el **perímetro de seguridad**: el server no lee archivos ni opera git fuera de esa ruta, sin importar en qué directorio esté parada una sesión tmux. Cualquier repo adentro funciona sin configurar nada más.
+
+Opcionales (una línea cada una): `DEFAULT_DIR` (directorio "home" del panel — dónde nacen las sesiones tmux nuevas; default `WORKSPACES_ROOT`, debe caer adentro de él), `DECK_PORT` (puerto local, default `7433`), `TMUX_SESSION` (nombre de la sesión tmux, default `deck`).
 
 ## 3. Prueba local
 

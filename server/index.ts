@@ -35,19 +35,26 @@ try {
 // entorno sin UTF-8. Defaultear acá cubre al proceso y a todo lo que spawnea.
 if (!process.env.LANG) process.env.LANG = 'en_US.UTF-8'
 
-const REPO_DIR = process.env.REPO_DIR || ''
+// WORKSPACES_ROOT es el perímetro de seguridad: el server no lee ni opera git
+// fuera de esta ruta, sin importar a dónde haga cd una sesión tmux.
+// DEFAULT_DIR es solo el "home" del panel: dónde nacen las sesiones tmux nuevas
+// y sobre qué operan los endpoints sin ?session=. Debe caer dentro del perímetro.
+const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || ''
+const DEFAULT_DIR = process.env.DEFAULT_DIR || WORKSPACES_ROOT
 const AUTH_TOKEN = process.env.AUTH_TOKEN || ''
 const TMUX_SESSION = process.env.TMUX_SESSION || 'deck'
 const PORT = Number(process.env.DECK_PORT || 7433)
-const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || (REPO_DIR ? path.dirname(REPO_DIR) : '')
 
 function die(msg: string): never {
   console.error(`[claude-deck] ERROR: ${msg}`)
   process.exit(1)
 }
 
-if (!REPO_DIR) die('falta la variable REPO_DIR (ruta absoluta del repo a monitorear)')
-if (!fs.existsSync(REPO_DIR) || !fs.statSync(REPO_DIR).isDirectory()) die(`REPO_DIR no existe o no es un directorio: ${REPO_DIR}`)
+if (!WORKSPACES_ROOT) die('falta la variable WORKSPACES_ROOT (raíz que contiene tus proyectos; el server no accede a nada fuera de ella)')
+if (!fs.existsSync(WORKSPACES_ROOT) || !fs.statSync(WORKSPACES_ROOT).isDirectory()) die(`WORKSPACES_ROOT no existe o no es un directorio: ${WORKSPACES_ROOT}`)
+if (!fs.existsSync(DEFAULT_DIR) || !fs.statSync(DEFAULT_DIR).isDirectory()) die(`DEFAULT_DIR no existe o no es un directorio: ${DEFAULT_DIR}`)
+if (!insideDir(fs.realpathSync(DEFAULT_DIR), fs.realpathSync(WORKSPACES_ROOT)))
+  die(`DEFAULT_DIR debe estar dentro de WORKSPACES_ROOT: ${DEFAULT_DIR} ⊄ ${WORKSPACES_ROOT}`)
 if (!AUTH_TOKEN) die('falta AUTH_TOKEN — el servidor no arranca sin token (ver README, sección Seguridad)')
 if (AUTH_TOKEN.length < 32) die('AUTH_TOKEN demasiado corto: debe tener al menos 32 caracteres (probá: openssl rand -hex 32)')
 
@@ -167,7 +174,7 @@ async function resolvePaneDir(session: string): Promise<string> {
   return dir
 }
 
-/** Realpath validado contra WORKSPACES_ROOT (el límite de todo acceso por sesión). */
+/** Realpath validado contra WORKSPACES_ROOT (el perímetro de todo acceso git/fs). */
 function checkInsideWorkspaces(p: string): string {
   const real = fs.realpathSync(p)
   const realRoot = fs.realpathSync(WORKSPACES_ROOT)
@@ -177,12 +184,12 @@ function checkInsideWorkspaces(p: string): string {
 
 /**
  * Resuelve el directorio git sobre el que operar.
- * Sin `session` → REPO_DIR. Con `session` → directorio actual del pane de esa
- * sesión tmux, validado como repo git dentro de WORKSPACES_ROOT.
+ * Sin `session` → DEFAULT_DIR. Con `session` → directorio actual del pane de
+ * esa sesión tmux. En ambos casos, validado como repo git dentro de
+ * WORKSPACES_ROOT.
  */
 async function resolveGitDir(session: string | undefined): Promise<string> {
-  if (!session) return REPO_DIR
-  const dir = await resolvePaneDir(session)
+  const dir = session ? await resolvePaneDir(session) : DEFAULT_DIR
   let toplevel: string
   try {
     toplevel = (await execFileP('git', ['-C', dir, 'rev-parse', '--show-toplevel'])).stdout.trim()
@@ -198,8 +205,7 @@ async function resolveGitDir(session: string | undefined): Promise<string> {
  * estable aunque el shell haya hecho cd), si no, el directorio del pane.
  */
 async function resolveFsDir(session: string | undefined): Promise<string> {
-  if (!session) return REPO_DIR
-  const dir = await resolvePaneDir(session)
+  const dir = session ? await resolvePaneDir(session) : DEFAULT_DIR
   let top = dir
   try {
     top = (await execFileP('git', ['-C', dir, 'rev-parse', '--show-toplevel'])).stdout.trim() || dir
@@ -482,7 +488,7 @@ app.onError((err, c) => {
   return c.json({ error: 'internal error' }, 500)
 })
 
-app.get('/api/config', (c) => c.json({ session: TMUX_SESSION, repoDir: REPO_DIR }))
+app.get('/api/config', (c) => c.json({ session: TMUX_SESSION, defaultDir: DEFAULT_DIR }))
 
 app.get('/api/tmux/sessions', async (c) => c.json(await tmuxListSessions()))
 
@@ -708,11 +714,11 @@ async function handleTerm(ws: WebSocket, url: URL) {
     // `; set-option mouse on`: tmux captura la rueda del mouse y scrollea su
     // historial (copy-mode). El frontend traduce gestos táctiles a eventos de
     // rueda — sin esto, no habría forma de ver scrollback desde el celular.
-    p = pty.spawn('tmux', ['new-session', '-A', '-s', tmuxName, '-c', REPO_DIR, ';', 'set-option', 'mouse', 'on'], {
+    p = pty.spawn('tmux', ['new-session', '-A', '-s', tmuxName, '-c', DEFAULT_DIR, ';', 'set-option', 'mouse', 'on'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
-      cwd: REPO_DIR,
+      cwd: DEFAULT_DIR,
       env,
     })
   } catch (e) {

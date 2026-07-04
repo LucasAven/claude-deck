@@ -29,7 +29,7 @@ npm install
 
 cp .env.example .env
 # Editar .env:
-#   REPO_DIR=/ruta/absoluta/de/tu/repo
+#   WORKSPACES_ROOT=/ruta/que/contiene/tus/proyectos
 #   AUTH_TOKEN=$(openssl rand -hex 32)
 
 npm run dev
@@ -67,7 +67,7 @@ git worktree add ../proyecto-feature-x rama-x
 cd ../proyecto-feature-x && claude
 ```
 
-Cada `claude` corre en su worktree, con su propio árbol de archivos y su propia rama. Los endpoints git de claude-deck resuelven el directorio de cada sesión automáticamente (limitado a `WORKSPACES_ROOT`, por defecto el directorio padre de `REPO_DIR`).
+Cada `claude` corre en su worktree, con su propio árbol de archivos y su propia rama. Los endpoints git de claude-deck resuelven el directorio de cada sesión automáticamente (siempre dentro de `WORKSPACES_ROOT`).
 
 ## Modo remoto: "me voy, sigo desde el celu" (`scripts/deck`)
 
@@ -98,11 +98,11 @@ Otros subcomandos: `deck status` (server / agente / tailscale / sueño / baterí
 
 | Variable          | Obligatoria | Default                  | Descripción                                        |
 |-------------------|-------------|--------------------------|----------------------------------------------------|
-| `REPO_DIR`        | sí          | —                        | Ruta absoluta del repo a monitorear                 |
+| `WORKSPACES_ROOT` | sí          | —                        | **Perímetro de seguridad**: raíz que contiene tus proyectos; el server no lee ni opera git fuera de ella |
 | `AUTH_TOKEN`      | sí          | —                        | String aleatorio largo (≥32 chars)                  |
+| `DEFAULT_DIR`     | no          | `WORKSPACES_ROOT`        | "Home" del panel: dónde nacen las sesiones tmux nuevas y qué usan los endpoints sin `?session=`. Debe estar dentro de `WORKSPACES_ROOT` |
 | `TMUX_SESSION`    | no          | `deck`                   | Nombre de la sesión tmux de Claude                  |
 | `DECK_PORT`       | no          | `7433`                   | Puerto local  |
-| `WORKSPACES_ROOT` | no          | padre de `REPO_DIR`      | Raíz permitida para repos de otras sesiones tmux    |
 | `NTFY_TOPIC`      | no          | —                        | Topic secreto de ntfy.sh para push (ver abajo)      |
 
 ## Notificaciones push cuando Claude te necesita (ntfy)
@@ -133,7 +133,7 @@ Esta app expone una shell de tu PC. Medidas tomadas (no negociables):
 - **`AUTH_TOKEN` obligatorio** incluso dentro del tailnet (defensa en profundidad). Si falta o es corto (<32 chars), el server no arranca. Toda ruta — estáticos incluidos — y el handshake del WebSocket validan la cookie httpOnly `deck_token` (o el header `x-deck-token`). Sin token válido → 401.
 - **Validación estricta de paths** en `/api/git/diff`, `/api/git/stage` y `/api/fs/*` (helper compartido `checkRepoPath`): se rechazan rutas absolutas, `..` y symlinks que escapen de la raíz.
 - **Sin ejecución arbitraria por HTTP**: ningún endpoint ejecuta comandos del cliente; solo subcomandos fijos de `git`/`tmux` con argumentos validados (`execFile`, sin shell). La única escritura sobre el repo es stage/unstage de un archivo (`/api/git/stage`); el explorador de archivos es de solo lectura; commit, push, etc. se hacen pidiéndoselos a Claude.
-- **Multi-sesión acotada**: los endpoints git con `?session=` solo operan en repos dentro de `WORKSPACES_ROOT`; los nombres de sesión se validan contra `^[A-Za-z0-9_-]{1,32}$`.
+- **Todo acceso acotado a `WORKSPACES_ROOT`**: los endpoints git/fs — con `?session=` o sin él — solo operan dentro de esa raíz (validada con realpath, anti-symlinks); los nombres de sesión se validan contra `^[A-Za-z0-9_-]{1,32}$`.
 - **Rate limit** básico en los endpoints HTTP.
 - El token en la URL solo se usa la primera vez; después vive en una cookie httpOnly.
 
@@ -154,7 +154,7 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 | `GET /api/git/log?n=15&session=<s>` | Últimos commits |
 | `GET /api/fs/list?path=<rel>&session=<s>` | Lista un directorio (no recursivo; carpetas primero, excluye `.git`, máx 500 entradas). `path` vacío → raíz de la sesión (toplevel git del pane, o el dir del pane si no es repo) |
 | `GET /api/fs/file?path=<rel>&session=<s>` | Contenido de un archivo (solo lectura, truncado a 512 KB, detecta binarios) |
-| `GET /api/config` | Sesión default y `REPO_DIR` |
+| `GET /api/config` | Sesión default y `DEFAULT_DIR` |
 
 Al cerrar el WebSocket se mata **solo el attach** (pty); la sesión tmux sigue viva.
 

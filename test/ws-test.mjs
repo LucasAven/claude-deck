@@ -114,7 +114,7 @@ const sumJson = await sum.json();
 ok('git summary con ?session=deck-2', sum.status === 200 && typeof sumJson.branch === 'string');
 
 // 9b. POST /api/git/stage: stagear/desstagear un archivo temporal del repo de deck-2
-// (las sesiones nacen con -c REPO_DIR, así que el dir del pane es el toplevel del repo)
+// (las sesiones nacen con -c DEFAULT_DIR, así que el dir del pane es el toplevel del repo)
 const stageDir = sessions.find((s) => s.name === 'deck-2')?.dir;
 const tmpRel = `.tmp-ws-test-stage-${Date.now()}.txt`;
 fs.writeFileSync(`${stageDir}/${tmpRel}`, 'stage-test\n');
