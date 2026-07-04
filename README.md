@@ -109,8 +109,10 @@ Otros subcomandos: `deck status` (server / agente / tailscale / sueño / baterí
 
 Para enterarte en el celular cuando Claude pide un permiso o termina una tarea:
 
-1. Instalá la app [ntfy](https://ntfy.sh) en el celular y suscribite a un topic **largo y secreto** (ej: `openssl rand -hex 16`).
-2. Agregá `NTFY_TOPIC=<ese-topic>` a tu `.env`.
+1. Generá un topic **largo y secreto** (ej: `openssl rand -hex 16`) y agregá `NTFY_TOPIC=<ese-topic>` a tu `.env`.
+2. Suscribite al topic en el celular, con cualquiera de las dos opciones:
+   - **App nativa**: instalá [ntfy](https://ntfy.sh) y suscribite al topic. Conexión persistente, la entrega más confiable.
+   - **Web push (sin instalar nada)**: abrí `https://ntfy.sh/<ese-topic>` en el navegador del celular y tocá **Subscribe**. En iPhone hace falta *Add to Home Screen* primero (iOS solo entrega web push a PWAs instaladas).
 3. Activá los hooks de Claude Code renombrando el archivo de ejemplo:
 
    ```bash
@@ -119,9 +121,9 @@ Para enterarte en el celular cuando Claude pide un permiso o termina una tarea:
 
    Eso registra hooks en los eventos `Notification` (Claude espera tu input) y `Stop` (Claude terminó), que ejecutan `scripts/notify.sh` → `curl` a `ntfy.sh/$NTFY_TOPIC`. Ver "Hooks" en la doc oficial de Claude Code.
 
-   > Nota: los hooks aplican al `claude` que corras **en este repo**. Para tener push trabajando en otro repo, copiá `.claude/settings.json` y `scripts/notify.sh` a ese repo (o definí los hooks en `~/.claude/settings.json` con la ruta absoluta del script).
+   > Nota: los hooks aplican al `claude` que corras **en este repo**. Para tener push trabajando en cualquier repo, definí los hooks en el `settings.json` global (`~/.claude/settings.json`) con la ruta absoluta de `scripts/notify.sh` — el script es autocontenido, lee el topic del `.env` de este repo.
 
-Cuando llegue la notificación, entrás a claude-deck y aprobás desde la pestaña Claude.
+`notify.sh` solo notifica sesiones que corren **dentro de tmux** (las que podés controlar remoto); un `claude` en una terminal común no manda push, porque estás mirando la pantalla. Cuando llegue la notificación, entrás a claude-deck y aprobás desde la pestaña Claude.
 
 ## Seguridad
 

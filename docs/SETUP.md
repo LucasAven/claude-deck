@@ -68,6 +68,28 @@ alias deck='<ruta-al-repo>/scripts/deck'
 - `deck status` / `deck log` — diagnóstico.
 - `deck help` — referencia completa de subcomandos.
 
-## 7. Seguridad
+## 7. Notificaciones push (opcional)
+
+Para recibir un push en el teléfono cuando Claude pide un permiso o termina una tarea:
+
+1. Generar un topic secreto y agregarlo al `.env`:
+
+   ```bash
+   echo "NTFY_TOPIC=$(openssl rand -hex 16)" >> .env
+   ```
+
+2. Activar los hooks de Claude Code para este repo:
+
+   ```bash
+   mv .claude/settings.example.json .claude/settings.json
+   ```
+
+   Para tener push en **cualquier** repo, en cambio, definir los hooks `Notification` y `Stop` en el `settings.json` global (`~/.claude/settings.json`) apuntando a la ruta absoluta de `scripts/notify.sh` (no combinar ambos: el hook local y el global mandarían la notificación dos veces).
+
+3. Suscribirse al topic en el teléfono: con la app [ntfy](https://ntfy.sh), o sin instalar nada abriendo `https://ntfy.sh/<topic>` en el navegador y tocando **Subscribe** (en iPhone hace falta *Add to Home Screen* primero — iOS solo entrega web push a PWAs instaladas).
+
+Probar con `TMUX=1 scripts/notify.sh 'prueba'`: la notificación debe llegar al teléfono. Nota: `notify.sh` solo notifica sesiones que corren dentro de tmux (las controlables remoto); un `claude` en una terminal común no manda push.
+
+## 8. Seguridad
 
 El server escucha únicamente en `127.0.0.1`; la única exposición es vía `tailscale serve` (HTTPS + WireGuard, visible solo para los dispositivos del tailnet propio). El `AUTH_TOKEN` no se comparte ni se sube al repositorio: `.env` queda fuera del control de versiones.

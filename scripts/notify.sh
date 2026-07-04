@@ -3,6 +3,10 @@
 # El topic secreto se lee de NTFY_TOPIC en el .env del proyecto (nunca commitearlo).
 set -u
 
+# Solo notificar sesiones que corren dentro de tmux (las controlables remoto);
+# fuera de tmux estás en la compu mirando la terminal, el push sobra.
+[ -z "${TMUX:-}" ] && exit 0
+
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ -z "${NTFY_TOPIC:-}" ] && [ -f "$DIR/.env" ]; then
