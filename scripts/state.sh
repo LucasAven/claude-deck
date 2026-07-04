@@ -31,6 +31,23 @@ if printf '%s' "$STATE" > "$TMP" 2>/dev/null; then
   mv -f "$TMP" "$DIR/$SESSION" 2>/dev/null || rm -f "$TMP" 2>/dev/null
 fi
 
+# Transcript de la sesión (tarea 9, overlay 📜): el JSON del hook trae
+# transcript_path — anotarlo en <sesión>.transcript resuelve el matching
+# sesión tmux ↔ .jsonl sin adivinar por mtime (y sobrevive a varios claude
+# en el mismo repo). Sin jq (misma decisión que el estado): sed sobre el
+# primer tramo del stdin. Si no hay stdin (corrida manual) no se toca nada.
+if [ ! -t 0 ]; then
+  TRANSCRIPT="$(head -c 200000 2>/dev/null | sed -n 's/.*"transcript_path":"\([^"]*\)".*/\1/p' | head -n 1)"
+  case "$TRANSCRIPT" in
+    /*.jsonl)
+      TMPT="$DIR/.tmpt-$SESSION-$$"
+      if printf '%s' "$TRANSCRIPT" > "$TMPT" 2>/dev/null; then
+        mv -f "$TMPT" "$DIR/$SESSION.transcript" 2>/dev/null || rm -f "$TMPT" 2>/dev/null
+      fi
+      ;;
+  esac
+fi
+
 # Limpieza oportunista de registros de sesiones muertas hace rato (el server
 # ya ignora archivos de sesiones que no existen; esto solo evita acumular).
 find "$DIR" -type f -mmin +1440 -delete 2>/dev/null || true

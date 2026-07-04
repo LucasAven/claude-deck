@@ -495,6 +495,118 @@ const compCancel = await page.evaluate(() => {
 ok('cancelar cierra el composer pero conserva el borrador',
   compCancel.closed && compCancel.draft === 'borrador vivo');
 
+// 15. scrollback legible (tarea 9): el 📜 abre un overlay read-only. Fuente
+// primaria: turnos del transcript .jsonl (/api/claude/transcript); fallback
+// para shells: capture-pane como texto plano. Ambos endpoints mockeados
+// (determinista y sin leer el transcript real de deck): A) modo transcript
+// con turnos y roles; B) sin transcript (turns vacíos) → fallback pane con
+// apertura al fondo, "Cargar más" con anclaje, selección nativa y letra
+// persistida.
+ok('botón 📜 (scrollback) presente en la quickkeys row', (await page.$('#btn-scrollback')) !== null);
+const sbRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const mkLines = (n, tag) => Array.from({ length: n }, (_, i) => `${tag} línea ${i + 1}`).join('\n') + '\n';
+  const served = { transcript: [], pane: [] };
+  let transcriptMode = 'turns'; // 'turns' | 'empty' (sin transcript → fallback)
+  const TURNS = [
+    { role: 'user', text: 'probá el overlay' },
+    { role: 'assistant', text: 'dale, lo pruebo' },
+    { role: 'tool', text: 'Bash: echo hola' },
+  ];
+  window.fetch = (url, opts) => {
+    const u = String(url);
+    if (u.includes('/api/claude/transcript')) {
+      served.transcript.push(Number(new URL(u, location.origin).searchParams.get('bytes')));
+      return Promise.resolve(new Response(JSON.stringify(transcriptMode === 'turns'
+        ? { file: 'x.jsonl', turns: TURNS, more: true }
+        : { file: null, turns: [], more: false }), { status: 200 }));
+    }
+    if (u.includes('/api/tmux/scrollback')) {
+      served.pane.push(Number(new URL(u, location.origin).searchParams.get('lines')));
+      // 520 líneas: ≥ las 500 pedidas al abrir (botón "más" visible); < las
+      // 1000 del segundo fetch (la historia se acabó → botón oculto)
+      return Promise.resolve(new Response(mkLines(520, 'sb-mock'), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  localStorage.removeItem('deck-sb-font');
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
+  const out = { served };
+
+  // A) modo transcript: turnos renderizados con clase por rol, pre oculto
+  tap(document.querySelector('#btn-scrollback'));
+  await new Promise((r) => setTimeout(r, 300));
+  out.aOpen = !document.querySelector('#scrollback').classList.contains('hidden');
+  out.aSession = document.querySelector('#scrollback-session').textContent;
+  out.aSrc = document.querySelector('#scrollback-src').textContent;
+  out.aTurns = [...document.querySelectorAll('#scrollback-turns .sb-turn')]
+    .map((d) => `${d.className}|${d.textContent}`);
+  out.aPreHidden = document.querySelector('#scrollback-text').classList.contains('hidden');
+  out.aMoreShown = !document.querySelector('#scrollback-more').classList.contains('hidden');
+  // cargar más: duplica bytes; el mock devuelve los mismos turnos (sin
+  // crecimiento) → el botón se oculta para no invitar taps inútiles
+  tap(document.querySelector('#scrollback-more'));
+  await new Promise((r) => setTimeout(r, 300));
+  out.aMoreHidden = document.querySelector('#scrollback-more').classList.contains('hidden');
+  tap(document.querySelector('#scrollback-close'));
+
+  // B) sin transcript (turns vacíos) → fallback capture-pane (texto plano)
+  transcriptMode = 'empty';
+  tap(document.querySelector('#btn-scrollback'));
+  await new Promise((r) => setTimeout(r, 300));
+  const body = document.querySelector('#scrollback-body');
+  out.bSrc = document.querySelector('#scrollback-src').textContent;
+  out.bTurnsHidden = document.querySelector('#scrollback-turns').classList.contains('hidden');
+  out.bHasText = document.querySelector('#scrollback-text').textContent.includes('sb-mock línea 520');
+  out.bAtBottom = Math.abs(body.scrollTop - (body.scrollHeight - body.clientHeight)) < 4;
+  out.bMoreShown = !document.querySelector('#scrollback-more').classList.contains('hidden');
+  // selección nativa sobre el texto (imposible dentro del canvas de xterm)
+  const sel = window.getSelection();
+  sel.selectAllChildren(document.querySelector('#scrollback-text'));
+  out.bSelectable = sel.toString().includes('sb-mock línea 1');
+  sel.removeAllRanges();
+  // A+ sube el tamaño y lo persiste
+  out.bFontBefore = getComputedStyle(document.querySelector('#scrollback-text')).fontSize;
+  tap(document.querySelector('#scrollback-bigger'));
+  out.bFontAfter = getComputedStyle(document.querySelector('#scrollback-text')).fontSize;
+  out.bFontStored = localStorage.getItem('deck-sb-font');
+  // "Cargar más": pide más líneas y mantiene el ancla de lectura (no salta al fondo)
+  body.scrollTop = 0;
+  tap(document.querySelector('#scrollback-more'));
+  await new Promise((r) => setTimeout(r, 300));
+  out.bMoreHidden = document.querySelector('#scrollback-more').classList.contains('hidden');
+  out.bKeptAnchor = body.scrollTop < body.scrollHeight - body.clientHeight - 4;
+  tap(document.querySelector('#scrollback-close'));
+  out.closed = document.querySelector('#scrollback').classList.contains('hidden');
+  out.emptied = document.querySelector('#scrollback-text').textContent === ''
+    && document.querySelector('#scrollback-turns').textContent === '';
+  window.fetch = realFetch;
+  localStorage.removeItem('deck-sb-font');
+  return out;
+});
+ok('📜 abre en modo transcript: turnos con clase por rol y pre oculto',
+  sbRun.aOpen && sbRun.aSession === 'deck' && sbRun.aSrc === '· transcript' && sbRun.aPreHidden
+  && JSON.stringify(sbRun.aTurns) === JSON.stringify([
+    'sb-turn sb-user|probá el overlay',
+    'sb-turn sb-assistant|dale, lo pruebo',
+    'sb-turn sb-tool|Bash: echo hola',
+  ]));
+ok('transcript "cargar más": duplica bytes y se oculta si no crece',
+  sbRun.aMoreShown && sbRun.aMoreHidden
+  && sbRun.served.transcript[0] === 2 * 1024 * 1024 && sbRun.served.transcript[1] === 4 * 1024 * 1024);
+ok('sin transcript → fallback pane con el texto del capture (src "· pane")',
+  sbRun.bSrc === '· pane' && sbRun.bTurnsHidden && sbRun.bHasText && sbRun.served.pane[0] === 500);
+ok('el overlay abre scrolleado al fondo (lo más reciente)', sbRun.bAtBottom);
+ok('texto seleccionable con la selección nativa del browser', sbRun.bSelectable);
+ok('A+ agranda la letra y persiste en localStorage',
+  parseFloat(sbRun.bFontAfter) > parseFloat(sbRun.bFontBefore) && sbRun.bFontStored === '14');
+ok('pane "cargar más": pide más líneas, conserva el ancla y se oculta al agotar',
+  sbRun.served.pane[1] === 1000 && sbRun.bMoreShown && sbRun.bMoreHidden && sbRun.bKeptAnchor);
+ok('✕ cierra el overlay y suelta el contenido', sbRun.closed && sbRun.emptied);
+
 await page.click('.tab[data-tab="claude"]');
 await new Promise((r) => setTimeout(r, 800));
 await page.screenshot({ path: new URL('./shot-claude.png', import.meta.url).pathname });

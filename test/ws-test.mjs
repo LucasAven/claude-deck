@@ -206,6 +206,77 @@ try {
   fs.rmSync(`${stageDir}/${fsRel}`, { recursive: true, force: true });
 }
 
+// 9d. GET /api/tmux/scrollback (tarea 9): capture-pane como text/plain para el
+// overlay de lectura. Se manda un marcador al shell de deck-2 (sesión scratch
+// del test, nunca la deck real) y tiene que volver por el endpoint.
+execFileSync('tmux', ['send-keys', '-t', '=deck-2:', '-l', 'echo marcador-sb-tarea9']);
+execFileSync('tmux', ['send-keys', '-t', '=deck-2:', 'Enter']);
+await new Promise((r) => setTimeout(r, 800));
+const sbGet = (q) => fetch(`${HTTP}/api/tmux/scrollback?${q}`, { headers: { 'x-deck-token': TOKEN } });
+const sb = await sbGet('session=deck-2&lines=200');
+const sbText = await sb.text();
+ok('scrollback → 200 text/plain con el contenido del pane',
+  sb.status === 200 && (sb.headers.get('content-type') || '').includes('text/plain')
+  && sbText.includes('marcador-sb-tarea9'));
+const sbClamp = await sbGet('session=deck-2&lines=999999');
+ok('scrollback lines gigante se clampa (200, no revienta)', sbClamp.status === 200);
+const sbDefault = await sbGet('session=deck-2');
+ok('scrollback sin lines usa el default (200)', sbDefault.status === 200
+  && (await sbDefault.text()).includes('marcador-sb-tarea9'));
+const sbBad = await sbGet('session=..%2Fmal');
+ok('scrollback nombre inválido → 400', sbBad.status === 400);
+const sb404 = await sbGet('session=no-existe-x');
+ok('scrollback sesión inexistente → 404', sb404.status === 404);
+
+// 9e. GET /api/claude/transcript (tarea 9, fase jsonl): turnos legibles del
+// .jsonl apuntado por el marker que escribe scripts/state.sh; el path se
+// valida contra las raíces ~/.claude*/projects (excepción read-only al
+// perímetro). Fixture scratch bajo la raíz real, limpiada en el finally.
+const TR_DIR = `${os.homedir()}/.claude/projects/zz-deck-ws-test`;
+const TR_FILE = `${TR_DIR}/fixture.jsonl`;
+const TR_MARK = `${STATE_DIR}/deck-2.transcript`;
+const trGet = (q) => fetch(`${HTTP}/api/claude/transcript?${q}`, { headers: { 'x-deck-token': TOKEN } });
+try {
+  fs.rmSync(TR_MARK, { force: true });
+  const trNone = await trGet('session=deck-2');
+  const trNoneJson = await trNone.json();
+  ok('transcript sin marker → 200 con turns vacíos (frontend cae a capture-pane)',
+    trNone.status === 200 && trNoneJson.file === null && trNoneJson.turns.length === 0);
+  fs.mkdirSync(TR_DIR, { recursive: true });
+  fs.writeFileSync(TR_FILE, [
+    JSON.stringify({ type: 'user', message: { role: 'user', content: 'hola claude' } }),
+    JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hola lucas' }, { type: 'tool_use', name: 'Bash', input: { command: 'echo hi\nsegunda linea' } }] } }),
+    JSON.stringify({ type: 'user', isMeta: true, message: { role: 'user', content: 'meta oculto' } }),
+    JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'plomería' }] } }),
+    JSON.stringify({ type: 'assistant', isSidechain: true, message: { role: 'assistant', content: [{ type: 'text', text: 'sidechain oculto' }] } }),
+    'basura no-json',
+    JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'segundo prompt' }] } }),
+  ].join('\n') + '\n');
+  fs.writeFileSync(TR_MARK, TR_FILE);
+  const tr = await trGet('session=deck-2');
+  const trJson = await tr.json();
+  ok('transcript → 200 con turnos parseados (meta/sidechain/tool_result/basura filtrados)',
+    tr.status === 200 && trJson.more === false
+    && JSON.stringify(trJson.turns) === JSON.stringify([
+      { role: 'user', text: 'hola claude' },
+      { role: 'assistant', text: 'hola lucas' },
+      { role: 'tool', text: 'Bash: echo hi' },
+      { role: 'user', text: 'segundo prompt' },
+    ]));
+  const outFile = `${os.tmpdir()}/zz-deck-ws-out.jsonl`;
+  fs.writeFileSync(outFile, '{}\n');
+  fs.writeFileSync(TR_MARK, outFile);
+  const trOut = await trGet('session=deck-2');
+  ok('transcript con marker fuera de ~/.claude*/projects se ignora (perímetro)',
+    trOut.status === 200 && (await trOut.json()).turns.length === 0);
+  fs.rmSync(outFile, { force: true });
+  ok('transcript nombre inválido → 400', (await trGet('session=..%2Fmal')).status === 400);
+  ok('transcript sesión inexistente → 404', (await trGet('session=no-existe-x')).status === 404);
+} finally {
+  fs.rmSync(TR_MARK, { force: true });
+  fs.rmSync(TR_DIR, { recursive: true, force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);

@@ -269,6 +269,87 @@ body.composer-open .controlbar { display: none; }
   font-size: 12px;
 }
 
+/* ---------- scrollback legible (tarea 9) ---------- */
+/* overlay fullscreen fixed: tapa todo (tabbar incluida) sin tocar el layout de
+   la columna — al cerrar no hace falta re-fit de la terminal */
+.scrollback {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.scrollback-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  min-height: 52px;
+}
+.scrollback-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+#scrollback-session { color: var(--accent); }
+#scrollback-src { font-size: 11px; }
+#scrollback-text,
+#scrollback-turns {
+  padding: 10px 12px 24px;
+  font-family: var(--mono);
+  font-size: var(--sb-font, 13px); /* A−/A+ setea --sb-font en #scrollback */
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;   /* leer, no layout de terminal: wrap antes que h-scroll */
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* turnos del transcript: prompt del usuario resaltado, texto del asistente
+   plano, tools como one-liners apagados */
+.sb-turn { margin: 0 0 12px; }
+.sb-user {
+  border-left: 3px solid var(--accent-dim);
+  background: var(--panel);
+  border-radius: 0 8px 8px 0;
+  padding: 8px 10px;
+  margin: 18px 0 12px;
+}
+.sb-user::before { content: "\276F"; color: var(--accent); margin-right: 7px; }
+.sb-turn:first-child { margin-top: 0; }
+.sb-tool {
+  color: var(--muted);
+  font-size: 0.92em;
+  margin: 0 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap; /* one-liner: el resumen ya viene truncado del server */
+}
+.sb-tool::before { content: "\23FA"; color: var(--accent-dim); margin-right: 7px; }
+.scrollback-more {
+  display: block;
+  margin: 10px auto 0;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--panel);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.scrollback-more:active { border-color: var(--accent); color: var(--accent); }
+
 /* ---------- barra de control inferior (pestaña Claude) ---------- */
 .controlbar {
   position: relative; /* ancla del popover .switch-menu */

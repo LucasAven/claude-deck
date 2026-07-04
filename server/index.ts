@@ -156,6 +156,111 @@ function sessionState(name: string): SessionState | null {
   }
 }
 
+// --- transcript de Claude por sesión (tarea 9, fase jsonl) ----------------
+// EXCEPCIÓN DELIBERADA AL PERÍMETRO (solo lectura, documentada en README):
+// los transcripts viven en ~/.claude*/projects, FUERA de WORKSPACES_ROOT.
+// El matching sesión↔jsonl no se adivina: scripts/state.sh anota el
+// transcript_path que traen los hooks en ~/.claude-deck/state/<sesión>.transcript,
+// y acá solo se acepta ese path si realpath-resuelve a un *.jsonl dentro de
+// las raíces conocidas (los dos perfiles del usuario). Nada más es legible.
+const TRANSCRIPT_ROOTS = [
+  path.join(os.homedir(), '.claude', 'projects'),
+  path.join(os.homedir(), '.claude-work', 'projects'),
+]
+
+function transcriptForSession(name: string): string | null {
+  if (!SESSION_RE.test(name)) return null
+  try {
+    const raw = fs.readFileSync(path.join(STATE_DIR, `${name}.transcript`), 'utf8').trim()
+    if (!path.isAbsolute(raw) || !raw.endsWith('.jsonl')) return null
+    const real = fs.realpathSync(raw) // resuelve symlinks antes del check de raíz
+    if (!real.endsWith('.jsonl')) return null
+    const inRoots = TRANSCRIPT_ROOTS.some((root) => {
+      try {
+        return insideDir(real, fs.realpathSync(root))
+      } catch {
+        return false // el perfil no existe en esta máquina
+      }
+    })
+    if (!inRoots || !fs.statSync(real).isFile()) return null
+    return real
+  } catch {
+    return null
+  }
+}
+
+/** Cola del jsonl acotada en bytes; si se recortó, descarta la primera línea parcial. */
+async function readTranscriptTail(file: string, tailBytes: number): Promise<{ text: string; more: boolean }> {
+  const fh = await fs.promises.open(file, 'r')
+  try {
+    const size = (await fh.stat()).size
+    const start = Math.max(0, size - tailBytes)
+    const len = size - start
+    const buf = Buffer.alloc(len)
+    await fh.read(buf, 0, len, start)
+    let text = buf.toString('utf8')
+    if (start > 0) {
+      const nl = text.indexOf('\n')
+      text = nl === -1 ? '' : text.slice(nl + 1)
+    }
+    return { text, more: start > 0 }
+  } finally {
+    await fh.close()
+  }
+}
+
+type TranscriptTurn = { role: 'user' | 'assistant' | 'tool'; text: string }
+
+// resumen de una línea por tool_use: el nombre + el argumento más informativo
+function toolLine(name: string, input: Record<string, unknown> | undefined): string {
+  const pick = ['command', 'file_path', 'pattern', 'description', 'prompt', 'skill', 'url']
+  let arg = ''
+  for (const k of pick) {
+    if (typeof input?.[k] === 'string') { arg = input[k] as string; break }
+  }
+  arg = arg.split('\n')[0].slice(0, 160)
+  return arg ? `${name}: ${arg}` : name
+}
+
+// Turnos legibles del jsonl: prompts del usuario, texto del asistente y
+// one-liners de tools. Se saltean: entradas meta (wrappers de slash commands,
+// caveats), sidechains (subagentes), thinking y los tool_result (plomería).
+function parseTranscriptTurns(text: string): TranscriptTurn[] {
+  const turns: TranscriptTurn[] = []
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    let e: any
+    try {
+      e = JSON.parse(line)
+    } catch {
+      continue // línea partida o corrupta: mejor esfuerzo
+    }
+    if (e?.isMeta || e?.isSidechain) continue
+    const content = e?.message?.content
+    if (e?.type === 'user') {
+      let t = ''
+      if (typeof content === 'string') t = content
+      else if (Array.isArray(content)) {
+        t = content.filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+          .map((b: any) => b.text).join('\n')
+      }
+      t = t.trim()
+      // los slash commands / interrupciones llegan envueltos en tags o caveats
+      if (!t || t.startsWith('<') || t.startsWith('Caveat:') || t.startsWith('[Request interrupted')) continue
+      turns.push({ role: 'user', text: t })
+    } else if (e?.type === 'assistant' && Array.isArray(content)) {
+      for (const b of content) {
+        if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+          turns.push({ role: 'assistant', text: b.text.trim() })
+        } else if (b?.type === 'tool_use' && typeof b.name === 'string') {
+          turns.push({ role: 'tool', text: toolLine(b.name, b.input) })
+        }
+      }
+    }
+  }
+  return turns
+}
+
 async function tmuxListSessions(): Promise<Array<{ name: string; attached: boolean; dir: string; state: SessionState | null }>> {
   let stdout = ''
   try {
@@ -516,6 +621,63 @@ app.onError((err, c) => {
 app.get('/api/config', (c) => c.json({ session: TMUX_SESSION, defaultDir: DEFAULT_DIR }))
 
 app.get('/api/tmux/sessions', async (c) => c.json(await tmuxListSessions()))
+
+// Scrollback legible (tarea 9): texto plano del pane para el overlay de
+// lectura del frontend — sobre HTML plano el browser da selección, copy y
+// find-in-page gratis (nada de eso existe dentro del canvas de xterm).
+// Decisión abierta anotada: SIN `-e` (colores ANSI) a propósito — el texto
+// plano es más legible a tamaños de lectura y copia limpio; revisitar si se
+// extrañan los colores de diffs/status (implicaría conversión ansi→HTML).
+const SCROLLBACK_DEFAULT = 500
+const SCROLLBACK_MAX = 5000
+app.get('/api/tmux/scrollback', async (c) => {
+  const session = c.req.query('session') || TMUX_SESSION
+  if (!SESSION_RE.test(session)) throw new HttpError(400, 'nombre de sesión inválido')
+  if (!(await tmuxHasSession(session))) throw new HttpError(404, `sesión tmux no encontrada: ${session}`)
+  let lines = Number.parseInt(c.req.query('lines') || String(SCROLLBACK_DEFAULT), 10)
+  if (!Number.isFinite(lines)) lines = SCROLLBACK_DEFAULT
+  lines = Math.min(Math.max(lines, 1), SCROLLBACK_MAX)
+  // target `=sesion:` — capture-pane no acepta `=sesion` pelado (gotcha 3);
+  // maxBuffer holgado: 5000 líneas anchas superan el mega default de execFile
+  const { stdout } = await execFileP(
+    'tmux',
+    ['capture-pane', '-p', '-t', `=${session}:`, '-S', `-${lines}`],
+    { maxBuffer: 8 * 1024 * 1024 },
+  )
+  // el viewport del pane se captura entero: las filas vacías bajo el cursor
+  // son ruido al final del texto — recortarlas (solo líneas en blanco)
+  return c.text(stdout.replace(/[ \t]*(\n[ \t]*)*$/, '\n'))
+})
+
+// Transcript de la sesión como turnos legibles (tarea 9, fase jsonl): la
+// fuente primaria del overlay 📜. Claude Code 2.x corre en alternate screen
+// y repinta en el lugar — tmux NUNCA acumula su transcript en la historia
+// (probado contra claude real, incluso con alternate-screen off), así que el
+// capture-pane de arriba solo sirve para shells; lo que hizo Claude vive
+// únicamente en su .jsonl. `bytes` acota la cola leída (cargar más = pedir
+// más bytes hacia atrás). Sin marker NO es error: 200 con turns vacíos (el
+// frontend cae a capture-pane) — un 404 acá ensuciaría la consola del browser
+// en cada apertura del overlay sobre un shell pelado.
+const TRANSCRIPT_BYTES_DEFAULT = 2 * 1024 * 1024
+const TRANSCRIPT_BYTES_MAX = 32 * 1024 * 1024
+const TRANSCRIPT_TURNS_MAX = 1000 // techo del DOM del overlay
+app.get('/api/claude/transcript', async (c) => {
+  const session = c.req.query('session') || TMUX_SESSION
+  if (!SESSION_RE.test(session)) throw new HttpError(400, 'nombre de sesión inválido')
+  if (!(await tmuxHasSession(session))) throw new HttpError(404, `sesión tmux no encontrada: ${session}`)
+  const file = transcriptForSession(session)
+  if (!file) return c.json({ file: null, turns: [], more: false })
+  let bytes = Number.parseInt(c.req.query('bytes') || String(TRANSCRIPT_BYTES_DEFAULT), 10)
+  if (!Number.isFinite(bytes)) bytes = TRANSCRIPT_BYTES_DEFAULT
+  bytes = Math.min(Math.max(bytes, 64 * 1024), TRANSCRIPT_BYTES_MAX)
+  const { text, more } = await readTranscriptTail(file, bytes)
+  let turns = parseTranscriptTurns(text)
+  // techo de turnos: pedir más bytes no agregaría nada visible una vez capado,
+  // así que `more` sigue siendo solo el recorte por bytes (el frontend además
+  // oculta el botón si un re-fetch no crece)
+  if (turns.length > TRANSCRIPT_TURNS_MAX) turns = turns.slice(-TRANSCRIPT_TURNS_MAX)
+  return c.json({ file: path.basename(file), turns, more })
+})
 
 // Imagen desde el celular → Claude Code de la sesión.
 // Camino ideal (macOS): guardar la imagen, ponerla en el clipboard de la Mac

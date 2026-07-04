@@ -757,6 +757,148 @@ function wireComposer() {
 }
 
 // ---------------------------------------------------------------------------
+// Scrollback legible (tarea 9): overlay fullscreen de solo lectura. Fuente
+// primaria: el transcript .jsonl de la sesión como turnos (Claude Code 2.x
+// corre en alternate screen y repinta en el lugar — tmux nunca acumula su
+// transcript, probado contra claude real); fallback para shells: capture-pane
+// como texto plano. HTML plano a propósito: scroll nativo (sin wireTouchScroll
+// ni copy-mode), selección/copy y find-in-page del browser gratis — también
+// es la vía para copiar un error/path/hash. Abre al fondo (lo más reciente);
+// "Cargar más" pide historia hacia atrás sin perder la posición de lectura.
+// ---------------------------------------------------------------------------
+const SB_STEP = 500;                    // modo pane: líneas por fetch
+const SB_MAX = 5000;                    // modo pane: techo (= el del server)
+const SB_BYTES_STEP = 2 * 1024 * 1024;  // modo transcript: cola inicial
+const SB_BYTES_MAX = 32 * 1024 * 1024;  // modo transcript: techo (= el del server)
+const SB_FONT_KEY = 'deck-sb-font';
+const SB_FONT_DEFAULT = 13;
+let sbMode = 'text';   // 'turns' (transcript) | 'text' (capture-pane)
+let sbLines = 0;       // modo pane: líneas pedidas en el fetch vigente
+let sbBytes = 0;       // modo transcript: bytes pedidos en el fetch vigente
+let sbTurnCount = 0;   // modo transcript: para detectar re-fetch sin crecimiento
+
+// aplica el tamaño persistido (+delta opcional, clampeado) vía --sb-font
+function sbApplyFont(delta) {
+  let px = SB_FONT_DEFAULT;
+  try { px = parseInt(localStorage.getItem(SB_FONT_KEY), 10) || SB_FONT_DEFAULT; } catch (_) {}
+  px = Math.min(Math.max(px + (delta || 0), 10), 20);
+  try { localStorage.setItem(SB_FONT_KEY, String(px)); } catch (_) {}
+  $('#scrollback').style.setProperty('--sb-font', `${px}px`);
+}
+
+// ancla de lectura compartida: al fondo en la carga inicial, compensada
+// cuando "cargar más" mete contenido arriba
+function sbAnchor(body, prevH, prevTop, keepAnchor) {
+  body.scrollTop = keepAnchor ? body.scrollHeight - prevH + prevTop : body.scrollHeight;
+}
+
+function sbShowSource(mode) {
+  sbMode = mode;
+  $('#scrollback-src').textContent = mode === 'turns' ? '· transcript' : '· pane';
+  $('#scrollback-turns').classList.toggle('hidden', mode !== 'turns');
+  $('#scrollback-text').classList.toggle('hidden', mode !== 'text');
+}
+
+// modo transcript: turnos legibles del jsonl (404 → el caller cae a sbFetch)
+async function sbFetchTranscript(bytes, keepAnchor) {
+  let data;
+  try {
+    const res = await api(`/api/claude/transcript?${sessionQuery()}&bytes=${bytes}`);
+    if (!res.ok) return false;
+    data = await res.json();
+  } catch (_) {
+    return false;
+  }
+  if (!Array.isArray(data.turns) || !data.turns.length) return false; // recién nacida: mejor el pane
+  const body = $('#scrollback-body');
+  const prevH = body.scrollHeight;
+  const prevTop = body.scrollTop;
+  const box = $('#scrollback-turns');
+  box.textContent = '';
+  for (const t of data.turns) {
+    const div = document.createElement('div');
+    const role = t.role === 'user' || t.role === 'tool' ? t.role : 'assistant';
+    div.className = `sb-turn sb-${role}`;
+    div.textContent = t.text; // textContent siempre: el transcript es input no confiable
+    box.appendChild(div);
+  }
+  // ocultar "cargar más" al llegar al techo o si un re-fetch no creció (techo
+  // de turnos del server: más bytes ya no agregan nada visible)
+  const grew = data.turns.length > sbTurnCount;
+  $('#scrollback-more').classList.toggle('hidden',
+    !data.more || bytes >= SB_BYTES_MAX || (keepAnchor && !grew));
+  sbTurnCount = data.turns.length;
+  sbBytes = bytes;
+  sbShowSource('turns');
+  $('#scrollback-text').textContent = '';
+  sbAnchor(body, prevH, prevTop, keepAnchor);
+  return true;
+}
+
+// modo pane (fallback shells): capture-pane como texto plano
+async function sbFetch(lines, keepAnchor) {
+  const body = $('#scrollback-body');
+  const pre = $('#scrollback-text');
+  let text;
+  try {
+    const res = await api(`/api/tmux/scrollback?${sessionQuery()}&lines=${lines}`);
+    if (!res.ok) throw new Error(String(res.status));
+    text = await res.text();
+  } catch (_) {
+    pre.textContent = 'No se pudo leer el scrollback de la sesión.';
+    $('#scrollback-more').classList.add('hidden');
+    sbShowSource('text');
+    return;
+  }
+  const prevH = body.scrollHeight;
+  const prevTop = body.scrollTop;
+  pre.textContent = text;
+  sbLines = lines;
+  // "Cargar más" solo si tmux devolvió al menos lo pedido: si vino menos, la
+  // historia se acabó (heurística: la captura incluye el viewport además de
+  // las -S líneas, así que puede sobrar un tap no-op — aceptable)
+  const got = text.split('\n').length;
+  $('#scrollback-more').classList.toggle('hidden', got < lines || lines >= SB_MAX);
+  sbShowSource('text');
+  sbAnchor(body, prevH, prevTop, keepAnchor);
+}
+
+async function sbLoadMore() {
+  if (sbMode === 'turns') await sbFetchTranscript(Math.min(sbBytes * 2, SB_BYTES_MAX), true);
+  else await sbFetch(Math.min(sbLines + SB_STEP, SB_MAX), true);
+}
+
+async function openScrollback() {
+  $('#scrollback-session').textContent = state.session;
+  $('#scrollback-src').textContent = '';
+  $('#scrollback-turns').textContent = '';
+  $('#scrollback-text').textContent = 'Cargando…';
+  sbTurnCount = 0;
+  $('#scrollback-more').classList.add('hidden');
+  sbShowSource('text');
+  sbApplyFont(0);
+  $('#scrollback').classList.remove('hidden');
+  if (!(await sbFetchTranscript(SB_BYTES_STEP, false))) await sbFetch(SB_STEP, false);
+}
+
+function closeScrollback() {
+  $('#scrollback').classList.add('hidden');
+  $('#scrollback-text').textContent = ''; // soltar el contenido grande del DOM
+  $('#scrollback-turns').textContent = '';
+  sbLines = 0;
+  sbBytes = 0;
+  sbTurnCount = 0;
+}
+
+function wireScrollback() {
+  onTap($('#btn-scrollback'), openScrollback);
+  onTap($('#scrollback-close'), closeScrollback);
+  onTap($('#scrollback-smaller'), () => sbApplyFont(-1));
+  onTap($('#scrollback-bigger'), () => sbApplyFont(1));
+  onTap($('#scrollback-more'), sbLoadMore);
+}
+
+// ---------------------------------------------------------------------------
 // Fetch con manejo de 401
 // ---------------------------------------------------------------------------
 async function api(path, opts) {
@@ -1489,6 +1631,7 @@ async function init() {
   wireTouchScroll('term-claude', () => claudeConn);
   wireImagePaste();
   wireComposer();
+  wireScrollback();
   refreshSessions();
   refreshGit(); // primer fetch del badge de Cambios sin esperar el intervalo
 
