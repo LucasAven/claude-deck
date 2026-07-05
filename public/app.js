@@ -382,6 +382,8 @@ function sendSlashCommand(cmd) {
 
 function closeSwitchMenu() {
   $('#switch-menu').classList.add('hidden');
+  markSnippetsBtn();
+  hideSnipTip(); // que el tooltip no sobreviva a la paleta
 }
 
 function menuItem(label, selected, onPick) {
@@ -449,6 +451,7 @@ function openModelMenu() {
   menu.appendChild(row);
 
   menu.classList.remove('hidden');
+  markSnippetsBtn(); // pisó el contenido de la paleta: apagar el ☰
 }
 
 function wireSwitchers() {
@@ -456,7 +459,7 @@ function wireSwitchers() {
   onTap($('#btn-model'), () => openModelMenu());
   // tap afuera cierra el menú
   document.addEventListener('pointerdown', (e) => {
-    if (!e.target.closest('#switch-menu, #btn-mode, #btn-model, #btn-attach')) closeSwitchMenu();
+    if (!e.target.closest('#switch-menu, #btn-mode, #btn-model, #btn-attach, #btn-snippets')) closeSwitchMenu();
   });
   renderSwitchPills();
 }
@@ -638,6 +641,7 @@ function openAttachMenu() {
     menu.appendChild(btn);
   }
   menu.classList.remove('hidden');
+  markSnippetsBtn(); // pisó el contenido de la paleta: apagar el ☰
 }
 
 function wireImagePaste() {
@@ -731,6 +735,7 @@ function openComposer() {
 function closeComposer() {
   if (!composerIsOpen()) return;
   saveDraftNow(); // Cancelar conserva el borrador; tras enviar guarda vacío → borra la key
+  hideComposerSnips();
   composerSession = null;
   $('#composer-text').blur(); // sin esto el teclado iOS queda abierto sobre la terminal
   $('#composer').classList.add('hidden');
@@ -764,6 +769,301 @@ function wireComposer() {
   onTap($('#composer-send'), () => sendComposer());
   onTap($('#composer-nl'), () => composerNewline());
   $('#composer-text').addEventListener('input', scheduleDraftSave);
+}
+
+// ---------------------------------------------------------------------------
+// Paleta de snippets (tarea 10): frases de uso constante a un tap. La lista es
+// GLOBAL y vive en el server (~/.claude-deck/snippets.json, GET/PUT
+// /api/snippets) para que sincronice celu ↔ desktop — decisión de Lucas.
+// Tocar un chip ESCRIBE el texto en el prompt y NUNCA envía: bracketed paste
+// sin el \r diferido de sendSlashCommand, hasta /compact entra como texto
+// tipeado. Con el composer abierto inserta en el textarea en el cursor.
+// Edición low-fi con prompt(), el patrón establecido (renameSession).
+// ---------------------------------------------------------------------------
+let snippets = null;         // cache local; null = todavía no se pudo cargar
+let snippetsEditing = false; // modo edición (renombrar / borrar / mover)
+
+async function loadSnippets(force) {
+  if (snippets && !force) return;
+  try {
+    const res = await api('/api/snippets');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.snippets)) snippets = data.snippets;
+  } catch (_) { /* server caído: la paleta muestra el error */ }
+}
+
+async function saveSnippets() {
+  try {
+    const res = await api('/api/snippets', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ snippets }),
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch (_) {}
+      alert(`No se pudieron guardar los snippets: ${msg}`);
+    }
+  } catch (e) {
+    if (String(e.message) !== '401') alert('No se pudieron guardar los snippets (error de red)');
+  }
+}
+
+// la lista es compartida entre dispositivos: refrescar en cada apertura y
+// re-pintar solo si cambió (la primera pintura sale del cache al toque)
+function refreshSnippetsInBackground() {
+  const before = JSON.stringify(snippets);
+  loadSnippets(true).then(() => {
+    if (snippetsEditing) return; // no pisar una edición en curso
+    if (JSON.stringify(snippets) !== before) rerenderSnippets();
+  });
+}
+
+// insertar SIN enviar: ese es el contrato de toda la paleta (caption del mockup)
+function insertSnippet(text) {
+  if (composerIsOpen()) {
+    const ta = $('#composer-text');
+    ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, 'end');
+    scheduleDraftSave(); // setRangeText no dispara 'input' (como composerNewline)
+    hideComposerSnips();
+    ta.focus();
+  } else {
+    pasteTextToPrompt(text);
+    closeSwitchMenu();
+  }
+}
+
+function snippetAdd() {
+  const input = window.prompt('Texto del nuevo snippet:');
+  if (input === null) return;
+  const text = input.trim();
+  if (!text) return;
+  snippets.push(text);
+  saveSnippets();
+  rerenderSnippets();
+}
+
+function snippetRename(i) {
+  const input = window.prompt('Editar snippet:', snippets[i]);
+  if (input === null) return;
+  const text = input.trim();
+  if (!text || text === snippets[i]) return;
+  snippets[i] = text;
+  saveSnippets();
+  rerenderSnippets();
+}
+
+function snippetDelete(i) {
+  if (!window.confirm(`¿Borrar el snippet "${snippets[i]}"?`)) return;
+  snippets.splice(i, 1);
+  saveSnippets();
+  rerenderSnippets();
+}
+
+// mover un lugar hacia atrás alcanza para cualquier reordenamiento (grilla 2
+// col: "antes" = izquierda o fila anterior)
+function snippetMove(i) {
+  if (i <= 0) return;
+  [snippets[i - 1], snippets[i]] = [snippets[i], snippets[i - 1]];
+  saveSnippets();
+  rerenderSnippets();
+}
+
+// --- tooltip de texto completo: los chips truncan con ellipsis y un snippet
+// largo se vuelve ilegible. Desktop: hover con el mouse. Touch (sin hover):
+// mantener apretado ~medio segundo lo muestra mientras el dedo siga apoyado,
+// y ese release NO inserta (es un peek, no una acción — snipTipSuppressTap).
+// Solo aparece si el texto realmente no entra en el chip. ---
+const SNIP_TIP_HOLD_MS = 450;
+let snipTipHoldTimer = null;
+let snipTipSuppressTap = false; // true = el pointerup en curso fue un peek
+
+function showSnipTip(chip, text) {
+  const tip = $('#snip-tip');
+  tip.textContent = text;
+  tip.classList.remove('hidden');
+  // medir visible con su max-width y recién después posicionar: centrado
+  // sobre el chip, clampeado al viewport (fixed = mismas coordenadas que
+  // getBoundingClientRect, no importa dónde esté el contenedor)
+  const r = chip.getBoundingClientRect();
+  const x = Math.max(8, Math.min(r.left + r.width / 2 - tip.offsetWidth / 2,
+    window.innerWidth - tip.offsetWidth - 8));
+  tip.style.left = `${x}px`;
+  tip.style.bottom = `${window.innerHeight - r.top + 8}px`; // arriba del chip
+}
+
+function hideSnipTip() {
+  clearTimeout(snipTipHoldTimer);
+  snipTipHoldTimer = null;
+  $('#snip-tip').classList.add('hidden');
+}
+
+function wireSnipTip(chip, textSpan, text) {
+  const truncated = () => textSpan.scrollWidth > textSpan.clientWidth + 1;
+  chip.addEventListener('pointerenter', (e) => {
+    if (e.pointerType === 'mouse' && truncated()) showSnipTip(chip, text);
+  });
+  chip.addEventListener('pointerleave', hideSnipTip);
+  chip.addEventListener('pointerdown', () => {
+    snipTipSuppressTap = false; // gesto nuevo; el flag NO se consume en los taps
+    clearTimeout(snipTipHoldTimer);
+    snipTipHoldTimer = setTimeout(() => {
+      snipTipHoldTimer = null;
+      if (truncated()) {
+        snipTipSuppressTap = true;
+        showSnipTip(chip, text);
+      }
+    }, SNIP_TIP_HOLD_MS);
+  });
+  chip.addEventListener('pointerup', hideSnipTip);
+  chip.addEventListener('pointercancel', hideSnipTip);
+}
+
+// pinta la paleta en un contenedor: header (SNIPPETS · Editar) + grilla 2 col
+// con "+ Nuevo" al final; compartida por el popover y el panel del composer
+function renderSnippetsInto(box) {
+  hideSnipTip(); // un re-render reemplaza los chips: el pointerleave nunca llegaría
+  box.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'snip-head';
+  const title = document.createElement('span');
+  title.className = 'snip-title';
+  title.textContent = 'Snippets';
+  head.appendChild(title);
+  if (snippets) {
+    const edit = document.createElement('button');
+    edit.className = 'snip-edit';
+    edit.textContent = snippetsEditing ? 'Listo' : 'Editar';
+    onTap(edit, () => {
+      snippetsEditing = !snippetsEditing;
+      rerenderSnippets();
+    });
+    head.appendChild(edit);
+  }
+  box.appendChild(head);
+  if (!snippets) {
+    const err = document.createElement('div');
+    err.className = 'empty-state';
+    err.textContent = 'No se pudieron cargar los snippets';
+    box.appendChild(err);
+    return;
+  }
+  const grid = document.createElement('div');
+  grid.className = 'mi-snippets';
+  snippets.forEach((text, i) => {
+    const chip = document.createElement('button');
+    chip.className = 'snip';
+    const span = document.createElement('span');
+    span.className = 'snip-text';
+    span.textContent = text;
+    chip.appendChild(span);
+    if (snippetsEditing) {
+      if (i > 0) {
+        const mv = document.createElement('span');
+        mv.className = 'snip-move';
+        mv.textContent = '◀';
+        mv.title = 'Mover antes';
+        onTap(mv, () => {
+          if (snipTipSuppressTap) return; // release de un peek, no un tap
+          snippetMove(i);
+        });
+        chip.appendChild(mv);
+      }
+      const x = document.createElement('span');
+      x.className = 'snip-x';
+      x.textContent = '✕';
+      x.title = 'Borrar';
+      onTap(x, () => {
+        if (snipTipSuppressTap) return; // release de un peek, no un tap
+        snippetDelete(i);
+      });
+      chip.appendChild(x);
+    }
+    // el pointerup de los controles burbujea hasta el chip: ignorarlo acá
+    // (el onTap del control ya disparó su acción)
+    onTap(chip, (e) => {
+      if (snipTipSuppressTap) return; // release de un peek (long-press), no un tap
+      if (e.target.closest('.snip-move, .snip-x')) return;
+      if (snippetsEditing) snippetRename(i);
+      else insertSnippet(text);
+    });
+    wireSnipTip(chip, span, text); // title nativo no: en el celu no existe y en desktop duplicaría
+    grid.appendChild(chip);
+  });
+  const add = document.createElement('button');
+  add.className = 'snip snip-new';
+  add.textContent = '+ Nuevo';
+  onTap(add, () => snippetAdd());
+  grid.appendChild(add);
+  box.appendChild(grid);
+}
+
+// re-pinta la superficie abierta (popover o panel del composer) tras una edición
+function rerenderSnippets() {
+  const menu = $('#switch-menu');
+  if (!menu.classList.contains('hidden') && menu.dataset.kind === 'snippets') renderSnippetsInto(menu);
+  const panel = $('#composer-snips');
+  if (!panel.classList.contains('hidden')) renderSnippetsInto(panel);
+}
+
+// ☰ ámbar mientras la paleta esté abierta (como el mockup); centralizado acá
+// porque el popover se cierra/pisa desde varios lados
+function markSnippetsBtn() {
+  const menu = $('#switch-menu');
+  const open = !menu.classList.contains('hidden') && menu.dataset.kind === 'snippets';
+  $('#btn-snippets').classList.toggle('active', open);
+}
+
+async function openSnippetsMenu() {
+  const menu = $('#switch-menu');
+  // mismo patrón toggle/re-render que openModelMenu / openAttachMenu
+  if (!menu.classList.contains('hidden') && menu.dataset.kind === 'snippets') {
+    closeSwitchMenu();
+    return;
+  }
+  snippetsEditing = false;
+  menu.innerHTML = '';
+  menu.dataset.kind = 'snippets';
+  await loadSnippets();
+  if (menu.dataset.kind !== 'snippets') return; // otro menú ganó durante el await
+  renderSnippetsInto(menu);
+  menu.classList.remove('hidden');
+  markSnippetsBtn();
+  refreshSnippetsInBackground();
+}
+
+async function toggleComposerSnips() {
+  const panel = $('#composer-snips');
+  if (!panel.classList.contains('hidden')) {
+    hideComposerSnips();
+    return;
+  }
+  snippetsEditing = false;
+  await loadSnippets();
+  if (!composerIsOpen()) return; // se cerró el composer durante el await
+  renderSnippetsInto(panel);
+  panel.classList.remove('hidden');
+  $('#composer-snippets').classList.add('active');
+  refreshSnippetsInBackground();
+}
+
+function hideComposerSnips() {
+  const panel = $('#composer-snips');
+  if (panel.classList.contains('hidden')) return;
+  panel.classList.add('hidden');
+  panel.innerHTML = '';
+  $('#composer-snippets').classList.remove('active');
+  hideSnipTip(); // que el tooltip no sobreviva al panel
+}
+
+function wireSnippets() {
+  onTap($('#btn-snippets'), () => openSnippetsMenu());
+  onTap($('#composer-snippets'), () => toggleComposerSnips());
+  // tap afuera cierra el panel del composer (el popover ya lo cubre wireSwitchers)
+  document.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('#composer-snips, #composer-snippets')) hideComposerSnips();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1641,6 +1941,7 @@ async function init() {
   wireTouchScroll('term-claude', () => claudeConn);
   wireImagePaste();
   wireComposer();
+  wireSnippets();
   wireScrollback();
   refreshSessions();
   refreshGit(); // primer fetch del badge de Cambios sin esperar el intervalo

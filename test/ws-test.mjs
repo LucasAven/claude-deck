@@ -277,6 +277,36 @@ try {
   fs.rmSync(TR_DIR, { recursive: true, force: true });
 }
 
+// 9f. GET/PUT /api/snippets (tarea 10): lista global server-side en
+// ~/.claude-deck/snippets.json — es DATA REAL del usuario: se preserva el
+// archivo (si existe) y se restaura en el finally.
+const SNIP_FILE = `${os.homedir()}/.claude-deck/snippets.json`;
+const SNIP_SEEDS = ['dale, seguí', '/compact', 'commit y push', 'sí, hacelo', 'explicá primero', '/clear'];
+const snipBackup = fs.existsSync(SNIP_FILE) ? fs.readFileSync(SNIP_FILE) : null;
+const snipGet = () => fetch(`${HTTP}/api/snippets`, { headers: { 'x-deck-token': TOKEN } });
+const snipPut = (body) => fetch(`${HTTP}/api/snippets`, {
+  method: 'PUT',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+try {
+  fs.rmSync(SNIP_FILE, { force: true });
+  const seeded = await (await snipGet()).json();
+  ok('snippets sin archivo → seeds del mockup', JSON.stringify(seeded.snippets) === JSON.stringify(SNIP_SEEDS));
+  const put = await snipPut({ snippets: ['uno', 'dos'] });
+  ok('PUT snippets → 200 y persiste', put.status === 200
+    && JSON.stringify((await (await snipGet()).json()).snippets) === JSON.stringify(['uno', 'dos']));
+  ok('PUT snippets con no-string → 400', (await snipPut({ snippets: ['ok', 42] })).status === 400);
+  ok('PUT snippets con string vacío → 400', (await snipPut({ snippets: ['ok', '  '] })).status === 400);
+  ok('PUT snippets sin lista → 400', (await snipPut({ snippets: 'no-lista' })).status === 400);
+  fs.writeFileSync(SNIP_FILE, 'json roto {');
+  const broken = await (await snipGet()).json();
+  ok('snippets con JSON roto → cae a los seeds (no 500)', JSON.stringify(broken.snippets) === JSON.stringify(SNIP_SEEDS));
+} finally {
+  if (snipBackup !== null) fs.writeFileSync(SNIP_FILE, snipBackup);
+  else fs.rmSync(SNIP_FILE, { force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);

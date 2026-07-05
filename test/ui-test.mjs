@@ -607,6 +607,212 @@ ok('pane "cargar más": pide más líneas, conserva el ancla y se oculta al agot
   sbRun.served.pane[1] === 1000 && sbRun.bMoreShown && sbRun.bMoreHidden && sbRun.bKeptAnchor);
 ok('✕ cierra el overlay y suelta el contenido', sbRun.closed && sbRun.emptied);
 
+// 16. paleta de snippets (tarea 10): el ☰ abre el popover compartido con la
+// lista GLOBAL del server (/api/snippets, acá mockeado con estado propio para
+// no tocar la lista real de Lucas); chip → term.paste SIN \r (insertar nunca
+// envía); edición low-fi (prompt()/confirm() stubbeados) manda PUT con la
+// lista completa; con el composer abierto el chip inserta en el textarea en
+// el cursor (sin term.paste).
+ok('botón ☰ (snippets) presente en la quickkeys row', (await page.$('#btn-snippets')) !== null);
+const snipRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  let mockList = ['dale, seguí', '/compact', 'commit y push'];
+  const puts = [];
+  window.fetch = (url, opts) => {
+    if (String(url).includes('/api/snippets')) {
+      if (opts && opts.method === 'PUT') {
+        mockList = JSON.parse(opts.body).snippets;
+        puts.push([...mockList]);
+        return Promise.resolve(new Response('{"ok":true}', { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ snippets: mockList }), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  snippets = null; // forzar re-fetch contra el mock
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
+  const menu = document.querySelector('#switch-menu');
+  const chipTexts = (root) => [...root.querySelectorAll('.mi-snippets .snip:not(.snip-new) .snip-text')]
+    .map((s) => s.textContent);
+  const out = { puts };
+
+  // abrir: popover kind=snippets, chips del server en grilla 2 col, + Nuevo dashed, ☰ ámbar
+  tap(document.querySelector('#btn-snippets'));
+  await new Promise((r) => setTimeout(r, 250));
+  out.open = !menu.classList.contains('hidden') && menu.dataset.kind === 'snippets';
+  out.chips = chipTexts(menu);
+  out.newDashed = !!menu.querySelector('.snip-new')
+    && getComputedStyle(menu.querySelector('.snip-new')).borderTopStyle === 'dashed';
+  out.twoCols = getComputedStyle(menu.querySelector('.mi-snippets')).gridTemplateColumns.split(' ').length === 2;
+  out.btnActive = document.querySelector('#btn-snippets').classList.contains('active');
+
+  // chip → term.paste con el texto exacto y CERO sendKeys (nada manda \r)
+  const pastes = [];
+  const keys = [];
+  const origPaste = claudeConn.term.paste.bind(claudeConn.term);
+  const origSend = claudeConn.sendKeys;
+  claudeConn.term.paste = (t) => pastes.push(t);
+  claudeConn.sendKeys = (d) => keys.push(d);
+  tap(menu.querySelectorAll('.mi-snippets .snip')[1]); // "/compact"
+  await new Promise((r) => setTimeout(r, 300));
+  claudeConn.sendKeys = origSend;
+  out.pastes = [...pastes];
+  out.keys = [...keys];
+  out.closedTrasInsert = menu.classList.contains('hidden');
+  out.btnInactive = !document.querySelector('#btn-snippets').classList.contains('active');
+
+  // edición: Editar → ✕ por chip y ◀ desde el segundo; + Nuevo / rename /
+  // mover / borrar mandan PUT con la lista completa
+  const origPrompt = window.prompt;
+  const origConfirm = window.confirm;
+  tap(document.querySelector('#btn-snippets'));
+  await new Promise((r) => setTimeout(r, 250));
+  tap(menu.querySelector('.snip-edit'));
+  await new Promise((r) => setTimeout(r, 100));
+  out.editXs = menu.querySelectorAll('.mi-snippets .snip-x').length;
+  out.editMoves = menu.querySelectorAll('.mi-snippets .snip-move').length;
+  window.prompt = () => 'nuevo snippet';
+  tap(menu.querySelector('.snip-new'));
+  await new Promise((r) => setTimeout(r, 100));
+  out.afterAdd = chipTexts(menu);
+  tap(menu.querySelectorAll('.mi-snippets .snip-move')[0]); // mueve el 2º al 1º lugar
+  await new Promise((r) => setTimeout(r, 100));
+  out.afterMove = chipTexts(menu);
+  window.prompt = () => 'renombrado';
+  tap(menu.querySelectorAll('.mi-snippets .snip')[0]); // tap en chip en modo edición = rename
+  await new Promise((r) => setTimeout(r, 100));
+  out.afterRename = chipTexts(menu);
+  window.confirm = () => true;
+  tap(menu.querySelectorAll('.mi-snippets .snip-x')[0]);
+  await new Promise((r) => setTimeout(r, 100));
+  out.afterDel = chipTexts(menu);
+  window.prompt = origPrompt;
+  window.confirm = origConfirm;
+  tap(document.querySelector('#term-claude')); // cierra el popover
+
+  // composer: el ☰ del foot abre el panel y el chip inserta EN EL CURSOR del
+  // textarea (destino distinto, misma lista) — sin term.paste
+  tap(document.querySelector('#btn-composer'));
+  await new Promise((r) => setTimeout(r, 250));
+  const ta = document.querySelector('#composer-text');
+  ta.value = 'hola mundo';
+  ta.setSelectionRange(5, 5); // cursor después de "hola "
+  tap(document.querySelector('#composer-snippets'));
+  await new Promise((r) => setTimeout(r, 250));
+  const panel = document.querySelector('#composer-snips');
+  out.cPanelOpen = !panel.classList.contains('hidden');
+  out.cBtnActive = document.querySelector('#composer-snippets').classList.contains('active');
+  out.cChips = chipTexts(panel);
+  pastes.length = 0;
+  tap(panel.querySelectorAll('.mi-snippets .snip')[0]);
+  await new Promise((r) => setTimeout(r, 100));
+  claudeConn.term.paste = origPaste;
+  out.cValue = ta.value;
+  out.cNoPaste = pastes.length === 0;
+  out.cPanelClosed = panel.classList.contains('hidden');
+  tap(document.querySelector('#composer-cancel'));
+  await new Promise((r) => setTimeout(r, 100));
+  localStorage.removeItem('draft:deck'); // residuo del insert (draft de la sesión real)
+
+  window.fetch = realFetch;
+  snippets = null; // que la próxima apertura re-fetchee la lista real
+  return out;
+});
+ok('☰ abre la paleta: chips del server en grilla 2 col y "+ Nuevo" dashed',
+  snipRun.open && JSON.stringify(snipRun.chips) === JSON.stringify(['dale, seguí', '/compact', 'commit y push'])
+  && snipRun.newDashed && snipRun.twoCols);
+ok('☰ ámbar con la paleta abierta y se apaga al cerrar', snipRun.btnActive && snipRun.btnInactive);
+ok('chip → term.paste con el texto exacto y cierra la paleta',
+  JSON.stringify(snipRun.pastes) === JSON.stringify(['/compact']) && snipRun.closedTrasInsert);
+ok('insertar NUNCA envía (cero sendKeys, sin \\r)', snipRun.keys.length === 0);
+ok('modo edición: ✕ en cada chip y ◀ desde el segundo',
+  snipRun.editXs === 3 && snipRun.editMoves === 2);
+ok('+ Nuevo agrega al final (prompt low-fi)',
+  JSON.stringify(snipRun.afterAdd) === JSON.stringify(['dale, seguí', '/compact', 'commit y push', 'nuevo snippet']));
+ok('◀ mueve el chip un lugar antes',
+  JSON.stringify(snipRun.afterMove) === JSON.stringify(['/compact', 'dale, seguí', 'commit y push', 'nuevo snippet']));
+ok('tap en chip en modo edición renombra',
+  JSON.stringify(snipRun.afterRename) === JSON.stringify(['renombrado', 'dale, seguí', 'commit y push', 'nuevo snippet']));
+ok('✕ borra el chip (con confirm)',
+  JSON.stringify(snipRun.afterDel) === JSON.stringify(['dale, seguí', 'commit y push', 'nuevo snippet']));
+ok('cada edición manda PUT con la lista completa (4 PUTs)',
+  snipRun.puts.length === 4 && JSON.stringify(snipRun.puts[3]) === JSON.stringify(snipRun.afterDel));
+ok('composer: ☰ del foot abre el panel con la misma lista',
+  snipRun.cPanelOpen && snipRun.cBtnActive
+  && JSON.stringify(snipRun.cChips) === JSON.stringify(['dale, seguí', 'commit y push', 'nuevo snippet']));
+ok('composer: chip inserta en el cursor del textarea (sin term.paste) y cierra el panel',
+  snipRun.cValue === 'hola dale, seguímundo' && snipRun.cNoPaste && snipRun.cPanelClosed);
+
+// 16b. tooltip de texto completo (#snip-tip): hover con mouse sobre un chip
+// truncado lo muestra; en touch, mantener apretado ~450 ms lo muestra y ese
+// release NO inserta (peek); un chip corto no muestra nada; el tap normal
+// siguiente inserta como siempre.
+const tipRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const LONG = 'este snippet es larguísimo: corré la suite entera, después commit y push con mensaje corto en minúsculas';
+  window.fetch = (url, opts) => String(url).includes('/api/snippets')
+    ? Promise.resolve(new Response(JSON.stringify(opts && opts.method === 'PUT'
+      ? { ok: true } : { snippets: ['corto', LONG] }), { status: 200 }))
+    : realFetch(url, opts);
+  snippets = null;
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
+  tap(document.querySelector('#btn-snippets'));
+  await new Promise((r) => setTimeout(r, 250));
+  const chips = document.querySelectorAll('#switch-menu .mi-snippets .snip');
+  const tip = document.querySelector('#snip-tip');
+  const out = {};
+
+  // hover (mouse) sobre el largo: tip con el texto completo; leave lo oculta
+  chips[1].dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+  out.hoverShown = !tip.classList.contains('hidden') && tip.textContent === LONG;
+  chips[1].dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
+  out.hoverHidden = tip.classList.contains('hidden');
+  // hover sobre el corto: no está truncado → nada
+  chips[0].dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+  out.shortNoTip = tip.classList.contains('hidden');
+
+  // long-press (touch) sobre el largo: tip mientras se sostiene, release sin insertar
+  const pastes = [];
+  const origPaste = claudeConn.term.paste.bind(claudeConn.term);
+  claudeConn.term.paste = (t) => pastes.push(t);
+  chips[1].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 650));
+  out.holdShown = !tip.classList.contains('hidden') && tip.textContent === LONG;
+  chips[1].dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 250));
+  out.holdHidden = tip.classList.contains('hidden');
+  out.holdNoInsert = pastes.length === 0;
+  out.menuStillOpen = !document.querySelector('#switch-menu').classList.contains('hidden');
+
+  // el tap normal siguiente inserta como siempre (el flag no queda pegado)
+  tap(chips[1]);
+  await new Promise((r) => setTimeout(r, 200));
+  claudeConn.term.paste = origPaste;
+  out.tapInserts = pastes.length === 1 && pastes[0] === LONG;
+  window.fetch = realFetch;
+  snippets = null;
+  return out;
+});
+ok('hover (mouse) sobre un chip truncado muestra el tooltip y leave lo oculta',
+  tipRun.hoverShown && tipRun.hoverHidden);
+ok('chip corto (sin truncar) no muestra tooltip', tipRun.shortNoTip);
+ok('long-press muestra el tooltip y ese release NO inserta (paleta sigue abierta)',
+  tipRun.holdShown && tipRun.holdHidden && tipRun.holdNoInsert && tipRun.menuStillOpen);
+ok('el tap normal siguiente inserta como siempre', tipRun.tapInserts);
+
+// screenshot de la paleta contra el server real (fetch ya restaurado)
+await tapSel('#btn-snippets');
+await new Promise((r) => setTimeout(r, 400));
+await page.screenshot({ path: new URL('./shot-snippets.png', import.meta.url).pathname });
+await page.$eval('#term-claude', pd);
+await new Promise((r) => setTimeout(r, 200));
+
 await page.click('.tab[data-tab="claude"]');
 await new Promise((r) => setTimeout(r, 800));
 await page.screenshot({ path: new URL('./shot-claude.png', import.meta.url).pathname });

@@ -852,6 +852,52 @@ app.get('/api/fs/file', async (c) => {
   return c.json(fsReadFile(dir, c.req.query('path') || ''))
 })
 
+// Snippets (tarea 10): lista GLOBAL de frases para la paleta del frontend.
+// Server-side a pedido de Lucas para que sincronice celu ↔ desktop — única
+// escritura de "datos de la app": un JSON propio en ~/.claude-deck (fuera del
+// perímetro WORKSPACES_ROOT a propósito: no es contenido de repos).
+const SNIPPETS_FILE = path.join(os.homedir(), '.claude-deck', 'snippets.json')
+// presets del mockup (design-refs/task10-snippets.png): se sirven mientras no
+// exista el archivo; el primer PUT los materializa (editados o no)
+const SNIPPET_SEEDS = ['dale, seguí', '/compact', 'commit y push', 'sí, hacelo', 'explicá primero', '/clear']
+const SNIPPETS_MAX = 50
+const SNIPPET_LEN_MAX = 500
+
+function readSnippets(): string[] {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SNIPPETS_FILE, 'utf8'))
+    if (Array.isArray(raw)) return raw.filter((s): s is string => typeof s === 'string')
+  } catch {
+    /* sin archivo todavía (primera vez) o JSON roto: seeds */
+  }
+  return [...SNIPPET_SEEDS]
+}
+
+app.get('/api/snippets', (c) => c.json({ snippets: readSnippets() }))
+
+// Reemplaza la lista completa: la paleta edita de a una operación y manda todo
+// (más simple que un CRUD por ítem para una lista de este tamaño).
+app.put('/api/snippets', async (c) => {
+  let body: { snippets?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const list = body.snippets
+  if (!Array.isArray(list) || list.length > SNIPPETS_MAX
+    || !list.every((s) => typeof s === 'string' && s.trim().length > 0 && s.length <= SNIPPET_LEN_MAX)) {
+    throw new HttpError(400, `snippets: lista de hasta ${SNIPPETS_MAX} strings no vacíos (máx ${SNIPPET_LEN_MAX} caracteres)`)
+  }
+  fs.mkdirSync(path.dirname(SNIPPETS_FILE), { recursive: true })
+  // escritura atómica (tmp + rename): un crash a mitad de write no puede
+  // dejar el JSON trunco — un archivo roto degradaría la lista a los seeds
+  const tmp = `${SNIPPETS_FILE}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(list, null, 2) + '\n')
+  fs.renameSync(tmp, SNIPPETS_FILE)
+  return c.json({ ok: true })
+})
+
 // Estáticos (con auth, servidos desde public/)
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

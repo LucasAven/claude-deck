@@ -144,7 +144,7 @@ Esta app expone una shell de tu PC. Medidas tomadas (no negociables):
 - **Bind solo a `127.0.0.1`.** El server nunca escucha en interfaces externas. La única exposición es vía `tailscale serve` (HTTPS + WireGuard, visible solo para los dispositivos de tu tailnet). **Jamás** bindear `0.0.0.0` ni abrir el puerto en el router.
 - **`AUTH_TOKEN` obligatorio** incluso dentro del tailnet (defensa en profundidad). Si falta o es corto (<32 chars), el server no arranca. Toda ruta — estáticos incluidos — y el handshake del WebSocket validan la cookie httpOnly `deck_token` (o el header `x-deck-token`). Sin token válido → 401.
 - **Validación estricta de paths** en `/api/git/diff`, `/api/git/stage` y `/api/fs/*` (helper compartido `checkRepoPath`): se rechazan rutas absolutas, `..` y symlinks que escapen de la raíz.
-- **Sin ejecución arbitraria por HTTP**: ningún endpoint ejecuta comandos del cliente; solo subcomandos fijos de `git`/`tmux` con argumentos validados (`execFile`, sin shell). La única escritura sobre el repo es stage/unstage de un archivo (`/api/git/stage`); el explorador de archivos es de solo lectura; commit, push, etc. se hacen pidiéndoselos a Claude.
+- **Sin ejecución arbitraria por HTTP**: ningún endpoint ejecuta comandos del cliente; solo subcomandos fijos de `git`/`tmux` con argumentos validados (`execFile`, sin shell). La única escritura sobre el repo es stage/unstage de un archivo (`/api/git/stage`); el explorador de archivos es de solo lectura; commit, push, etc. se hacen pidiéndoselos a Claude. La única otra escritura es `PUT /api/snippets`, que solo toca su propio JSON de datos de la app (`~/.claude-deck/snippets.json`, contenido validado, path fijo).
 - **Todo acceso acotado a `WORKSPACES_ROOT`**: los endpoints git/fs — con `?session=` o sin él — solo operan dentro de esa raíz (validada con realpath, anti-symlinks); los nombres de sesión se validan contra `^[A-Za-z0-9_-]{1,32}$`.
 - **Única excepción al perímetro (solo lectura)**: `GET /api/claude/transcript` lee el transcript `.jsonl` de la sesión para el overlay de lectura 📜 — esos archivos viven en `~/.claude/projects` / `~/.claude-work/projects`, fuera de `WORKSPACES_ROOT`. El path no viene del cliente: lo anota `scripts/state.sh` desde los hooks (`transcript_path` del evento) en `~/.claude-deck/state/<sesión>.transcript`, y el server solo lo sirve si realpath-resuelve a un `*.jsonl` dentro de esas dos raíces. Nada más de `~/.claude*` es accesible, y nunca hay escritura.
 - **Rate limit** básico en los endpoints HTTP.
@@ -170,6 +170,8 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 | `GET /api/git/log?n=15&session=<s>` | Últimos commits |
 | `GET /api/fs/list?path=<rel>&session=<s>` | Lista un directorio (no recursivo; carpetas primero, excluye `.git`, máx 500 entradas). `path` vacío → raíz de la sesión (toplevel git del pane, o el dir del pane si no es repo) |
 | `GET /api/fs/file?path=<rel>&session=<s>` | Contenido de un archivo (solo lectura, truncado a 512 KB, detecta binarios) |
+| `GET /api/snippets` | Lista global de snippets para la paleta ☰ (frases que se insertan en el prompt sin enviar). Vive en `~/.claude-deck/snippets.json` (sincroniza entre dispositivos); sin archivo responde los presets |
+| `PUT /api/snippets` | Reemplaza la lista completa. Body JSON: `{ "snippets": ["…"] }` (máx 50 strings no vacíos de ≤500 chars). Escritura atómica |
 | `GET /api/config` | Sesión default y `DEFAULT_DIR` |
 
 Al cerrar el WebSocket se mata **solo el attach** (pty); la sesión tmux sigue viva.
