@@ -341,6 +341,42 @@ try {
   }
 }
 
+// 12c. GET /api/presence (tarea 3): los clientes WS reportan {t:'vis'} y el
+// server lo expone para que notify.sh suprima pushes si ya estás mirando.
+// Se asserta sobre la MEMBRESÍA de deck-2 en sessions (no sobre `visible`
+// global) para que una PWA real mirando otra sesión no ensucie los checks.
+const getPresence = async () =>
+  (await (await fetch(`${HTTP}/api/presence`, { headers: { 'x-deck-token': TOKEN } })).json());
+{
+  let pr = await getPresence();
+  ok('presence: sin vis, deck-2 no figura', !pr.sessions.includes('deck-2'));
+
+  // vis:true mandado EN el onopen: cubre la carrera del primer report (el
+  // listener de presencia se registra antes del spawn del pty en handleTerm)
+  const cv = connect('session=deck-2');
+  cv.on('open', () => cv.send(JSON.stringify({ t: 'vis', visible: true })));
+  await new Promise((r) => setTimeout(r, 800));
+  pr = await getPresence();
+  ok('presence: vis:true en onopen → deck-2 visible', pr.visible === true && pr.sessions.includes('deck-2'));
+
+  cv.send(JSON.stringify({ t: 'vis', visible: false }));
+  await new Promise((r) => setTimeout(r, 300));
+  pr = await getPresence();
+  ok('presence: vis:false → deck-2 ya no figura', !pr.sessions.includes('deck-2'));
+
+  cv.send(JSON.stringify({ t: 'vis', visible: 'basura' }));
+  await new Promise((r) => setTimeout(r, 300));
+  pr = await getPresence();
+  ok('presence: visible no-booleano no cuenta', !pr.sessions.includes('deck-2'));
+
+  cv.send(JSON.stringify({ t: 'vis', visible: true }));
+  await new Promise((r) => setTimeout(r, 300));
+  cv.close();
+  await new Promise((r) => setTimeout(r, 400));
+  pr = await getPresence();
+  ok('presence: cerrar el WS borra la entrada', !pr.sessions.includes('deck-2'));
+}
+
 // 13. DELETE /api/tmux/sessions/:name mata la sesión
 const del = await fetch(`${HTTP}/api/tmux/sessions/deck-2`, { method: 'DELETE', headers: { 'x-deck-token': TOKEN } });
 ok('DELETE sesión existente → 200', del.status === 200);

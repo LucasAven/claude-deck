@@ -85,6 +85,44 @@ ${DESC:0:200}"
   esac
 fi
 
+# Presencia (tarea 3): si ya estás mirando, el push sobra — se DESCARTA (no
+# hay push silencioso; decidido 2026-07-04). Dos señales, alcanza una:
+#   (a) Mac presente: pantalla desbloqueada + input hace < DECK_PRESENCE_IDLE
+#       segundos (HIDIdleTime; default 5 min — tolera leer output largo).
+#   (b) Celu presente: alguna PWA visible en primer plano — el server lo sabe
+#       por los reports {t:'vis'} del WS (GET /api/presence, TTL 25 s). Al
+#       bloquear el celu o cambiar de app, visibilitychange lo apaga.
+# Todo falla ABIERTO: error, timeout o lectura rara = mandar el push igual
+# (perder una notificación es peor que una redundante). El AUTH_TOKEN viaja
+# SOLO a 127.0.0.1 — jamás en nada que toque ntfy.
+IDLE_MAX="${DECK_PRESENCE_IDLE:-$(env_get DECK_PRESENCE_IDLE)}"
+IDLE_MAX="${IDLE_MAX:-300}"
+
+mac_present() {
+  # pantalla bloqueada → ausente. macOS moderno (probado en Darwin 25) expone
+  # IOConsoleLocked (siempre presente, true/false — y recién pasa a true cuando
+  # vence el "require password after", no al apagarse la pantalla); versiones
+  # viejas mostraban CGSSessionScreenIsLocked solo al bloquear. Se aceptan las
+  # dos: cualquiera en <true/> = bloqueada.
+  LOCKED="$(ioreg -n Root -d1 -a 2>/dev/null | grep -A1 -E 'IOConsoleLocked|CGSSessionScreenIsLocked' | grep -c '<true/>')"
+  [ "${LOCKED:-0}" -gt 0 ] && return 1
+  IDLE="$(ioreg -c IOHIDSystem 2>/dev/null | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}')"
+  case "$IDLE" in '' | *[!0-9]*) return 1 ;; esac # sin lectura → no afirmar presencia
+  [ "$IDLE" -lt "$IDLE_MAX" ]
+}
+
+phone_present() {
+  TOKEN="$(env_get AUTH_TOKEN)"
+  [ -n "$TOKEN" ] || return 1
+  PORT="${DECK_PORT:-$(env_get DECK_PORT)}"
+  curl -s -m 1 -H "x-deck-token: $TOKEN" \
+    "http://127.0.0.1:${PORT:-7433}/api/presence" 2>/dev/null | grep -q '"visible":true'
+}
+
+if mac_present || phone_present; then
+  exit 0
+fi
+
 # Click → PWA con la sesión ya seleccionada (init lee ?session=). Solo con
 # nombres que el server acepta (mismo SESSION_RE) — así no hace falta encodear.
 ARGS=(-s -m 5 -H "Title: $TITLE" -H "Tags: robot" -d "$BODY")

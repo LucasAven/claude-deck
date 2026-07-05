@@ -86,6 +86,14 @@ function createTermConnection(containerId, connId, getSession) {
     } catch (_) { /* contenedor oculto */ }
   }
 
+  function sendVis() {
+    // presencia (tarea 3): el server suprime pushes de notify.sh mientras
+    // alguna PWA esté visible en primer plano. Se manda al conectar, en cada
+    // visibilitychange y re-afirmado en el poll de 8 s (TTL server: 25 s).
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ t: 'vis', visible: document.visibilityState === 'visible' }));
+  }
+
   function connect() {
     clearTimeout(retryTimer);
     retryTimer = null;
@@ -113,6 +121,7 @@ function createTermConnection(containerId, connId, getSession) {
       if (myGen !== gen) return;
       retries = 0;
       setConn(true);
+      sendVis();
       lastCols = 0;
       lastRows = 0;
       requestAnimationFrame(() => doFit(true));
@@ -177,6 +186,7 @@ function createTermConnection(containerId, connId, getSession) {
       retries = 0;
       connect();
     },
+    sendVis,
     resume() {
       // al volver del background: si el WS murió, reconectar ya (sin backoff)
       if (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
@@ -1652,12 +1662,16 @@ async function init() {
   // en cualquier tab para mantener al día el badge de Cambios
   setInterval(() => {
     if (document.visibilityState !== 'visible') return;
+    claudeConn.sendVis(); // re-afirmar presencia (tarea 3): el server la expira a los 25 s
     refreshGit();
     if (state.activeTab === 'claude') refreshSessions();
     if (state.activeTab === 'files') refreshTree(false); // sigue el cwd del pane: re-render solo si cambió la raíz
   }, 8000);
 
   document.addEventListener('visibilitychange', () => {
+    // presencia (tarea 3): avisar también el pasaje a hidden — iOS congela la
+    // página después de este evento, es la última chance de decir "no miro más"
+    claudeConn.sendVis();
     if (document.visibilityState === 'visible') {
       refreshGit();
       refreshSessions();

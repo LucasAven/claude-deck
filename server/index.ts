@@ -622,6 +622,24 @@ app.get('/api/config', (c) => c.json({ session: TMUX_SESSION, defaultDir: DEFAUL
 
 app.get('/api/tmux/sessions', async (c) => c.json(await tmuxListSessions()))
 
+// Presencia del celu (tarea 3): cada cliente WS reporta {t:'vis'} al conectar,
+// en cada visibilitychange y re-afirmado en el poll de 8 s. notify.sh consulta
+// este endpoint antes de pushear: PWA visible en primer plano = el usuario ya
+// está mirando, el push sobra. El TTL corto existe porque un socket puede
+// morir SIN close (celu sin batería, red cortada): la entrada caduca sola si
+// el cliente deja de re-afirmar.
+const PRESENCE_TTL_MS = 25_000
+const presence = new Map<WebSocket, { session: string; visible: boolean; at: number }>()
+
+app.get('/api/presence', (c) => {
+  const now = Date.now()
+  const sessions: string[] = []
+  for (const p of presence.values()) {
+    if (p.visible && now - p.at < PRESENCE_TTL_MS && !sessions.includes(p.session)) sessions.push(p.session)
+  }
+  return c.json({ visible: sessions.length > 0, sessions })
+})
+
 // Scrollback legible (tarea 9): texto plano del pane para el overlay de
 // lectura del frontend — sobre HTML plano el browser da selección, copy y
 // find-in-page gratis (nada de eso existe dentro del canvas de xterm).
@@ -878,6 +896,18 @@ async function handleTerm(ws: WebSocket, url: URL) {
     return
   }
   const tmuxName = session
+
+  // Presencia (tarea 3): registrado ANTES de cualquier await — la PWA manda
+  // {t:'vis'} apenas abre el socket, y ws no bufferea mensajes sin listener:
+  // si esto viviera en el handler principal (que recién se registra después
+  // del spawn del pty), ese primer report se perdería en la ventana del spawn.
+  ws.on('message', (raw: RawData) => {
+    let m: any
+    try { m = JSON.parse(String(raw)) } catch { return }
+    if (m.t === 'vis') presence.set(ws, { session: tmuxName, visible: m.visible === true, at: Date.now() })
+  })
+  ws.on('close', () => { presence.delete(ws) })
+
   const existed = await tmuxHasSession(tmuxName)
 
   // Solo un attach con intención explícita puede CREAR (create=1: botón + de

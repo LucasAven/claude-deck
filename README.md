@@ -105,6 +105,7 @@ Otros subcomandos: `deck status` (server / agente / tailscale / sueño / baterí
 | `DECK_PORT`       | no          | `7433`                   | Puerto local  |
 | `NTFY_TOPIC`      | no          | —                        | Topic secreto de ntfy.sh para push (ver abajo)      |
 | `DECK_URL`        | no          | —                        | URL pública del panel (la escriben solos `deck install`/`deck url`); habilita el deep-link del push |
+| `DECK_PRESENCE_IDLE` | no       | `300`                    | Segundos sin teclado/mouse para que la Mac deje de contar como "estás mirando" (supresión de push por presencia) |
 
 ## Notificaciones push cuando Claude te necesita (ntfy)
 
@@ -130,6 +131,8 @@ El push es **contextual**: el título es el nombre de la sesión tmux, y el cuer
 
 `notify.sh` solo notifica sesiones que corren **dentro de tmux** (las que podés controlar remoto); un `claude` en una terminal común no manda push, porque estás mirando la pantalla. Cuando llegue la notificación, entrás a claude-deck y aprobás desde la pestaña Claude.
 
+Además el push se **suprime si ya estás mirando** (presencia): con la Mac desbloqueada y actividad de teclado/mouse en los últimos 5 min (`DECK_PRESENCE_IDLE` en segundos para cambiarlo), o con la PWA visible en primer plano en cualquier dispositivo (`GET /api/presence` — bloquear el celular o cambiar de app te vuelve "ausente" al instante). El push suprimido se descarta, no se encola. Todos los chequeos fallan abiertos: si algo no se puede leer, el push sale igual.
+
 ### Semáforo de sesiones (punto en el chip)
 
 Cada chip de sesión muestra un punto con lo que su Claude está haciendo: **verde = trabajando, ámbar = espera tu input, gris = idle**. Lo alimentan los mismos hooks: `scripts/state.sh` escribe el estado en `~/.claude-deck/state/<sesión>` (`UserPromptSubmit`/`PreToolUse` → working, `Notification`/`PermissionRequest` → waiting, `Stop` → idle) y el server lo mezcla en `GET /api/tmux/sessions`. El mismo script anota además el `transcript_path` que trae cada evento (`<sesión>.transcript`) — es lo que le permite al overlay 📜 saber qué `.jsonl` corresponde a cada sesión tmux. Una sesión sin registro (un shell pelado, o un `claude` sin estos hooks) no muestra punto. Un `working` sin señales por más de 5 min decae a "sin punto" (un claude matado con `kill` nunca emite `Stop`); `waiting` e `idle` no decaen — un permiso pendiente sigue en ámbar aunque vuelvas horas después.
@@ -153,8 +156,9 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 
 | Ruta | Descripción |
 |---|---|
-| `WS /ws/term?session=<s>&create=1` | Terminal (attach tmux). Solo crea la sesión si falta con `create=1` (o si es la default); sin él, una sesión inexistente contesta `{"t":"meta","gone":true}` y cierra — así el retry de un cliente viejo no resucita una sesión recién matada. Mensajes JSON: `{"t":"in","d":…}`, `{"t":"resize","cols":N,"rows":N}`, `{"t":"refresh"}` (repaint completo, lo manda la PWA al volver de background) ⇄ `{"t":"out","d":…}` |
+| `WS /ws/term?session=<s>&create=1` | Terminal (attach tmux). Solo crea la sesión si falta con `create=1` (o si es la default); sin él, una sesión inexistente contesta `{"t":"meta","gone":true}` y cierra — así el retry de un cliente viejo no resucita una sesión recién matada. Mensajes JSON: `{"t":"in","d":…}`, `{"t":"resize","cols":N,"rows":N}`, `{"t":"refresh"}` (repaint completo, lo manda la PWA al volver de background), `{"t":"vis","visible":bool}` (presencia: la PWA reporta si está en primer plano) ⇄ `{"t":"out","d":…}` |
 | `GET /api/tmux/sessions` | Sesiones tmux activas (excluye `*-shell`, legacy de la pestaña Shell). Incluye `state` (`working`\|`waiting`\|`idle`\|`null`) leído de `~/.claude-deck/state/` — lo escriben los hooks vía `scripts/state.sh` |
+| `GET /api/presence` | `{ visible, sessions }`: si alguna PWA está en primer plano (y qué sesiones mira), según los reports `{"t":"vis"}` del WS (TTL 25 s). Lo consulta `notify.sh` para suprimir pushes mientras estás mirando |
 | `DELETE /api/tmux/sessions/:name` | Mata la sesión tmux (y su `*-shell` acompañante si quedó de la v1) |
 | `PATCH /api/tmux/sessions/:name` | Renombra la sesión (y su `*-shell` si existe). Body JSON: `{ "newName": "<nombre>" }` (letras/números/`-`/`_`, máx 32, sufijo `-shell` reservado). 409 si el nombre ya existe |
 | `GET /api/claude/transcript?session=<s>&bytes=<n>` | Turnos legibles (vos/Claude/tools) del transcript `.jsonl` de la sesión — fuente primaria del overlay 📜. El `.jsonl` lo apunta el marker que escriben los hooks (`state.sh`); sin marker responde `{ turns: [] }` y la UI cae a `capture-pane`. `bytes` acota la cola leída (default 2 MB, máx 32 MB) |
