@@ -182,10 +182,19 @@ body {
   border-radius: 14px 14px 0 0;
   background: var(--panel);
   box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
+  /* contexto de apilado propio: el sheet siempre sobre las capas de la terminal
+     (que son position:absolute) — bajo los overlays scrollback/host/snip-tip */
+  position: relative;
+  z-index: 2;
 }
 /* mientras el composer está abierto, su fila inferior reemplaza a la
    controlbar (el mockup no la muestra: el sheet va directo sobre el teclado) */
 body.composer-open .controlbar { display: none; }
+/* y la tabbar también: navegar de pestaña no sirve mientras se compone, y
+   con interactive-widget=resizes-content kb-open no dispara (layout y visual
+   viewport encogen juntos), así que la tabbar quedaba encajada entre el sheet
+   y el teclado robando alto */
+body.composer-open .tabbar { display: none; }
 
 .composer-head {
   flex: none;
@@ -566,6 +575,20 @@ body.composer-open .controlbar { display: none; }
   overflow-y: auto;
   border-top: 1px solid var(--border);
 }
+/* al abrir la paleta dentro del composer, media pantalla no alcanza para el
+   textarea (que con flex:1 se comía el alto) MÁS la grilla de snippets: el
+   sheet crece y la prioridad pasa a la paleta — el textarea baja a unas pocas
+   líneas y la paleta toma el resto, scrolleable, para verse completa */
+.composer.snips-open { height: 75%; }
+.composer.snips-open #composer-text {
+  flex: none;
+  min-height: 44px;
+  max-height: 30%;
+}
+.composer.snips-open .composer-snips {
+  flex: 1 1 auto;
+  max-height: none;
+}
 /* tooltip de texto completo de un snippet truncado: hover en desktop, long-
    press en touch (ver wireSnipTip). pointer-events none: nunca roba el tap */
 .snip-tip {
@@ -831,6 +854,11 @@ body.composer-open .controlbar { display: none; }
   min-height: 0;
   padding: 4px 2px 4px 8px;
   background: var(--bg);
+  /* clip del canvas de xterm a su caja: al abrir el composer la terminal se
+     achica y, hasta que corre fit(), el canvas (dimensionado en px al alto
+     viejo) se desbordaba hacia abajo; como sus capas son position:absolute,
+     pintaban ENCIMA del composer (estático). Clipear acá lo evita siempre */
+  overflow: hidden;
 }
 .term-wrap .xterm { height: 100%; }
 .xterm .xterm-viewport { background: transparent !important; }

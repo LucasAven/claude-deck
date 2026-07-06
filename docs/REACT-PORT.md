@@ -355,19 +355,24 @@ renderizado, seguimiento del cwd de la sesión al hacer `cd`.
 
 **Tareas:**
 
-- [ ] `web/public/`: `manifest.json`, `sw.js`, `icon.svg` copiados de `public/`.
-  Registrar el SW igual que hoy (app.js:2220-2222).
+- [x] `web/public/`: `manifest.json`, `sw.js`, `icon.svg` copiados de `public/`
+  (Vite los emite a `web/dist/`). SW registrado en `main.tsx` igual que hoy
+  (app.js:2220-2222). Verificado: server sirve `/manifest.json` `/sw.js` (no-cache)
+  `/icon.svg` con 200 y MIME correcto desde `web/dist`.
 - [ ] Verificación de paridad completa (checklist §6) hecha por Lucas en el teléfono
-  con `npm run build` servido por el server real + tailscale.
-- [ ] `test/ui-test.mjs`: ajustar solo lo inevitable (debería ser casi nada si se
-  respetaron ids/clases y `window.claudeConn`). **Lucas lo corre.**
-- [ ] `test/shot-diff.mjs`: verificar que siga siendo útil (compara screenshots).
+  con `npm run build` servido por el server real + tailscale. **(pendiente — Lucas)**
+- [x] `test/ui-test.mjs`: revisado — no requiere cambios. Apunta al server real
+  (`:7433`, ahora sirviendo `web/dist`) y depende solo de ids/clases y `window.claudeConn`,
+  todos preservados. **Lucas lo corre.**
+- [x] `test/shot-diff.mjs`: revisado — sigue útil sin cambios (usa `#diff-view`,
+  `.file-row`, `.d2h-*`, presentes en `ChangesView`).
 - [ ] Borrar `public/` (el server ya solo sirve `web/dist`); simplificar el dual-root
-  del server si se quiere, o dejarlo (inofensivo).
-- [ ] Docs: README §Setup (`npm run build` antes de `deck start`/LaunchAgent — el
-  agente corre `tsx server/index.ts` y sirve `web/dist` ya buildeado), `docs/SETUP.md`,
-  y una nota en `docs/SPEC.md` de que el stack §3 quedó obsoleto (frontend ahora React).
-- [ ] `.gitignore`: `web/dist`, `web/node_modules` si aplica.
+  del server si se quiere, o dejarlo (inofensivo). **(pendiente — recién tras la
+  verificación de paridad de Lucas; hasta entonces `public/` es el fallback seguro.)**
+- [x] Docs: README §Setup (`npm --prefix web install` + `npm run build` antes de
+  `deck start`/LaunchAgent, y `dev:web` para iterar), `docs/SETUP.md` (idem), y nota en
+  `docs/SPEC.md` §3 de que el stack de frontend quedó obsoleto (ahora React).
+- [x] `.gitignore`: ya tenía `web/dist` y `web/node_modules`.
 
 ---
 

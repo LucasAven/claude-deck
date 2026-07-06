@@ -34,7 +34,7 @@ export function Composer() {
   const snipsTap = useTap(() => toggleComposerSnips())
 
   return (
-    <div id="composer" className={'composer' + (open ? '' : ' hidden')}>
+    <div id="composer" className={'composer' + (open ? '' : ' hidden') + (snipsOpen ? ' snips-open' : '')}>
       <div className="composer-head">
         <button id="composer-cancel" className="composer-lnk" {...cancelTap}>
           Cancelar

@@ -22,3 +22,7 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 // Sin StrictMode a propósito: el doble-mount de efectos en dev duplicaría el
 // attach del WS/pty (texto doblado, pelea de resize) — ver docs/REACT-PORT.md §1.
 createRoot(document.getElementById('root')!).render(<App />)
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {})
+}

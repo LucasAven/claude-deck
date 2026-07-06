@@ -28,13 +28,20 @@ Debo poder correr **varias instancias de Claude Code en paralelo** (una por sesi
 
 ## 3. Stack (fijado)
 
+> **Obsoleto (frontend).** Esta sección describe el stack de la v1: frontend vanilla
+> sin bundler, con las libs por CDN. El frontend se **portó a React + TypeScript + Vite**
+> (código en `web/`, deps por npm, sin CDN); el plan y las decisiones vigentes están en
+> [`docs/REACT-PORT.md`](REACT-PORT.md). El resto de este documento (arquitectura tmux,
+> protocolo WS, endpoints, UX) sigue vigente byte a byte — el port fue 1:1. La descripción
+> del server (Hono + ws + node-pty) también sigue vigente.
+
 - Runtime: Node.js 20+ con TypeScript (usar `tsx` para correr sin build step).
 - Server: **Hono** (o Express si resulta más simple) + **ws** + **node-pty**.
-- Frontend: una sola página HTML/CSS/JS vanilla, sin bundler:
-  - **xterm.js** + **@xterm/addon-fit** (vía CDN cdnjs) para las terminales.
-  - **diff2html** (vía CDN cdnjs) para renderizar diffs.
+- Frontend: ~~una sola página HTML/CSS/JS vanilla, sin bundler~~ → **React + TypeScript + Vite** (`web/`); el server sirve `web/dist` buildeado (fallback a `public/`):
+  - **@xterm/xterm** + **@xterm/addon-fit** (por npm) para las terminales.
+  - **diff2html** (por npm) para renderizar diffs.
 - PWA: `manifest.json` + service worker mínimo (solo para poder instalarla en la pantalla de inicio; sin caché offline agresiva).
-- Sin base de datos, sin frameworks de frontend.
+- Sin base de datos.
 
 ## 4. Prerrequisitos (verificarlos/instalarlos al inicio)
 

@@ -25,17 +25,28 @@ Celular (claude-deck / WS) ─────┘
 
 ```bash
 git clone <este-repo> && cd claude-deck
-npm install
+npm install                 # deps del server
+npm --prefix web install    # deps del frontend (React/Vite)
 
 cp .env.example .env
 # Editar .env:
 #   WORKSPACES_ROOT=/ruta/que/contiene/tus/proyectos
 #   AUTH_TOKEN=$(openssl rand -hex 32)
 
-npm run dev
+npm run build               # buildea el frontend a web/dist (lo que sirve el server)
+npm run dev                 # levanta el server en :7433
 ```
 
-La consola imprime la URL local, el comando de Tailscale y la URL con `?token=` lista para abrir. `dev` corre con **watch**: editar `server/index.ts` reinicia el server solo (la PWA reconecta). El puerto se configura con `DECK_PORT` (en `.env` o como variable de entorno) — el server ignora `PORT` a propósito, porque los perfiles de shell suelen exportarlo.
+El frontend es **React + Vite** (código en `web/`); el server sirve `web/dist` si existe, si no cae a `public/`. Para producción/LaunchAgent hay que correr **`npm run build`** antes de arrancar (`deck start` / el agente corre `tsx server/index.ts`, que no buildea nada — sirve el `web/dist` ya generado).
+
+Para **desarrollar el frontend** con hot-reload, en vez de buildear cada vez:
+
+```bash
+npm run dev       # server en :7433
+npm run dev:web   # Vite en :5173 (proxya /api y /ws al server con el token)
+```
+
+y abrís `http://127.0.0.1:5173`. Editar `server/index.ts` con `npm run dev` reinicia el server solo (watch); la PWA reconecta. El puerto del server se configura con `DECK_PORT` (en `.env` o como variable de entorno) — el server ignora `PORT` a propósito, porque los perfiles de shell suelen exportarlo.
 
 Exponer al tailnet (HTTPS automático, visible solo para tus dispositivos):
 

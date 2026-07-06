@@ -13,7 +13,8 @@ Guía de instalación desde cero en una Mac propia.
 
 ```bash
 git clone <este-repo> && cd claude-deck
-npm install
+npm install                 # deps del server
+npm --prefix web install    # deps del frontend (React/Vite)
 cp .env.example .env
 ```
 
@@ -30,17 +31,25 @@ Opcionales (una línea cada una): `DEFAULT_DIR` (directorio "home" del panel —
 
 ## 3. Prueba local
 
+El frontend es React + Vite (código en `web/`); el server sirve `web/dist` si existe, si no cae a `public/`. Buildealo una vez y arrancá el server:
+
 ```bash
-npm run dev
+npm run build   # genera web/dist (lo que sirve el server)
+npm run dev     # server en :7433, con watch sobre server/index.ts
 ```
 
-La consola imprime la URL local con `?token=` lista para abrir en el navegador. `dev` corre con watch: editar `server/index.ts` reinicia el server automáticamente.
+La consola imprime la URL local con `?token=` lista para abrir en el navegador.
+
+Para iterar sobre el frontend sin re-buildear, corré además `npm run dev:web` (Vite en `:5173`, proxya `/api` y `/ws` al server) y abrí `http://127.0.0.1:5173`.
 
 ## 4. Servicio permanente y exposición al tailnet
+
+**Antes de instalar el servicio, buildeá el frontend** (`npm run build`): el LaunchAgent corre `tsx server/index.ts`, que sirve el `web/dist` ya generado y no buildea nada por su cuenta. Re-corré `npm run build` cada vez que cambie el frontend.
 
 Una sola vez (**nunca ejecutar con sudo**; el script pide sudo solo cuando lo necesita):
 
 ```bash
+npm run build
 scripts/deck install
 ```
 
