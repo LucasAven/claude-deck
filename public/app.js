@@ -14,6 +14,15 @@ const state = {
 
 const $ = (sel) => document.querySelector(sel);
 
+// la sesión activa se persiste para sobrevivir al reload: sin esto init()
+// vuelve siempre a la default, y como el server recrea la default si no
+// existe (attach-or-create), renombrarla y recargar spawneaba un "deck"
+// vacío fantasma
+const ACTIVE_SESSION_KEY = 'deck-active-session';
+function persistActiveSession() {
+  try { localStorage.setItem(ACTIVE_SESSION_KEY, state.session); } catch (_) {}
+}
+
 const XTERM_THEME = {
   background: '#0b0d10',
   foreground: '#c8ccd4',
@@ -1478,6 +1487,7 @@ async function refreshSessions() {
 function selectSession(name) {
   if (name === state.session) return;
   state.session = name;
+  persistActiveSession();
   hideHint();
   closeSwitchMenu();
   closeComposer(); // guarda el borrador de la sesión anterior (composerSession)
@@ -1517,6 +1527,7 @@ async function fallbackToLiveSession() {
   state.session = names.includes(state.defaultSession)
     ? state.defaultSession
     : (names[0] || state.defaultSession);
+  persistActiveSession();
   hideHint();
   closeSwitchMenu();
   closeComposer();
@@ -1557,6 +1568,7 @@ async function renameSession(name) {
   // falta reconectar el WS, solo actualizar el nombre con el que habla la API
   if (state.session === name) {
     state.session = newName;
+    persistActiveSession(); // sin esto un reload vuelve al nombre viejo (y recrea la default vacía)
     if (treeSession === name) treeSession = newName; // mismo árbol, solo cambió el nombre
     try {
       // el estado de switchers y el borrador del composer se guardan por
@@ -2102,6 +2114,16 @@ async function init() {
   } catch (_) {}
   state.session = state.defaultSession;
 
+  // restaurar la última sesión activa: si la guardada ya no existe, el attach
+  // sin create=1 contesta meta gone y fallbackToLiveSession() cae a una viva
+  // (nunca resucita nada; la default sigue exenta como siempre)
+  try {
+    const saved = localStorage.getItem(ACTIVE_SESSION_KEY);
+    if (saved && SESSION_NAME_RE.test(saved) && !saved.endsWith('-shell')) {
+      state.session = saved;
+    }
+  } catch (_) {}
+
   // Deep-link del push (tarea 1): ?session=<name> selecciona esa sesión antes
   // del primer attach. Sin create=1 (expectCreate queda null): si la sesión
   // murió, el server contesta meta gone y caemos a una viva — nunca resucita.
@@ -2118,6 +2140,7 @@ async function init() {
       history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : ''));
     }
   } catch (_) {}
+  persistActiveSession(); // la elección inicial (restaurada o deep-link) queda como punto de partida del próximo reload
 
   claudeConn = createTermConnection('term-claude', 'conn-claude', () => state.session);
 

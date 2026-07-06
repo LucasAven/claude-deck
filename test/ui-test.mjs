@@ -365,6 +365,24 @@ const deepLink = await page.evaluate(() => ({
 }));
 ok('deep-link ?session= selecciona la sesión y limpia la URL', deepLink.urlClean && deepLink.active === 'deck');
 
+// 12b. persistencia de la sesión activa (fix: renombrar la default y recargar
+// creaba una "deck" vacía fantasma). init() guarda la sesión elegida en
+// localStorage y el próximo load la restaura en vez de volver a la default.
+// Si la guardada ya no existe, el attach sin create=1 contesta meta gone y se
+// cae a una viva — sin resucitar la muerta ni recrear la default de más.
+const persisted = await page.evaluate(() => localStorage.getItem('deck-active-session'));
+ok('sesión activa persistida en localStorage tras init', persisted === 'deck');
+await page.evaluate(() => localStorage.setItem('deck-active-session', 'zz-mock-muerta'));
+await page.goto('http://127.0.0.1:7433/', { waitUntil: 'networkidle2', timeout: 20000 });
+await new Promise((r) => setTimeout(r, 1500));
+const restored = await page.evaluate(async () => ({
+  active: (document.querySelector('#session-chips .chip.active span:not(.chip-dot)') || {}).textContent,
+  saved: localStorage.getItem('deck-active-session'),
+  names: (await (await fetch('/api/tmux/sessions', { cache: 'no-store' })).json()).map((s) => s.name),
+}));
+ok('sesión guardada muerta → fallback a una viva y re-persistida, sin resucitarla',
+  restored.active === 'deck' && restored.saved === 'deck' && !restored.names.includes('zz-mock-muerta'));
+
 // 13. semáforo de chips (tarea 4): con un payload mockeado de
 // /api/tmux/sessions los chips pintan el punto según `state` (verde working /
 // ámbar waiting / gris idle) y sin state no hay punto. Después se restaura el
