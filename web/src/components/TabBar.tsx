@@ -11,6 +11,7 @@ export function TabBar() {
     <nav className="tabbar">
       <button
         className={'tab' + (activeTab === 'claude' ? ' active' : '')}
+        data-tab="claude"
         onClick={() => setActiveTab('claude')}
       >
         <span className="tab-icon">&#9670;</span>
@@ -18,16 +19,18 @@ export function TabBar() {
       </button>
       <button
         className={'tab' + (activeTab === 'changes' ? ' active' : '')}
+        data-tab="changes"
         onClick={() => setActiveTab('changes')}
       >
         <span className="tab-icon">&#916;</span>
         <span>Cambios</span>
-        <span className={'tab-badge' + (count ? '' : ' hidden')}>
+        <span id="tab-changes-badge" className={'tab-badge' + (count ? '' : ' hidden')}>
           {count ? (count > 99 ? '99+' : String(count)) : ''}
         </span>
       </button>
       <button
         className={'tab' + (activeTab === 'files' ? ' active' : '')}
+        data-tab="files"
         onClick={() => setActiveTab('files')}
       >
         <span className="tab-icon">&#9636;</span>
