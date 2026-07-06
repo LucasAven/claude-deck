@@ -9,7 +9,7 @@
 ## Estado general
 
 - [x] Fase 0 — Scaffolding (Vite + server dual-root)
-- [ ] Fase 1 — Shell: store, api, tabs, CSS, init
+- [x] Fase 1 — Shell: store, api, tabs, CSS, init
 - [ ] Fase 2 — Terminal + sesiones (el core)
 - [ ] Fase 3 — Controlbar: switchers, adjuntar/imagen, composer, snippets
 - [ ] Fase 4 — Overlays: scrollback legible + panel de host
@@ -163,13 +163,13 @@ JSON (proxy + token OK). `npm run build` genera `web/dist` y el server lo sirve 
 
 **Tareas:**
 
-- [ ] `src/styles/app.css` = `public/style.css` verbatim, más los imports de libs:
+- [x] `src/styles/app.css` = `public/style.css` verbatim, más los imports de libs:
   `@xterm/xterm/css/xterm.css`, `diff2html/bundles/css/diff2html.min.css`,
   `highlight.js/styles/github-dark.css` (importarlos en `main.tsx` antes del css propio,
   mismo orden en cascada que los `<link>` actuales).
-- [ ] `lib/api.ts`: port de `api()` + estado `authError` en el store en vez de
+- [x] `lib/api.ts`: port de `api()` + estado `authError` en el store en vez de
   `showAuthError()` imperativo → componente `<AuthError/>` (mismo markup/id `#auth-error`).
-- [ ] `store.ts` — forma inicial:
+- [x] `store.ts` — forma inicial:
 
   ```ts
   {
@@ -184,29 +184,32 @@ JSON (proxy + token OK). `npm run build` genera `web/dist` y el server lo sirve 
   }
   ```
 
-- [ ] `App.tsx`: las tres `<section class="view">` **siempre montadas** con toggle de
+- [x] `App.tsx`: las tres `<section class="view">` **siempre montadas** con toggle de
   `.active` (como hoy — la vista Claude no puede desmontarse jamás, ver §5.1), TabBar,
-  overlays, `<SnipTip/>`, `<AuthError/>`.
-- [ ] Port de `init()` (app.js:2122-2156) a un efecto de arranque en `App`/`main`:
+  overlays, `<SnipTip/>`, `<AuthError/>`. (Contenido de vistas + composer/scrollback/
+  host-sheet quedan como shells vacíos — los llenan las Fases 2-5.)
+- [x] Port de `init()` (app.js:2122-2156) a un efecto de arranque en `App`/`main`:
   1. `GET /api/config` → `defaultSession`;
   2. restaurar `localStorage['deck-active-session']` (validada con `SESSION_NAME_RE`
      y sin sufijo `-shell`);
   3. deep-link `?session=` (validar, seleccionar, y **sacar el param de la URL** con
      `history.replaceState` — app.js:2144-2155);
   4. persistir la elección inicial.
-- [ ] `hooks/useTap.ts`: mismas semánticas que `onTap` (app.js:318-331) —
+- [x] `hooks/useTap.ts`: mismas semánticas que `onTap` (app.js:318-331) —
   **`preventDefault()` en pointerdown** (mantiene el foco → no se cierra el teclado
   virtual), acción en pointerup solo si el movimiento ≤ `TAP_SLOP=12px`, y
   pointercancel resetea. Devolver `{onPointerDown, onPointerUp, onPointerCancel}`.
-- [ ] `hooks/useViewportGeometry.ts`: port de `updateViewportGeometry` (app.js:2100-2117)
+- [x] `hooks/useViewportGeometry.ts`: port de `updateViewportGeometry` (app.js:2100-2117)
   — setea `--vvh`/`--vvt` en `documentElement`, togglea `kb-open` en `document.body`
   (umbral 100px), y llama `fit()` del terminal con debounce de 120ms. Listeners:
   `visualViewport.resize/scroll`, `window.resize`, `orientationchange` (+300ms).
-- [ ] Polling de 8s (app.js:2187-2194) en un efecto top-level: solo si
+- [x] Polling de 8s (app.js:2187-2194) en un efecto top-level: solo si
   `document.visibilityState === 'visible'`; re-afirma presencia (`sendVis`), refresca
   git (badge corre en cualquier tab), host, y sessions/tree según tab activa.
   `visibilitychange` (app.js:2196-2208): manda `vis` también al pasar a hidden
   (última chance antes del freeze de iOS), y al volver: refrescos + `resume()`.
+  (Fase 1 cablea presencia + git; host/sessions/tree se suman cuando existan sus
+  refreshers — Fases 2/4/5.)
 
 **Aceptación:** app carga con el look actual (tabs, tema, safe-areas), tab bar cambia
 vistas, badge de Cambios funciona contra el server real. Sin terminal todavía.

@@ -22,6 +22,11 @@ export default defineConfig({
     outDir: 'dist',
   },
   server: {
+    // expuesto a la red para testear en el teléfono vía tailnet; allowedHosts
+    // deshabilita el host-check de Vite para que ande también por MagicDNS
+    // (macbook-pro-de-lucas), no solo por IP. Solo dev, tailnet privado.
+    host: true,
+    allowedHosts: true,
     proxy: {
       '/api': { target: 'http://127.0.0.1:7433', headers },
       '/ws': { target: 'ws://127.0.0.1:7433', ws: true, headers },
