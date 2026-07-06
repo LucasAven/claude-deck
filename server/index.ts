@@ -19,12 +19,15 @@ import { fileURLToPath } from 'node:url'
 const execFileP = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(__dirname, '..')
-// Dual-root de la migración a React (docs/REACT-PORT.md): servimos el build de
-// Vite (web/dist) si existe, si no la app vanilla (public/). Resuelto una sola
-// vez al boot — la app desplegada no cambia hasta que web/dist tenga paridad.
-const WEB_DIST = path.join(ROOT, 'web', 'dist')
-const PUBLIC_DIR =
-  fs.existsSync(path.join(WEB_DIST, 'index.html')) ? WEB_DIST : path.join(ROOT, 'public')
+// Estáticos: el build de Vite (web/dist). El dual-root de la migración a React
+// (fallback a public/, docs/REACT-PORT.md) se retiró al borrar la app vanilla;
+// buildear es obligatorio, así que sin build frenamos acá con un error claro
+// en vez de servir 404s silenciosos.
+const PUBLIC_DIR = path.join(ROOT, 'web', 'dist')
+if (!fs.existsSync(path.join(PUBLIC_DIR, 'index.html'))) {
+  console.error('web/dist no existe — corré `npm run build` antes de arrancar el server')
+  process.exit(1)
+}
 
 // ---------------------------------------------------------------------------
 // Configuración (.env)
@@ -1063,7 +1066,7 @@ setInterval(async () => {
   } catch { /* el watcher jamás tira el server */ }
 }, BATT_WATCH_MS)
 
-// Estáticos (con auth, servidos desde PUBLIC_DIR: web/dist o public/)
+// Estáticos (con auth, servidos desde PUBLIC_DIR: web/dist)
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',

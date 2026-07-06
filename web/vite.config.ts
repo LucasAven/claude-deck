@@ -18,8 +18,22 @@ const headers = { 'x-deck-token': token }
 export default defineConfig({
   plugins: [react()],
   build: {
-    // el server sirve web/dist si existe (ver server/index.ts, PUBLIC_DIR)
+    // el server sirve web/dist (ver server/index.ts, PUBLIC_DIR)
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        // separar vendors del código de app: los assets se sirven immutable con
+        // nombre hasheado, así tras un deploy solo se re-baja el chunk que cambió
+        // (normalmente el código propio, ~decenas de KB) y no el bundle entero
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-dom/client'],
+          xterm: ['@xterm/xterm', '@xterm/addon-fit'],
+          diff2html: ['diff2html'],
+          hljs: ['highlight.js/lib/common'],
+          markdown: ['marked', 'dompurify'],
+        },
+      },
+    },
   },
   server: {
     // expuesto a la red para testear en el teléfono vía tailnet; allowedHosts
