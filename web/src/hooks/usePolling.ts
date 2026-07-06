@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useDeckStore } from '../store'
 import { refreshHost } from '../lib/host'
+import { refreshTree } from '../lib/files'
 
 // Auto-refresh cada 8 s mientras la pestaña esté visible + manejo de
 // visibilitychange (app.js:2185-2208). refreshGit y refreshHost corren en
@@ -17,8 +18,9 @@ export function usePolling() {
       window.claudeConn?.sendVis() // re-afirmar presencia: el server la expira a los 25 s
       refreshGit()
       refreshHost()
-      if (useDeckStore.getState().activeTab === 'claude') refreshSessions()
-      // Fase 5: if (tab==='files') refreshTree(false)
+      const tab = useDeckStore.getState().activeTab
+      if (tab === 'claude') refreshSessions()
+      if (tab === 'files') refreshTree(false) // sigue el cwd del pane: re-render solo si cambió la raíz
     }, 8000)
 
     const onVis = () => {
@@ -29,6 +31,7 @@ export function usePolling() {
         refreshGit()
         refreshHost()
         refreshSessions()
+        if (useDeckStore.getState().activeTab === 'files') refreshTree(false)
         // iOS suele matar los WS en background: reconectar sin esperar backoff
         window.claudeConn?.resume()
       }

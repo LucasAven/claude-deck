@@ -13,7 +13,7 @@
 - [x] Fase 2 — Terminal + sesiones (el core)
 - [x] Fase 3 — Controlbar: switchers, adjuntar/imagen, composer, snippets
 - [x] Fase 4 — Overlays: scrollback legible + panel de host
-- [ ] Fase 5 — Pestañas Cambios y Archivos
+- [x] Fase 5 — Pestañas Cambios y Archivos
 - [ ] Fase 6 — PWA, swap de estáticos, tests y limpieza
 
 ---
@@ -327,21 +327,21 @@ markdown del asistente renderiza sanitizado (el ui-test tiene un check de XSS co
 
 **Tareas:**
 
-- [ ] `ChangesView.tsx` (app.js:1633-1785): summary → header (`⎇ rama`, `↑↓ upstream`),
+- [x] `ChangesView.tsx` (app.js:1633-1785): summary → header (`⎇ rama`, `↑↓ upstream`),
   grupos Staged/Sin stagear, filas con badge + path + botón `+/−` (stage/unstage con
   `stopPropagation`, disabled mientras corre, `POST /api/git/stage`), badge de la tab
   (`99+` cap), fallback a `/api/git/summary` sin `?session=` si la sesión no tiene repo.
   Diff: `Diff2Html.html(text, {drawFileList:false, matching:'lines',
   outputFormat:'line-by-line'})` en `dangerouslySetInnerHTML`, botón ← vuelve.
   `inDiff` bloquea el auto-refresh (no pisar la vista).
-- [ ] `FilesView.tsx` (app.js:1791-2081): árbol recursivo `<TreeNode>` con estado local
+- [x] `FilesView.tsx` (app.js:1791-2081): árbol recursivo `<TreeNode>` con estado local
   `{expanded, loaded, entries}` — expandir la primera vez fetchea (`/api/fs/list`),
   colapsar **conserva** lo cargado; carpetas primero (ya viene del server), iconos de
   `lib/icons.ts` + tinte de `extClass`/`fileIcon`, notas de truncado/vacío.
   Lógica de caché por sesión/raíz (app.js:1950-1988): re-listar la raíz en cada
   refresh; si `data.root` no cambió, **no tocar el árbol** (expansión y archivo abierto
   sobreviven); guards de respuestas viejas (`ses !== state.session`).
-- [ ] Vista de archivo (app.js:2036-2081): `/api/fs/file`, binario → nota, código →
+- [x] Vista de archivo (app.js:2036-2081): `/api/fs/file`, binario → nota, código →
   `highlightInto` (límite 200KB, fallback texto plano), `.md` → toggle 👁 fuente ↔
   renderizado (`DOMPurify.sanitize(marked.parse(...))`), nota de truncado a 512KB.
   Registrar el hook de DOMPurify (links → `target=_blank rel=noopener`) **una vez** en

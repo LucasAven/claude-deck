@@ -3,6 +3,7 @@ import { api } from './lib/api'
 import { SESSION_NAME_RE } from './lib/keys'
 import { closeSwitchMenu, loadSwitch } from './lib/switch'
 import { closeComposer } from './lib/composer'
+import { invalidateTree, refreshTree } from './lib/files'
 
 // Estado global (zustand). El módulo de terminal/WS (Fase 2) lo lee fuera de
 // React con useDeckStore.getState() y dispara updates sin prop-drilling — ver
@@ -105,6 +106,7 @@ interface DeckStore {
   // --- datos del server ---
   sessions: Session[]
   git: GitSummary | null
+  gitNoRepo: boolean // el dir de la sesión existe pero no es repo git (distinto de "sin datos")
   hostStatus: HostStatus | null
   hostBannerDismissed: boolean
   snippets: string[] | null
@@ -181,6 +183,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
 
   sessions: [],
   git: null,
+  gitNoRepo: false,
   hostStatus: null,
   hostBannerDismissed: false,
   snippets: null,
@@ -228,18 +231,29 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
 
   setSwitchState: (sw) => set({ switchState: sw }),
 
-  // app.js:1651-1672 (solo la parte que la Fase 1 necesita: el badge). El header
-  // de rama y la lista de archivos los pinta ChangesView en la Fase 5.
+  // app.js:1651-1672. El header de rama y la lista de archivos los pinta
+  // ChangesView; el badge sale de git.files.length.
   refreshGit: async () => {
     if (get().inDiff) return // no pisar la vista de diff
     try {
       const q = sessionQuery(get().session)
       let res = await api(`/api/git/summary${q ? `?${q}` : ''}`)
-      if (!res.ok) res = await api('/api/git/summary') // fallback: sesión sin repo aún
-      if (!res.ok) throw new Error('git summary failed')
-      set({ git: (await res.json()) as GitSummary })
+      // Caer al repo default SOLO si la sesión no existe todavía (404: recién
+      // creada / aún sin dir). Si el dir existe pero NO es repo git (400), NO
+      // caer: mostraría los cambios de OTRO repo (el default) cuando la sesión
+      // está parada en un directorio sin git — se avisa con gitNoRepo.
+      if (!res.ok && res.status === 404 && q) res = await api('/api/git/summary')
+      if (res.ok) {
+        set({ git: (await res.json()) as GitSummary, gitNoRepo: false })
+        return
+      }
+      if (res.status === 400) {
+        set({ git: null, gitNoRepo: true }) // dir sin git → mensaje propio en ChangesView
+        return
+      }
+      throw new Error(`git summary ${res.status}`)
     } catch (e) {
-      if (String((e as Error).message) !== '401') set({ git: null })
+      if (String((e as Error).message) !== '401') set({ git: null, gitNoRepo: false })
     }
   },
 
@@ -397,7 +411,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
 
   // app.js:1535-1553. La default si existe (se recrea vacía si no queda
   // ninguna); si no, la primera viva. Usado al matar la activa y por el guard
-  // anti-resurrección. (Fase 5: treeSession=null + refreshTree.)
+  // anti-resurrección.
   fallbackToLiveSession: async () => {
     let names: string[] = []
     try {
@@ -414,6 +428,10 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     get().hideHint()
     window.claudeConn?.reconnect()
     get().refreshGit()
+    // el fallback puede reusar el nombre de una sesión muerta: marcar el árbol
+    // stale para que se re-liste aunque la sesión "no cambió" (app.js:1550)
+    invalidateTree()
+    if (get().activeTab === 'files') refreshTree(false)
     get().refreshSessions()
   },
 }))

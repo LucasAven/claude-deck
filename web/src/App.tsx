@@ -6,6 +6,8 @@ import { TabBar } from './components/TabBar'
 import { AuthError } from './components/AuthError'
 import { SnipTip } from './components/SnipTip'
 import { ClaudeView } from './components/claude/ClaudeView'
+import { ChangesView } from './components/changes/ChangesView'
+import { FilesView } from './components/files/FilesView'
 import { HostSheet } from './components/claude/HostSheet'
 import { closeSwitchMenu } from './lib/switch'
 import { refreshHost } from './lib/host'
@@ -82,11 +84,15 @@ export function App() {
           <ClaudeView />
         </section>
 
-        {/* Pestaña Cambios — header + lista + diff (Fase 5) */}
-        <section id="view-changes" className={cls('changes')} />
+        {/* Pestaña Cambios — header + lista + diff */}
+        <section id="view-changes" className={cls('changes')}>
+          <ChangesView />
+        </section>
 
-        {/* Pestaña Archivos — árbol + vista de archivo (Fase 5) */}
-        <section id="view-files" className={cls('files')} />
+        {/* Pestaña Archivos — árbol + vista de archivo */}
+        <section id="view-files" className={cls('files')}>
+          <FilesView />
+        </section>
 
         {/* overlays globales siempre montados: host-sheet (Fase 4), snip-tip */}
         <HostSheet />

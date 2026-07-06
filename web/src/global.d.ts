@@ -16,4 +16,6 @@ interface ClaudeConn {
 
 interface Window {
   claudeConn?: ClaudeConn
+  // puente para ui-test.mjs: espía el árbol de Archivos con `await refreshTree(false)`
+  refreshTree?: (force: boolean) => Promise<void>
 }
