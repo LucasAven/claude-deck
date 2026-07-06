@@ -125,6 +125,15 @@ body {
 }
 .chip-add { min-width: 40px; font-size: 16px; }
 
+/* chip de batería del host (tarea 17): pineado a la derecha como el + y el
+   dot de conexión; solo se renderiza cuando la Mac reporta batería */
+.host-chip { gap: 6px; padding: 4px 10px; font-size: 12px; }
+.host-chip svg { display: block; }
+.host-chip.warn {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
 /* ---------- barra de teclas rápidas ---------- */
 .quickkeys {
   display: flex;
@@ -691,6 +700,113 @@ body.composer-open .controlbar { display: none; }
 }
 .hint code { color: var(--accent); }
 .hint-close { float: right; color: var(--muted); padding: 0 4px; cursor: pointer; }
+
+/* banner de batería (tarea 17): mismo esqueleto que .hint, énfasis ámbar */
+.host-banner b { color: var(--accent); font-weight: 400; }
+.host-banner-warn { color: var(--accent); margin-right: 2px; }
+
+/* ---------- panel de host (tarea 17): bottom sheet ---------- */
+.host-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 65; /* sobre el overlay de scrollback (60), bajo el snip-tip (70) */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.55);
+}
+.host-sheet-panel {
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  padding: 8px 16px calc(14px + env(safe-area-inset-bottom));
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55);
+}
+.sheet-grip {
+  width: 38px;
+  height: 4px;
+  border-radius: 2px;
+  background: #2a2f37;
+  margin: 2px auto 10px;
+}
+.host-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  font-size: 15px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+.host-title svg { color: var(--accent); flex: none; }
+.host-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.host-ico { flex: none; display: flex; color: var(--muted); }
+.host-label { color: var(--text); }
+.host-val {
+  margin-left: auto;
+  color: var(--muted);
+  text-align: right;
+}
+.host-val.warn { color: var(--accent); }
+.host-val.good { color: #8fbe6b; } /* mismo verde que chip-dot-working */
+.host-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+}
+.host-alert-info { flex: 1; min-width: 0; }
+.host-alert-label { font-size: 13px; color: var(--text); }
+.host-alert-sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
+/* el umbral es editable (prompt low-fi): pista de tocable como el chip-name */
+.host-threshold {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 13px;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.switch {
+  flex: none;
+  position: relative;
+  width: 52px;
+  height: 32px;
+  border: none;
+  border-radius: 16px;
+  background: #2a2f37;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.15s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.15s, background 0.15s;
+}
+.switch.on { background: var(--accent); }
+.switch.on::after {
+  transform: translateX(20px);
+  background: var(--bg);
+}
 
 /* ---------- terminales ---------- */
 .term-wrap {

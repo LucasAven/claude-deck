@@ -106,6 +106,7 @@ Otros subcomandos: `deck status` (server / agente / tailscale / sueño / baterí
 | `NTFY_TOPIC`      | no          | —                        | Topic secreto de ntfy.sh para push (ver abajo)      |
 | `DECK_URL`        | no          | —                        | URL pública del panel (la escriben solos `deck install`/`deck url`); habilita el deep-link del push |
 | `DECK_PRESENCE_IDLE` | no       | `300`                    | Segundos sin teclado/mouse para que la Mac deje de contar como "estás mirando" (supresión de push por presencia) |
+| `DECK_BATT_WATCH_MS` | no       | `60000`                  | Intervalo (ms) del watcher de batería (la alerta proactiva); existe sobre todo para poder testearlo sin esperar minutos |
 
 ## Notificaciones push cuando Claude te necesita (ntfy)
 
@@ -137,6 +138,14 @@ Además el push se **suprime si ya estás mirando** (presencia): con la Mac desb
 
 Cada chip de sesión muestra un punto con lo que su Claude está haciendo: **verde = trabajando, ámbar = espera tu input, gris = idle**. Lo alimentan los mismos hooks: `scripts/state.sh` escribe el estado en `~/.claude-deck/state/<sesión>` (`UserPromptSubmit`/`PreToolUse` → working, `Notification`/`PermissionRequest` → waiting, `Stop` → idle) y el server lo mezcla en `GET /api/tmux/sessions`. El mismo script anota además el `transcript_path` que trae cada evento (`<sesión>.transcript`) — es lo que le permite al overlay 📜 saber qué `.jsonl` corresponde a cada sesión tmux. Una sesión sin registro (un shell pelado, o un `claude` sin estos hooks) no muestra punto. Un `working` sin señales por más de 5 min decae a "sin punto" (un claude matado con `kill` nunca emite `Stop`); `waiting` e `idle` no decaen — un permiso pendiente sigue en ámbar aunque vuelvas horas después.
 
+### Panel de host y alerta de batería
+
+La matemática del modo remoto: `deck away` mantiene la Mac despierta **a batería** — si se agota, se cae el acceso al tailnet y quedás afuera hasta volver físicamente. Por eso la PWA muestra la salud del host y el server avisa **antes** de que pase:
+
+- **Chip "🔋 N%"** en la fila de sesiones (solo si la Mac reporta batería; en un desktop no aparece). Tocarlo abre un panel con batería, energía, `SleepDisabled` de pmset (la palanca de `deck away`) y uptime.
+- **Banner ámbar** sobre la terminal cuando la batería descarga bajo el umbral. Se puede descartar; se re-arma al terminar el episodio (enchufar o recargar).
+- **Alerta push proactiva** (server-side, corre aunque nadie mire): un watcher chequea la batería cada minuto y manda un push al `NTFY_TOPIC` al cruzar el umbral descargando — **una vez por episodio**, con histéresis (se re-arma al volver a corriente o subir umbral+5). El toggle y el umbral se configuran desde el panel y persisten en `~/.claude-deck/host-alert.json` (default: activada, 30%). Sin `NTFY_TOPIC`, el watcher calla.
+
 ## Seguridad
 
 Esta app expone una shell de tu PC. Medidas tomadas (no negociables):
@@ -144,7 +153,7 @@ Esta app expone una shell de tu PC. Medidas tomadas (no negociables):
 - **Bind solo a `127.0.0.1`.** El server nunca escucha en interfaces externas. La única exposición es vía `tailscale serve` (HTTPS + WireGuard, visible solo para los dispositivos de tu tailnet). **Jamás** bindear `0.0.0.0` ni abrir el puerto en el router.
 - **`AUTH_TOKEN` obligatorio** incluso dentro del tailnet (defensa en profundidad). Si falta o es corto (<32 chars), el server no arranca. Toda ruta — estáticos incluidos — y el handshake del WebSocket validan la cookie httpOnly `deck_token` (o el header `x-deck-token`). Sin token válido → 401.
 - **Validación estricta de paths** en `/api/git/diff`, `/api/git/stage` y `/api/fs/*` (helper compartido `checkRepoPath`): se rechazan rutas absolutas, `..` y symlinks que escapen de la raíz.
-- **Sin ejecución arbitraria por HTTP**: ningún endpoint ejecuta comandos del cliente; solo subcomandos fijos de `git`/`tmux` con argumentos validados (`execFile`, sin shell). La única escritura sobre el repo es stage/unstage de un archivo (`/api/git/stage`); el explorador de archivos es de solo lectura; commit, push, etc. se hacen pidiéndoselos a Claude. La única otra escritura es `PUT /api/snippets`, que solo toca su propio JSON de datos de la app (`~/.claude-deck/snippets.json`, contenido validado, path fijo).
+- **Sin ejecución arbitraria por HTTP**: ningún endpoint ejecuta comandos del cliente; solo subcomandos fijos de `git`/`tmux` con argumentos validados (`execFile`, sin shell). La única escritura sobre el repo es stage/unstage de un archivo (`/api/git/stage`); el explorador de archivos es de solo lectura; commit, push, etc. se hacen pidiéndoselos a Claude. Las únicas otras escrituras son `PUT /api/snippets` y `POST /api/host/alert`, que solo tocan sus propios JSON de datos de la app (`~/.claude-deck/snippets.json` y `~/.claude-deck/host-alert.json`, contenido validado, paths fijos).
 - **Todo acceso acotado a `WORKSPACES_ROOT`**: los endpoints git/fs — con `?session=` o sin él — solo operan dentro de esa raíz (validada con realpath, anti-symlinks); los nombres de sesión se validan contra `^[A-Za-z0-9_-]{1,32}$`.
 - **Única excepción al perímetro (solo lectura)**: `GET /api/claude/transcript` lee el transcript `.jsonl` de la sesión para el overlay de lectura 📜 — esos archivos viven en `~/.claude/projects` / `~/.claude-work/projects`, fuera de `WORKSPACES_ROOT`. El path no viene del cliente: lo anota `scripts/state.sh` desde los hooks (`transcript_path` del evento) en `~/.claude-deck/state/<sesión>.transcript`, y el server solo lo sirve si realpath-resuelve a un `*.jsonl` dentro de esas dos raíces. Nada más de `~/.claude*` es accesible, y nunca hay escritura.
 - **Rate limit** básico en los endpoints HTTP.
@@ -172,6 +181,8 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 | `GET /api/fs/file?path=<rel>&session=<s>` | Contenido de un archivo (solo lectura, truncado a 512 KB, detecta binarios) |
 | `GET /api/snippets` | Lista global de snippets para la paleta ☰ (frases que se insertan en el prompt sin enviar). Vive en `~/.claude-deck/snippets.json` (sincroniza entre dispositivos); sin archivo responde los presets |
 | `PUT /api/snippets` | Reemplaza la lista completa. Body JSON: `{ "snippets": ["…"] }` (máx 50 strings no vacíos de ≤500 chars). Escritura atómica |
+| `GET /api/host/status` | Salud de la Mac anfitriona: `{ name, battery: { pct, state } \| null, ac, sleepDisabled, uptime, alert }` (parseado de `pmset`/`scutil`; en un desktop sin batería, `battery: null`) |
+| `POST /api/host/alert` | Configura la alerta de batería del watcher server-side. Body JSON: `{ "enabled": bool }` y/o `{ "threshold": 5–95 }`. Persiste en `~/.claude-deck/host-alert.json` (escritura atómica) |
 | `GET /api/config` | Sesión default y `DEFAULT_DIR` |
 
 Al cerrar el WebSocket se mata **solo el attach** (pty); la sesión tmux sigue viva.

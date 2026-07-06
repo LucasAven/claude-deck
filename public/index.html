@@ -23,10 +23,21 @@
       <div class="session-row">
         <div id="session-chips" class="chips"></div>
         <button id="btn-new-session" class="chip chip-add" title="Nueva sesión">+</button>
+        <!-- chip de batería del host (tarea 17): pineado como el + y el dot,
+             solo se renderiza cuando la Mac reporta batería -->
+        <button id="host-chip" class="chip host-chip hidden" title="Estado de la Mac">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7.5" width="17" height="9" rx="2.5"/><path d="M22 10.5v3"/><rect id="host-batt-fill" x="4.2" y="9.7" width="8" height="4.6" rx="1" fill="currentColor" stroke="none"/></svg>
+          <span id="host-chip-pct"></span>
+        </button>
         <span class="conn" id="conn-claude"><span class="dot"></span></span>
       </div>
       <div id="hint-claude" class="hint hidden">
         Sesión tmux nueva y vacía — escribí <code>claude --continue</code> para retomar la última conversación del repo. <span class="hint-close">✕</span>
+      </div>
+      <!-- banner de batería (tarea 17): solo descargando bajo el umbral; le
+           come filas a la terminal → fit al mostrar/ocultar (como el hint) -->
+      <div id="host-banner" class="hint host-banner hidden">
+        <span class="host-banner-warn">&#9888;</span> La Mac está <b>en batería (<span id="host-banner-pct"></span>%)</b>. Si se agota perdés el acceso al tailnet. Enchufala o cerrá lo que no uses. <span class="hint-close" id="host-banner-close">✕</span>
       </div>
       <div id="term-claude" class="term-wrap"></div>
 
@@ -150,6 +161,26 @@
       <div id="file-tree" class="scroll"></div>
       <div id="file-view" class="scroll hidden"></div>
     </section>
+
+    <!-- panel de host (tarea 17): bottom sheet al tocar el chip de batería;
+         las filas de estado las pinta renderHostSheet() del último status -->
+    <div id="host-sheet" class="host-sheet hidden">
+      <div class="host-sheet-panel">
+        <div class="sheet-grip"></div>
+        <div class="host-title">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="11" rx="1.8"/><path d="M2 19h20"/></svg>
+          <span id="host-name"></span>
+        </div>
+        <div id="host-rows"></div>
+        <div class="host-alert">
+          <div class="host-alert-info">
+            <div class="host-alert-label">Avisarme bajo <button id="host-threshold" class="host-threshold"></button></div>
+            <div class="host-alert-sub">Push proactivo si queda en batería</div>
+          </div>
+          <button id="host-alert-toggle" class="switch" role="switch" title="Alerta de batería"></button>
+        </div>
+      </div>
+    </div>
 
     <!-- tooltip de texto completo de un snippet (tarea 10): hover en desktop,
          mantener apretado en touch; fixed sobre coordenadas del chip -->

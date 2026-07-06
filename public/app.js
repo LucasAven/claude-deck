@@ -1209,6 +1209,191 @@ function wireScrollback() {
 }
 
 // ---------------------------------------------------------------------------
+// Panel de host + alerta de batería (tarea 17): la Mac que sirve el deck es
+// el único camino al tailnet — si `deck away` la deja despierta a batería y
+// se agota, quedás afuera. Chip "🔋 N%" pineado en la fila de sesiones (solo
+// si el host reporta batería), banner ámbar sobre la terminal cuando descarga
+// bajo el umbral, y bottom sheet con el detalle + toggle de la alerta push
+// (server-side: el watcher corre sin ningún cliente — POST /api/host/alert).
+// ---------------------------------------------------------------------------
+const BATT_STATES = {
+  discharging: 'descargando',
+  charging: 'cargando',
+  charged: 'cargada',
+  'finishing charge': 'terminando carga',
+  'AC attached': 'en corriente',
+};
+
+// iconos de las filas del sheet (markup 100% estático, como FT_ICONS)
+const hostSvg = (body) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+const HOST_ICONS = {
+  batt: hostSvg('<rect x="2" y="7.5" width="17" height="9" rx="2.5"/><path d="M22 10.5v3"/><path d="M6 10.5v3M9.5 10.5v3"/>'),
+  power: hostSvg('<path d="M13 2.5L4.5 13.5h6l-1.5 8L17.5 10h-6z"/>'),
+  sleep: hostSvg('<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/>'),
+  uptime: hostSvg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+};
+
+let hostStatus = null;          // último /api/host/status (null = sin datos aún)
+let hostBannerDismissed = false; // ✕ del banner: vale por episodio de descarga
+
+async function refreshHost() {
+  try {
+    const res = await api('/api/host/status');
+    if (!res.ok) return; // error transitorio: conservar el último estado
+    hostStatus = await res.json();
+  } catch (_) { return; }
+  renderHost();
+}
+
+// condición del banner y del chip en alerta: descargando bajo el umbral
+function battLow() {
+  const b = hostStatus && hostStatus.battery;
+  return !!(b && b.state === 'discharging' && b.pct < hostStatus.alert.threshold);
+}
+
+function setHostBanner(show, pct) {
+  const el = $('#host-banner');
+  if (show) $('#host-banner-pct').textContent = String(pct);
+  if (el.classList.contains('hidden') !== show) return; // sin cambio: no re-fittear
+  el.classList.toggle('hidden', !show);
+  requestAnimationFrame(() => claudeConn && claudeConn.fit()); // roba/devuelve filas
+}
+
+function renderHost() {
+  const chip = $('#host-chip');
+  const b = hostStatus && hostStatus.battery;
+  if (!b) {
+    // Mac de escritorio (o pmset ilegible): sin chip ni banner
+    chip.classList.add('hidden');
+    setHostBanner(false);
+  } else {
+    chip.classList.remove('hidden');
+    $('#host-chip-pct').textContent = `${b.pct}%`;
+    // la barrita interna del ícono refleja el nivel (ancho útil: 13.2px)
+    $('#host-batt-fill').setAttribute('width', String(Math.max(0.8, 13.2 * b.pct / 100).toFixed(1)));
+    chip.classList.toggle('warn', battLow());
+    if (battLow()) {
+      if (!hostBannerDismissed) setHostBanner(true, b.pct);
+    } else {
+      hostBannerDismissed = false; // terminó el episodio: re-armar el banner
+      setHostBanner(false);
+    }
+  }
+  if (!$('#host-sheet').classList.contains('hidden')) renderHostSheet();
+}
+
+function fmtUptime(s) {
+  if (!Number.isFinite(s) || s < 0) return '—';
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function hostRow(icon, label, value, valueCls) {
+  const row = document.createElement('div');
+  row.className = 'host-row';
+  const ico = document.createElement('span');
+  ico.className = 'host-ico';
+  ico.innerHTML = HOST_ICONS[icon]; // SVG estático de HOST_ICONS, sin input del usuario
+  const lab = document.createElement('span');
+  lab.className = 'host-label';
+  lab.textContent = label;
+  const val = document.createElement('span');
+  val.className = 'host-val' + (valueCls ? ` ${valueCls}` : '');
+  val.textContent = value;
+  row.append(ico, lab, val);
+  return row;
+}
+
+function renderHostSheet() {
+  const h = hostStatus;
+  if (!h) return;
+  $('#host-name').textContent = h.name || 'Mac';
+  const rows = $('#host-rows');
+  rows.innerHTML = '';
+  const b = h.battery;
+  rows.appendChild(hostRow('batt', 'Batería',
+    b ? `${b.pct}% · ${BATT_STATES[b.state] || b.state}` : 'sin batería',
+    b && b.state === 'discharging' ? 'warn' : ''));
+  rows.appendChild(hostRow('power', 'Energía',
+    h.ac === null ? '—' : h.ac ? 'Corriente' : 'En batería'));
+  rows.appendChild(hostRow('sleep', 'Reposo (pmset)',
+    h.sleepDisabled === null ? '—' : h.sleepDisabled ? 'Activo · no dormirá' : 'Normal · puede dormir',
+    h.sleepDisabled ? 'good' : ''));
+  rows.appendChild(hostRow('uptime', 'Uptime', fmtUptime(h.uptime)));
+  $('#host-threshold').textContent = `${h.alert.threshold}%`;
+  $('#host-alert-toggle').classList.toggle('on', h.alert.enabled);
+}
+
+function openHostSheet() {
+  if (!hostStatus) return;
+  renderHostSheet();
+  $('#host-sheet').classList.remove('hidden');
+  refreshHost(); // datos frescos al abrir (el poll es de 8 s)
+}
+
+function closeHostSheet() {
+  $('#host-sheet').classList.add('hidden');
+}
+
+// el toggle y el umbral gobiernan el watcher DEL SERVER (no un estado local)
+async function postHostAlert(patch) {
+  try {
+    const res = await api('/api/host/alert', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch (_) {}
+      alert(`No se pudo guardar la alerta: ${msg}`);
+      return;
+    }
+    const data = await res.json();
+    if (hostStatus) {
+      hostStatus.alert = data.alert;
+      renderHost(); // el umbral también mueve el banner/chip en alerta
+    }
+  } catch (e) {
+    if (String(e.message) !== '401') alert('No se pudo guardar la alerta (error de red)');
+  }
+}
+
+// umbral configurable con el prompt() low-fi de siempre (renameSession, snippets)
+function editHostThreshold() {
+  if (!hostStatus) return;
+  const input = window.prompt('Avisar cuando la batería baje de (%):', String(hostStatus.alert.threshold));
+  if (input === null) return;
+  const n = Number.parseInt(input.trim(), 10);
+  if (!Number.isFinite(n) || n < 5 || n > 95) {
+    alert('Umbral inválido: un entero entre 5 y 95');
+    return;
+  }
+  postHostAlert({ threshold: n });
+}
+
+function wireHost() {
+  // el chip está pineado fuera de la tira scrolleable: click directo alcanza
+  $('#host-chip').addEventListener('click', openHostSheet);
+  // tap en el fondo oscurecido (no en el panel) cierra el sheet
+  $('#host-sheet').addEventListener('click', (e) => {
+    if (e.target === $('#host-sheet')) closeHostSheet();
+  });
+  onTap($('#host-alert-toggle'), () => {
+    if (hostStatus) postHostAlert({ enabled: !hostStatus.alert.enabled });
+  });
+  onTap($('#host-threshold'), editHostThreshold);
+  $('#host-banner-close').addEventListener('click', () => {
+    hostBannerDismissed = true; // por aparición: se re-arma al salir del episodio
+    setHostBanner(false);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Fetch con manejo de 401
 // ---------------------------------------------------------------------------
 async function api(path, opts) {
@@ -1943,8 +2128,10 @@ async function init() {
   wireComposer();
   wireSnippets();
   wireScrollback();
+  wireHost();
   refreshSessions();
   refreshGit(); // primer fetch del badge de Cambios sin esperar el intervalo
+  refreshHost(); // chip de batería + banner (tarea 17) sin esperar el intervalo
 
   // tabs
   document.querySelectorAll('.tab').forEach((t) => {
@@ -1965,6 +2152,7 @@ async function init() {
     if (document.visibilityState !== 'visible') return;
     claudeConn.sendVis(); // re-afirmar presencia (tarea 3): el server la expira a los 25 s
     refreshGit();
+    refreshHost(); // el banner de batería tiene que aparecer sin interacción
     if (state.activeTab === 'claude') refreshSessions();
     if (state.activeTab === 'files') refreshTree(false); // sigue el cwd del pane: re-render solo si cambió la raíz
   }, 8000);
@@ -1976,6 +2164,7 @@ async function init() {
     if (document.visibilityState === 'visible') {
       refreshGit();
       refreshSessions();
+      refreshHost();
       if (state.activeTab === 'files') refreshTree(false);
       // iOS suele matar los WS en background: reconectar sin esperar backoff
       claudeConn.resume();

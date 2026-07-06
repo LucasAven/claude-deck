@@ -898,6 +898,166 @@ app.put('/api/snippets', async (c) => {
   return c.json({ ok: true })
 })
 
+// ---------------------------------------------------------------------------
+// Host (tarea 17): salud de la Mac anfitriona + alerta proactiva de batería.
+// La matemática del modo remoto: `deck away` mantiene la Mac despierta a
+// batería → si se agota, se cae el tailnet y quedás afuera hasta volver
+// físicamente. El panel muestra el estado y un watcher server-side avisa por
+// ntfy ANTES de que pase (el push tiene que salir sin ningún cliente mirando).
+// Parsing defensivo: el formato de pmset es estable pero no documentado —
+// cualquier miss devuelve null y la UI degrada (Mac de escritorio sin batería
+// → battery: null y el chip no se renderiza).
+// ---------------------------------------------------------------------------
+type HostBattery = { pct: number; state: string }
+
+function parsePmsetBatt(out: string): { battery: HostBattery | null; ac: boolean | null } {
+  let ac: boolean | null = null
+  const draw = out.match(/Now drawing from '([^']+)'/)
+  if (draw) ac = draw[1].includes('AC')
+  // línea típica: " -InternalBattery-0 (id=…)\t83%; discharging; 10:55 remaining present: true"
+  const m = out.match(/InternalBattery[^\n]*?(\d{1,3})%;\s*([^;\n]+)/)
+  if (!m) return { battery: null, ac }
+  const pct = Number(m[1])
+  if (pct > 100) return { battery: null, ac }
+  return { battery: { pct, state: m[2].trim() }, ac }
+}
+
+async function readHostBattery(): Promise<{ battery: HostBattery | null; ac: boolean | null }> {
+  try {
+    return parsePmsetBatt((await execFileP('pmset', ['-g', 'batt'])).stdout)
+  } catch {
+    return { battery: null, ac: null } // sin pmset (no-macOS): todo null
+  }
+}
+
+/** SleepDisabled de `pmset -g` — la palanca de `deck away` ("no dormirá"). */
+async function readSleepDisabled(): Promise<boolean | null> {
+  try {
+    const m = (await execFileP('pmset', ['-g'])).stdout.match(/^\s*SleepDisabled\s+(\d)/m)
+    return m ? m[1] !== '0' : null
+  } catch {
+    return null
+  }
+}
+
+// nombre visible de la Mac ("MacBook Pro de Lucas"): no cambia nunca → cache
+let hostNameCache: string | null = null
+async function hostName(): Promise<string> {
+  if (hostNameCache) return hostNameCache
+  try {
+    hostNameCache = (await execFileP('scutil', ['--get', 'ComputerName'])).stdout.trim()
+  } catch { /* no-macOS o scutil raro */ }
+  if (!hostNameCache) hostNameCache = os.hostname()
+  return hostNameCache
+}
+
+// Estado de la alerta: server-side (el watcher corre sin ningún cliente, un
+// localStorage no puede gobernarlo — decisión de Lucas 2026-07-05, igual que
+// el umbral configurable). Mismo patrón de app-data que snippets.json.
+const HOST_ALERT_FILE = path.join(os.homedir(), '.claude-deck', 'host-alert.json')
+const HOST_ALERT_DEFAULT = { enabled: true, threshold: 30 }
+const BATT_THRESHOLD_MIN = 5
+const BATT_THRESHOLD_MAX = 95
+
+function readHostAlert(): { enabled: boolean; threshold: number } {
+  try {
+    const raw = JSON.parse(fs.readFileSync(HOST_ALERT_FILE, 'utf8'))
+    return {
+      enabled: typeof raw?.enabled === 'boolean' ? raw.enabled : HOST_ALERT_DEFAULT.enabled,
+      threshold: Number.isInteger(raw?.threshold) && raw.threshold >= BATT_THRESHOLD_MIN && raw.threshold <= BATT_THRESHOLD_MAX
+        ? raw.threshold
+        : HOST_ALERT_DEFAULT.threshold,
+    }
+  } catch {
+    return { ...HOST_ALERT_DEFAULT } // sin archivo todavía o JSON roto: defaults
+  }
+}
+
+function writeHostAlert(alert: { enabled: boolean; threshold: number }): void {
+  fs.mkdirSync(path.dirname(HOST_ALERT_FILE), { recursive: true })
+  // atómico (tmp + rename), como snippets: un crash no deja JSON trunco
+  const tmp = `${HOST_ALERT_FILE}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(alert, null, 2) + '\n')
+  fs.renameSync(tmp, HOST_ALERT_FILE)
+}
+
+app.get('/api/host/status', async (c) => {
+  const [name, { battery, ac }, sleepDisabled] = await Promise.all([
+    hostName(),
+    readHostBattery(),
+    readSleepDisabled(),
+  ])
+  return c.json({ name, battery, ac, sleepDisabled, uptime: Math.round(os.uptime()), alert: readHostAlert() })
+})
+
+app.post('/api/host/alert', async (c) => {
+  let body: { enabled?: unknown; threshold?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const next = readHostAlert()
+  let touched = false
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== 'boolean') throw new HttpError(400, 'enabled debe ser booleano')
+    next.enabled = body.enabled
+    touched = true
+  }
+  if (body.threshold !== undefined) {
+    if (typeof body.threshold !== 'number' || !Number.isInteger(body.threshold)
+      || body.threshold < BATT_THRESHOLD_MIN || body.threshold > BATT_THRESHOLD_MAX) {
+      throw new HttpError(400, `threshold debe ser un entero entre ${BATT_THRESHOLD_MIN} y ${BATT_THRESHOLD_MAX}`)
+    }
+    next.threshold = body.threshold
+    touched = true
+  }
+  if (!touched) throw new HttpError(400, 'mandá enabled y/o threshold')
+  writeHostAlert(next)
+  return c.json({ ok: true, alert: next })
+})
+
+// push directo a ntfy, mismo formato que scripts/notify.sh (Title/Tags/body);
+// NTFY_TOPIC sale del .env ya cargado — sin topic, silencio (mejor esfuerzo)
+async function ntfyPush(title: string, body: string): Promise<void> {
+  const topic = process.env.NTFY_TOPIC
+  if (!topic) return
+  try {
+    await fetch(`https://ntfy.sh/${topic}`, {
+      method: 'POST',
+      headers: { Title: title, Tags: 'battery' },
+      body,
+      signal: AbortSignal.timeout(5000),
+    })
+  } catch { /* mejor esfuerzo: el próximo cruce re-armado reintenta */ }
+}
+
+// Watcher de batería: UNA notificación por episodio de descarga, con
+// histéresis — se re-arma recién al volver a corriente o al subir por encima
+// de umbral + margen (cargas parciales cortas no re-disparan a cada rato).
+// DECK_BATT_WATCH_MS existe para poder testear el ciclo sin esperar minutos.
+const BATT_WATCH_MS = Math.max(1000, Number(process.env.DECK_BATT_WATCH_MS) || 60_000)
+const BATT_REARM_MARGIN = 5
+let battAlertFired = false
+
+setInterval(async () => {
+  try {
+    const { battery } = await readHostBattery()
+    if (!battery) return
+    const alert = readHostAlert()
+    const discharging = battery.state === 'discharging'
+    if (!discharging || battery.pct >= alert.threshold + BATT_REARM_MARGIN) battAlertFired = false
+    if (alert.enabled && discharging && battery.pct < alert.threshold && !battAlertFired) {
+      battAlertFired = true // antes del push: un error de red no debe spamear
+      console.log(`[deck] ${new Date().toISOString()} batería ${battery.pct}% < ${alert.threshold}% descargando → push ntfy`)
+      await ntfyPush(
+        await hostName(),
+        `🔋 Batería al ${battery.pct}% y descargando. Si se agota perdés el acceso al tailnet — enchufá la Mac o cerrá lo que no uses.`,
+      )
+    }
+  } catch { /* el watcher jamás tira el server */ }
+}, BATT_WATCH_MS)
+
 // Estáticos (con auth, servidos desde public/)
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

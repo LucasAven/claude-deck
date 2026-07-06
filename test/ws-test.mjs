@@ -307,6 +307,39 @@ try {
   else fs.rmSync(SNIP_FILE, { force: true });
 }
 
+// 9g. /api/host/status + /api/host/alert (tarea 17): panel de host y alerta
+// de batería. Los checks del status son agnósticos de la máquina (batería
+// null en desktops); host-alert.json es data real del usuario → backup/restore.
+const ALERT_FILE = `${os.homedir()}/.claude-deck/host-alert.json`;
+const alertBackup = fs.existsSync(ALERT_FILE) ? fs.readFileSync(ALERT_FILE) : null;
+const alertPost = (body) => fetch(`${HTTP}/api/host/alert`, {
+  method: 'POST',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+try {
+  fs.rmSync(ALERT_FILE, { force: true });
+  const hs = await fetch(`${HTTP}/api/host/status`, { headers: { 'x-deck-token': TOKEN } });
+  const hsJson = await hs.json();
+  ok('host/status → 200 con name/uptime/alert sanos', hs.status === 200
+    && typeof hsJson.name === 'string' && hsJson.name.length > 0
+    && Number.isFinite(hsJson.uptime) && hsJson.uptime > 0
+    && hsJson.alert?.enabled === true && hsJson.alert?.threshold === 30);
+  ok('host/status battery null o {pct 0-100, state}', hsJson.battery === null
+    || (Number.isInteger(hsJson.battery.pct) && hsJson.battery.pct >= 0 && hsJson.battery.pct <= 100
+      && typeof hsJson.battery.state === 'string'));
+  const ap = await alertPost({ enabled: false, threshold: 20 });
+  const hs2 = await (await fetch(`${HTTP}/api/host/status`, { headers: { 'x-deck-token': TOKEN } })).json();
+  ok('host/alert POST → 200 y el status lo refleja', ap.status === 200
+    && hs2.alert?.enabled === false && hs2.alert?.threshold === 20);
+  ok('host/alert threshold fuera de rango → 400', (await alertPost({ threshold: 200 })).status === 400);
+  ok('host/alert enabled no-booleano → 400', (await alertPost({ enabled: 'si' })).status === 400);
+  ok('host/alert body vacío → 400', (await alertPost({})).status === 400);
+} finally {
+  if (alertBackup !== null) fs.writeFileSync(ALERT_FILE, alertBackup);
+  else fs.rmSync(ALERT_FILE, { force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);

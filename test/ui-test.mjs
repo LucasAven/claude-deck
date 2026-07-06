@@ -806,6 +806,108 @@ ok('long-press muestra el tooltip y ese release NO inserta (paleta sigue abierta
   tipRun.holdShown && tipRun.holdHidden && tipRun.holdNoInsert && tipRun.menuStillOpen);
 ok('el tap normal siguiente inserta como siempre', tipRun.tapInserts);
 
+// 17. panel de host + batería (tarea 17): chip "🔋 N%" pineado en la fila de
+// sesiones (solo si el host reporta batería), banner ámbar cuando descarga
+// bajo el umbral (dismissible por episodio), y bottom sheet con las filas de
+// estado + toggle/umbral de la alerta server-side. /api/host/status y
+// /api/host/alert mockeados: no se toca el host-alert.json real.
+const hostRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const posts = [];
+  let mockStatus = {
+    name: 'MacBook Pro de Lucas',
+    battery: { pct: 81, state: 'discharging' },
+    ac: false,
+    sleepDisabled: true,
+    uptime: 4 * 86400 + 6 * 3600, // "4d 6h"
+    alert: { enabled: true, threshold: 30 },
+  };
+  window.fetch = (url, opts) => {
+    const u = String(url);
+    if (u.includes('/api/host/alert')) {
+      const body = JSON.parse(opts.body);
+      posts.push(body);
+      mockStatus.alert = { ...mockStatus.alert, ...body };
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, alert: mockStatus.alert }), { status: 200 }));
+    }
+    if (u.includes('/api/host/status')) {
+      return Promise.resolve(new Response(JSON.stringify(mockStatus), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+  const chip = document.querySelector('#host-chip');
+  const banner = document.querySelector('#host-banner');
+  const sheet = document.querySelector('#host-sheet');
+  const out = { posts };
+
+  // batería sana descargando: chip con % sin warn, banner oculto
+  await refreshHost(); await frame();
+  out.chip = !chip.classList.contains('hidden')
+    && document.querySelector('#host-chip-pct').textContent === '81%'
+    && !chip.classList.contains('warn');
+  out.bannerHidden = banner.classList.contains('hidden');
+
+  // sin batería (Mac de escritorio): ni chip ni banner
+  mockStatus = { ...mockStatus, battery: null };
+  await refreshHost(); await frame();
+  out.noBattHidesChip = chip.classList.contains('hidden') && banner.classList.contains('hidden');
+
+  // descargando bajo el umbral: chip warn + banner con el %; el ✕ lo descarta
+  mockStatus = { ...mockStatus, battery: { pct: 28, state: 'discharging' } };
+  await refreshHost(); await frame();
+  out.lowWarn = chip.classList.contains('warn');
+  out.lowBanner = !banner.classList.contains('hidden')
+    && document.querySelector('#host-banner-pct').textContent === '28';
+  document.querySelector('#host-banner-close').click();
+  await refreshHost(); await frame();
+  out.dismissed = banner.classList.contains('hidden');
+
+  // chip → sheet con nombre y las 4 filas del mock; toggle prendido
+  chip.click(); // el chip está pineado fuera de la tira scrolleable: click directo
+  await frame();
+  out.sheetOpen = !sheet.classList.contains('hidden');
+  out.sheetName = document.querySelector('#host-name').textContent;
+  out.sheetRows = [...document.querySelectorAll('#host-rows .host-row')]
+    .map((r) => `${r.querySelector('.host-label').textContent}|${r.querySelector('.host-val').textContent}`);
+  out.sheetThreshold = document.querySelector('#host-threshold').textContent;
+  out.toggleOn = document.querySelector('#host-alert-toggle').classList.contains('on');
+
+  // toggle → POST {enabled:false} al server (la alerta es server-side)
+  tap(document.querySelector('#host-alert-toggle'));
+  await new Promise((r) => setTimeout(r, 150));
+  out.toggleOff = !document.querySelector('#host-alert-toggle').classList.contains('on');
+
+  // tap en el fondo cierra el sheet
+  sheet.click();
+  out.sheetClosed = sheet.classList.contains('hidden');
+
+  window.fetch = realFetch;
+  await refreshHost(); // repintar con el estado real de la Mac
+  return out;
+});
+ok('host: chip con % visible y sin warn con batería sana', hostRun.chip && hostRun.bannerHidden);
+ok('host: battery null → chip y banner ocultos', hostRun.noBattHidesChip);
+ok('host: bajo el umbral → chip warn + banner con el %', hostRun.lowWarn && hostRun.lowBanner);
+ok('host: ✕ descarta el banner (por episodio)', hostRun.dismissed);
+ok('host: chip abre el sheet con nombre y filas de estado',
+  hostRun.sheetOpen && hostRun.sheetName === 'MacBook Pro de Lucas'
+  && JSON.stringify(hostRun.sheetRows) === JSON.stringify([
+    'Batería|28% · descargando',
+    'Energía|En batería',
+    'Reposo (pmset)|Activo · no dormirá',
+    'Uptime|4d 6h',
+  ]));
+ok('host: umbral y toggle reflejan la alerta del server',
+  hostRun.sheetThreshold === '30%' && hostRun.toggleOn);
+ok('host: toggle manda POST {enabled:false} y se apaga',
+  hostRun.toggleOff && hostRun.posts.some((p) => p.enabled === false));
+ok('host: tap en el fondo cierra el sheet', hostRun.sheetClosed);
+
 // screenshot de la paleta contra el server real (fetch ya restaurado)
 await tapSel('#btn-snippets');
 await new Promise((r) => setTimeout(r, 400));
