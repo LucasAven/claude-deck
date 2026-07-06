@@ -954,6 +954,11 @@ body.composer-open .tabbar { display: none; }
      viejo) se desbordaba hacia abajo; como sus capas son position:absolute,
      pintaban ENCIMA del composer (estático). Clipear acá lo evita siempre */
   overflow: hidden;
+  /* el scroll (un dedo) y el pinch de fuente (dos dedos) los maneja JS
+     (wireTouchScroll / wirePinchZoom en lib/term.ts): desactivar los gestos
+     nativos del browser acá para que iOS no meta scroll de página ni zoom del
+     viewport sobre la terminal (tarea 11a) */
+  touch-action: none;
 }
 .term-wrap .xterm { height: 100%; }
 .xterm .xterm-viewport { background: transparent !important; }

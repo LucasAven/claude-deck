@@ -1048,6 +1048,30 @@ await page.click('.tab[data-tab="claude"]');
 await new Promise((r) => setTimeout(r, 800));
 await page.screenshot({ path: new URL('./shot-claude.png', import.meta.url).pathname });
 
+// 19. pinch-zoom del font (tarea 11a): el gesto no se puede sentir headless
+// (eso lo prueba el scratch de puppeteer del agente y Lucas en el celu), pero sí
+// se verifica el otro extremo: el tamaño persistido en localStorage se aplica al
+// arrancar el terminal (loadFontSize en el init de createTermConnection). Se
+// setea deck-fontsize, se recarga y se lee claudeConn.term.options.fontSize.
+// Al final se restaura el default (14) y se recarga, para que la sesión real
+// termine con su geometría normal (nunca la dejamos zoomeada).
+const bootFont = async (raw) => {
+  await page.evaluate((v) => { localStorage.setItem('deck-fontsize', v); }, raw);
+  await page.reload({ waitUntil: 'networkidle2', timeout: 20000 });
+  await page.waitForSelector('#term-claude .xterm', { timeout: 10000 });
+  await new Promise((r) => setTimeout(r, 2000));
+  return page.evaluate(() => window.claudeConn?.term?.options?.fontSize);
+};
+ok('pinch: tamaño persistido (18) aplicado al boot', (await bootFont('18')) === 18);
+ok('pinch: tamaño fuera de rango clampeado al boot (999 → 22)', (await bootFont('999')) === 22);
+ok('pinch: tamaño fuera de rango clampeado al boot (2 → 10)', (await bootFont('2')) === 10);
+// restaurar el default para no dejar zoomeada la sesión real
+await page.evaluate(() => localStorage.removeItem('deck-fontsize'));
+await page.reload({ waitUntil: 'networkidle2', timeout: 20000 });
+await page.waitForSelector('#term-claude .xterm', { timeout: 10000 });
+await new Promise((r) => setTimeout(r, 2000));
+ok('pinch: sin clave → default 14 al boot', (await page.evaluate(() => window.claudeConn?.term?.options?.fontSize)) === 14);
+
 await browser.close();
 console.log(results.join('\n'));
 process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);

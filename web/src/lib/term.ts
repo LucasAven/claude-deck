@@ -11,6 +11,28 @@ import { api } from './api'
 // el DOM a mano; el resto — gen guard, backoff, resize solo-si-cambió, watchdog
 // de resume, meta gone, anti-resurrección — se preserva byte a byte.
 
+// tamaño de fuente del terminal, GLOBAL (todas las sesiones comparten el único
+// xterm) y persistido en localStorage (tarea 11a). El pinch de dos dedos lo
+// mueve entre FONT_MIN y FONT_MAX; el default histórico era 14.
+const FONT_KEY = 'deck-fontsize'
+const FONT_MIN = 10
+const FONT_MAX = 22
+const FONT_DEFAULT = 14
+const clampFont = (n: number) => Math.max(FONT_MIN, Math.min(FONT_MAX, n))
+
+function loadFontSize(): number {
+  try {
+    const raw = localStorage.getItem(FONT_KEY)
+    if (raw == null) return FONT_DEFAULT
+    const n = parseInt(raw, 10)
+    return Number.isFinite(n) ? clampFont(n) : FONT_DEFAULT
+  } catch { return FONT_DEFAULT }
+}
+
+function saveFontSize(n: number) {
+  try { localStorage.setItem(FONT_KEY, String(n)) } catch { /* modo privado */ }
+}
+
 const XTERM_THEME = {
   background: '#0b0d10',
   foreground: '#c8ccd4',
@@ -29,7 +51,7 @@ const XTERM_THEME = {
 
 function createTermConnection(container: HTMLElement): ClaudeConn {
   const term = new Terminal({
-    fontSize: 14,
+    fontSize: loadFontSize(),
     fontFamily: '"SF Mono", ui-monospace, Menlo, Consolas, monospace',
     theme: XTERM_THEME,
     cursorBlink: true,
@@ -264,6 +286,70 @@ export function wireTouchScroll(container: HTMLElement, getConn: () => ClaudeCon
 
   container.addEventListener('touchend', () => { lastY = null })
   container.addEventListener('touchcancel', () => { lastY = null })
+}
+
+// ---------------------------------------------------------------------------
+// Pinch de dos dedos → tamaño de fuente del terminal (tarea 11a)
+// Convive con wireTouchScroll SIN chocar: aquel ignora todo lo que no sea un
+// solo dedo (touches.length !== 1 → lastY = null), así que un dedo scrollea y
+// dos dedos hacen zoom. La transición pinch→un-dedo NO se vuelve ráfaga de
+// scroll: cuando se levanta uno de los dos dedos, wireTouchScroll ya dejó lastY
+// en null en el touchstart del segundo dedo y solo lo re-arma en un touchstart
+// nuevo (todos los dedos arriba y vuelta a tocar), nunca a mitad de un move.
+//
+// El tamaño se aplica en vivo por cada touchmove (feedback inmediato, xterm
+// reflowea el texto a los cols/rows actuales), pero el re-fit + sendResize —que
+// repinta tmux ENTERO y propaga cols/rows al pty— se hace UNA sola vez al final
+// del gesto (ver el dedup de sendResize). Nunca por touchmove.
+export function wirePinchZoom(container: HTMLElement, getConn: () => ClaudeConn | undefined) {
+  let startDist: number | null = null // distancia entre los dos dedos al empezar
+  let startFont = FONT_DEFAULT          // fontSize al empezar (para compounding correcto)
+
+  const dist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+
+  container.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      const conn = getConn()
+      if (!conn) { startDist = null; return }
+      startDist = dist(e.touches[0], e.touches[1])
+      startFont = conn.term.options.fontSize ?? FONT_DEFAULT
+    } else {
+      // un solo dedo (scroll) o un tercer dedo → sin pinch
+      startDist = null
+    }
+  }, { passive: false })
+
+  container.addEventListener('touchmove', (e) => {
+    if (startDist === null || e.touches.length !== 2) return
+    const conn = getConn()
+    if (!conn) return
+    e.preventDefault() // suprime el pinch-zoom de página de Safari sobre la terminal
+    const d = dist(e.touches[0], e.touches[1])
+    const next = clampFont(Math.round(startFont * (d / startDist)))
+    if (next !== conn.term.options.fontSize) conn.term.options.fontSize = next
+  }, { passive: false })
+
+  const endPinch = () => {
+    if (startDist === null) return // no había pinch activo
+    startDist = null
+    const conn = getConn()
+    const size = conn?.term.options.fontSize ?? FONT_DEFAULT
+    if (!conn || size === startFont) return // nada cambió → no resizear el pty
+    // fin del gesto: re-fit y propagar los cols/rows NUEVOS al pty/tmux, una vez
+    conn.fit(true)
+    saveFontSize(size)
+  }
+  // touchend fija el fin del gesto (se levantó un dedo); touchcancel/pointercancel
+  // cubren cuando iOS le roba el gesto al sistema.
+  container.addEventListener('touchend', endPinch)
+  container.addEventListener('touchcancel', endPinch)
+  container.addEventListener('pointercancel', endPinch)
+  // Safari (iOS) dispara gesture* para el pinch nativo de la página: suprimirlo
+  // sobre la terminal para que el gesto llegue a la app, no al zoom del viewport.
+  const suppress = (e: Event) => e.preventDefault()
+  container.addEventListener('gesturestart', suppress)
+  container.addEventListener('gesturechange', suppress)
+  container.addEventListener('gestureend', suppress)
 }
 
 // Singleton de módulo: se crea una sola vez (lazy), nunca por render. Se expone

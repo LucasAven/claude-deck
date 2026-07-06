@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useDeckStore } from '../../store'
-import { getClaudeConn, wireTouchScroll } from '../../lib/term'
+import { getClaudeConn, wireTouchScroll, wirePinchZoom } from '../../lib/term'
 
 // Contenedor #term-claude (index.html:42). En un efecto —una sola vez— crea el
 // singleton de conexión (lib/term.ts), lo abre sobre el div y cablea el scroll
@@ -21,6 +21,7 @@ export function Terminal() {
     created.current = true
     getClaudeConn(ref.current)
     wireTouchScroll(ref.current, () => window.claudeConn)
+    wirePinchZoom(ref.current, () => window.claudeConn)
   }, [session])
 
   return <div id="term-claude" className="term-wrap" ref={ref} />
