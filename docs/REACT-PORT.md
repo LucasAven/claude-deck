@@ -12,7 +12,7 @@
 - [x] Fase 1 — Shell: store, api, tabs, CSS, init
 - [x] Fase 2 — Terminal + sesiones (el core)
 - [x] Fase 3 — Controlbar: switchers, adjuntar/imagen, composer, snippets
-- [ ] Fase 4 — Overlays: scrollback legible + panel de host
+- [x] Fase 4 — Overlays: scrollback legible + panel de host
 - [ ] Fase 5 — Pestañas Cambios y Archivos
 - [ ] Fase 6 — PWA, swap de estáticos, tests y limpieza
 
@@ -300,7 +300,7 @@ snippets sincronizan entre dispositivos, foto de la cámara llega como `[Image #
 
 **Tareas:**
 
-- [ ] `Scrollback.tsx` (app.js:1088-1231): overlay siempre montado. Fuente primaria
+- [x] `Scrollback.tsx` (app.js:1088-1231): overlay siempre montado. Fuente primaria
   `GET /api/claude/transcript` (turnos; asistente renderizado con
   `DOMPurify.sanitize(marked.parse(text, {breaks:true}))` en `dangerouslySetInnerHTML`
   + clase `md-body`; user/tool como texto plano), fallback `GET /api/tmux/scrollback`
@@ -310,7 +310,7 @@ snippets sincronizan entre dispositivos, foto de la cámara llega como `[Image #
   `--sb-font`), y el **anclaje de lectura**: capturar `scrollHeight/scrollTop` antes de
   pintar y restaurar en `useLayoutEffect` (fondo en carga inicial; compensado en "cargar
   más" — app.js:1110-1112). Cerrar suelta el contenido del DOM.
-- [ ] `HostSheet.tsx` + chip + banner (app.js:1241-1416): chip 🔋 solo si
+- [x] `HostSheet.tsx` + chip + banner (app.js:1241-1416): chip 🔋 solo si
   `hostStatus.battery` (con la barrita SVG proporcional y `.warn` bajo umbral), banner
   ámbar descartable **por episodio** (`hostBannerDismissed` se re-arma al salir del
   episodio de descarga), bottom sheet con filas (batería/energía/reposo/uptime,

@@ -5,6 +5,7 @@ import { useDeckStore } from '../../store'
 import { cycleMode, openModelMenu, openAttachMenu } from '../../lib/switch'
 import { openSnippetsMenu } from '../../lib/snippets'
 import { openComposer } from '../../lib/composer'
+import { openScrollback } from '../../lib/scrollback'
 import { attachImage, sendPendingImage, hideImgChip } from '../../lib/image'
 import { SwitchMenu } from './SwitchMenu'
 
@@ -36,6 +37,7 @@ export function ControlBar() {
   const attachTap = useTap(() => openAttachMenu())
   const snippetsTap = useTap(() => openSnippetsMenu())
   const composerTap = useTap(() => openComposer())
+  const scrollbackTap = useTap(() => openScrollback())
 
   const model = MODELS.find((m) => m.id === sw.model)
   const modelLabel = model ? model.label : sw.model || 'Modelo'
@@ -108,8 +110,7 @@ export function ControlBar() {
         <button id="btn-composer" className="ctl-sq" title="Componer prompt" {...composerTap}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.7 3.8a2.1 2.1 0 0 1 3 3L7.5 19l-4 1 1-4z" /></svg>
         </button>
-        {/* scrollback: inerte hasta la Fase 4 */}
-        <button id="btn-scrollback" className="ctl-sq" title="Ponerse al día (scrollback legible)">
+        <button id="btn-scrollback" className="ctl-sq" title="Ponerse al día (scrollback legible)" {...scrollbackTap}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5.5h16M4 9.5h16M4 13.5h10" /><path d="M17 21v-6M14 17.8l3 3 3-3" /></svg>
         </button>
         <span className="ctl-div" />

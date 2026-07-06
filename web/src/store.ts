@@ -24,10 +24,49 @@ export interface GitSummary {
   files: GitFile[]
 }
 
-// Formas que se completan en fases posteriores (sesiones: Fase 2, host: Fase 4,
+// Formas que se completan en fases posteriores (sesiones: Fase 2,
 // snippets: Fase 3). Se dejan tipadas laxo por ahora.
 export type Session = { name: string; state?: string; [k: string]: unknown }
-export type HostStatus = Record<string, unknown>
+
+// Estado del host (GET /api/host/status, server/index.ts:989-995). El chip y el
+// banner de batería solo existen si `battery` no es null (Mac de escritorio o
+// pmset ilegible → null).
+export interface HostBattery {
+  pct: number
+  state: string
+}
+export interface HostAlert {
+  enabled: boolean
+  threshold: number
+}
+export interface HostStatus {
+  name: string | null
+  battery: HostBattery | null
+  ac: boolean | null
+  sleepDisabled: boolean | null
+  uptime: number
+  alert: HostAlert
+}
+
+// Scrollback legible (app.js:1088-1231): parte reactiva del overlay. El modo
+// 'turns' pinta los turnos del transcript (asistente como markdown sanitizado),
+// 'text' el capture-pane crudo. El resto del estado del fetch (bytes/líneas
+// pedidas, techo) es module-level en lib/scrollback.ts.
+export interface SbTurn {
+  role: 'user' | 'tool' | 'assistant'
+  html: string | null // markdown sanitizado del asistente; null → usar text plano
+  text: string
+}
+export interface ScrollbackState {
+  session: string | null
+  mode: 'turns' | 'text'
+  srcLabel: string // '· transcript' | '· pane' | ''
+  turns: SbTurn[]
+  text: string
+  moreVisible: boolean
+  font: number // px, persistido en deck-sb-font (10-20)
+  renderNonce: number // bump por pintada → dispara el restore del ancla de lectura
+}
 
 // Chip de preview de imagen (app.js:498-524): la parte reactiva (thumb/título/
 // meta/pending) vive acá; el blob pendiente y los timers son module-level en
@@ -80,6 +119,7 @@ interface DeckStore {
   composerSnipsOpen: boolean
   draftSaved: boolean
   scrollbackOpen: boolean
+  scrollback: ScrollbackState
   hostSheetOpen: boolean
   switchMenu: SwitchMenuKind
   switchState: SwitchState
@@ -154,6 +194,16 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   composerSnipsOpen: false,
   draftSaved: false,
   scrollbackOpen: false,
+  scrollback: {
+    session: null,
+    mode: 'text',
+    srcLabel: '',
+    turns: [],
+    text: '',
+    moreVisible: false,
+    font: 13,
+    renderNonce: 0,
+  },
   hostSheetOpen: false,
   switchMenu: null,
   switchState: {},

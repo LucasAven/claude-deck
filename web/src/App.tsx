@@ -6,7 +6,9 @@ import { TabBar } from './components/TabBar'
 import { AuthError } from './components/AuthError'
 import { SnipTip } from './components/SnipTip'
 import { ClaudeView } from './components/claude/ClaudeView'
+import { HostSheet } from './components/claude/HostSheet'
 import { closeSwitchMenu } from './lib/switch'
+import { refreshHost } from './lib/host'
 import { hideComposerSnips } from './lib/composer'
 import { attachImage, pasteTextToPrompt } from './lib/image'
 
@@ -29,6 +31,7 @@ export function App() {
       s.refreshSessions() // primeros chips sin esperar el poll
       s.refreshGit() // primer badge de Cambios sin esperar el poll
     })
+    refreshHost() // primer estado del host (chip de batería) sin esperar el poll
   }, [])
 
   useViewportGeometry()
@@ -85,7 +88,8 @@ export function App() {
         {/* Pestaña Archivos — árbol + vista de archivo (Fase 5) */}
         <section id="view-files" className={cls('files')} />
 
-        {/* overlays globales siempre montados (Fase 3/4): host-sheet, etc. */}
+        {/* overlays globales siempre montados: host-sheet (Fase 4), snip-tip */}
+        <HostSheet />
         <SnipTip />
 
         <TabBar />

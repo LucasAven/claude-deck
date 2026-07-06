@@ -1,12 +1,13 @@
 import { useEffect } from 'react'
 import { useDeckStore } from '../store'
+import { refreshHost } from '../lib/host'
 
 // Auto-refresh cada 8 s mientras la pestaña esté visible + manejo de
-// visibilitychange (app.js:2185-2208). refreshGit corre en cualquier tab para
-// mantener al día el badge de Cambios.
+// visibilitychange (app.js:2185-2208). refreshGit y refreshHost corren en
+// cualquier tab (badge de Cambios y chip de batería siempre al día).
 //
 // Fase 1: presencia (sendVis) + git. Fase 2 suma sessions (solo en la tab
-// claude). host/tree se suman en las Fases 4/5 — ver docs/REACT-PORT.md §3.
+// claude). Fase 4 suma host. tree se suma en la Fase 5 — ver docs/REACT-PORT.md §3.
 export function usePolling() {
   useEffect(() => {
     const { refreshGit, refreshSessions } = useDeckStore.getState()
@@ -15,8 +16,9 @@ export function usePolling() {
       if (document.visibilityState !== 'visible') return
       window.claudeConn?.sendVis() // re-afirmar presencia: el server la expira a los 25 s
       refreshGit()
+      refreshHost()
       if (useDeckStore.getState().activeTab === 'claude') refreshSessions()
-      // Fase 4/5: refreshHost(); if (tab==='files') refreshTree(false)
+      // Fase 5: if (tab==='files') refreshTree(false)
     }, 8000)
 
     const onVis = () => {
@@ -25,6 +27,7 @@ export function usePolling() {
       window.claudeConn?.sendVis()
       if (document.visibilityState === 'visible') {
         refreshGit()
+        refreshHost()
         refreshSessions()
         // iOS suele matar los WS en background: reconectar sin esperar backoff
         window.claudeConn?.resume()

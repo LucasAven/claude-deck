@@ -1,4 +1,5 @@
 import { useDeckStore } from '../../store'
+import { battLow, openHostSheet } from '../../lib/host'
 
 // Fila de sesiones (index.html:23-33): chips + botón +, chip de host (Fase 4) y
 // el punto de conexión. Port de refreshSessions/selectSession/renameSession/
@@ -54,6 +55,12 @@ export function SessionRow() {
   const session = useDeckStore((s) => s.session)
   const connected = useDeckStore((s) => s.connected)
   const createSession = useDeckStore((s) => s.createSession)
+  const hostStatus = useDeckStore((s) => s.hostStatus)
+
+  // chip 🔋 solo si el host reporta batería (Mac de escritorio / pmset ilegible
+  // → null); la barrita interna del ícono refleja el nivel (ancho útil 13.2px)
+  const batt = hostStatus?.battery
+  const fillW = batt ? Math.max(0.8, (13.2 * batt.pct) / 100).toFixed(1) : '0'
 
   return (
     <div className="session-row">
@@ -71,7 +78,20 @@ export function SessionRow() {
       >
         +
       </button>
-      {/* chip de batería del host: Fase 4 (host-chip) */}
+      {/* chip de batería del host: pineado como el +, tap abre el sheet */}
+      <button
+        id="host-chip"
+        className={'chip host-chip' + (batt ? '' : ' hidden') + (battLow(hostStatus) ? ' warn' : '')}
+        title="Estado de la Mac"
+        onClick={() => openHostSheet()}
+      >
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="7.5" width="17" height="9" rx="2.5" />
+          <path d="M22 10.5v3" />
+          <rect id="host-batt-fill" x="4.2" y="9.7" width={fillW} height="4.6" rx="1" fill="currentColor" stroke="none" />
+        </svg>
+        <span id="host-chip-pct">{batt ? `${batt.pct}%` : ''}</span>
+      </button>
       <span className={'conn' + (connected ? ' on' : '')} id="conn-claude">
         <span className="dot" />
       </span>
