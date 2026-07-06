@@ -11,7 +11,7 @@
 - [x] Fase 0 — Scaffolding (Vite + server dual-root)
 - [x] Fase 1 — Shell: store, api, tabs, CSS, init
 - [x] Fase 2 — Terminal + sesiones (el core)
-- [ ] Fase 3 — Controlbar: switchers, adjuntar/imagen, composer, snippets
+- [x] Fase 3 — Controlbar: switchers, adjuntar/imagen, composer, snippets
 - [ ] Fase 4 — Overlays: scrollback legible + panel de host
 - [ ] Fase 5 — Pestañas Cambios y Archivos
 - [ ] Fase 6 — PWA, swap de estáticos, tests y limpieza
@@ -258,36 +258,36 @@ zombie), rotación/teclado re-fitean sin texto doblado.
 
 **Tareas:**
 
-- [ ] `SwitchMenu.tsx`: un solo popover con `kind: 'model'|'attach'|'snippets'` en el
+- [x] `SwitchMenu.tsx`: un solo popover con `kind: 'model'|'attach'|'snippets'` en el
   store (hoy `dataset.kind`, app.js:421-464, 630-654, 1027-1043). Mismo toggle: tap en
   el botón del kind abierto lo cierra; tap en otro lo re-renderiza. Tap-afuera cierra
   (listener global en pointerdown que ignora `#switch-menu, #btn-mode, #btn-model,
   #btn-attach, #btn-snippets` — app.js:470-472).
-- [ ] Pills modo/modelo (app.js:348-474): `cycleMode` manda `\x1b[Z`; menú de modelo
+- [x] Pills modo/modelo (app.js:348-474): `cycleMode` manda `\x1b[Z`; menú de modelo
   manda `/model <id>` y efforts `/effort <id>` vía `sendSlashCommand` (texto, pausa
   150ms, `\r` — app.js:386-390). Estado persistido **por sesión** en
-  `deck-switch:<sesión>` (mismas keys).
-- [ ] Imagen/adjuntar (app.js:481-687): `normalizeImage` (canvas → PNG, lado máx 1600),
+  `deck-switch:<sesión>` (mismas keys; se recarga a `switchState` en cada cambio de sesión).
+- [x] Imagen/adjuntar (app.js:481-687): `normalizeImage` (canvas → PNG, lado máx 1600),
   chip de preview en dos pasos (mostrar → tap confirma y sube a
   `POST /api/paste-image`, ✕ descarta), estados de error/reintento en el meta del chip,
   `URL.revokeObjectURL` al limpiar, paste global de Cmd/Ctrl+V (imagen desde cualquier
   lado; texto **solo si el foco no está en `.term-wrap`** — xterm ya pega solo),
   `pasteFromClipboard` con prioridad imagen > texto, `pasteTextToPrompt` =
   `claudeConn.term.paste(text)` (bracketed paste: multilínea sin submit).
-- [ ] `Composer.tsx` (app.js:696-781): **siempre montado**, toggle con clase; el
+- [x] `Composer.tsx` (app.js:696-781): **siempre montado**, toggle con clase; el
   textarea es un ref no-controlado (los borradores se guardan con debounce 500ms en
   `draft:<sesión>`, no re-render por tecla). Al abrir: `ta.focus()` **sincrónico dentro
   del pointerup** (iOS no abre teclado desde timers) + fit en rAF. `composer-open` en
   `document.body`. Cancelar guarda borrador; enviar = `paste` + `\r` diferido 150ms +
   limpia borrador. `composerNewline` inserta `\n` con `setRangeText` (+ save manual:
   no dispara `input`).
-- [ ] `Snippets.tsx` (app.js:792-1076): paleta compartida popover/composer, lista global
+- [x] `Snippets.tsx` (app.js:792-1076): paleta compartida popover/composer, lista global
   server-synced (GET al abrir con cache + refresh en background que solo re-pinta si
   cambió y no hay edición en curso), modo edición (rename/borrar/mover-uno-antes con
   `prompt/confirm`), `PUT /api/snippets` con manejo de error. Insertar **nunca envía**:
   en composer `setRangeText` en el cursor; si no, `term.paste`. ☰ ámbar mientras la
   paleta esté abierta.
-- [ ] `SnipTip.tsx` (app.js:887-930): tooltip de texto completo — hover en desktop
+- [x] `SnipTip.tsx` (app.js:887-930): tooltip de texto completo — hover en desktop
   (solo si el span está truncado: `scrollWidth > clientWidth+1`), long-press 450ms en
   touch, y el flag `snipTipSuppressTap` para que el release de un peek **no** inserte.
   Posicionamiento fixed clampeado al viewport, sobre el chip.

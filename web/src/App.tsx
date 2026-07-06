@@ -6,6 +6,9 @@ import { TabBar } from './components/TabBar'
 import { AuthError } from './components/AuthError'
 import { SnipTip } from './components/SnipTip'
 import { ClaudeView } from './components/claude/ClaudeView'
+import { closeSwitchMenu } from './lib/switch'
+import { hideComposerSnips } from './lib/composer'
+import { attachImage, pasteTextToPrompt } from './lib/image'
 
 // Shell de la app (index.html:20-203). Las tres <section class="view"> están
 // SIEMPRE montadas y se togglea .active por CSS — la vista Claude no puede
@@ -30,6 +33,41 @@ export function App() {
 
   useViewportGeometry()
   usePolling()
+
+  // Listeners globales de la controlbar (app.js:470-472, 669-687, 1073-1075):
+  //  · tap afuera cierra el popover switch-menu y el panel de snippets del composer
+  //  · Cmd/Ctrl+V pega imagen (desde cualquier lado) o texto (solo si el foco NO
+  //    está en la terminal — ahí xterm ya pega solo), con la tab Claude activa
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null
+      if (!t?.closest('#switch-menu, #btn-mode, #btn-model, #btn-attach, #btn-snippets')) closeSwitchMenu()
+      if (!t?.closest('#composer-snips, #composer-snippets')) hideComposerSnips()
+    }
+    const onPaste = (e: ClipboardEvent) => {
+      if (useDeckStore.getState().activeTab !== 'claude') return
+      const items = e.clipboardData?.items ?? []
+      const img = [...items].find((i) => i.type.startsWith('image/'))
+      if (img) {
+        e.preventDefault()
+        attachImage(img.getAsFile(), 'Imagen del portapapeles')
+        return
+      }
+      // texto: solo si el foco NO está en la terminal (xterm ya pega solo)
+      if ((e.target as HTMLElement | null)?.closest?.('.term-wrap')) return
+      const text = e.clipboardData?.getData('text/plain')
+      if (text) {
+        e.preventDefault()
+        pasteTextToPrompt(text)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('paste', onPaste)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('paste', onPaste)
+    }
+  }, [])
 
   const cls = (name: string) => 'view' + (activeTab === name ? ' active' : '')
 

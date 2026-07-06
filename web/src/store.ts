@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { api } from './lib/api'
 import { SESSION_NAME_RE } from './lib/keys'
+import { closeSwitchMenu, loadSwitch } from './lib/switch'
+import { closeComposer } from './lib/composer'
 
 // Estado global (zustand). El módulo de terminal/WS (Fase 2) lo lee fuera de
 // React con useDeckStore.getState() y dispara updates sin prop-drilling — ver
@@ -27,6 +29,30 @@ export interface GitSummary {
 export type Session = { name: string; state?: string; [k: string]: unknown }
 export type HostStatus = Record<string, unknown>
 
+// Chip de preview de imagen (app.js:498-524): la parte reactiva (thumb/título/
+// meta/pending) vive acá; el blob pendiente y los timers son module-level en
+// lib/image.ts. La `url` es un objectURL que ese módulo revoca al reemplazar/cerrar.
+export interface ImgChip {
+  url: string
+  title: string
+  meta: string
+  pending: boolean
+}
+
+// Tooltip de texto completo de un snippet (app.js:891-903): lo pinta <SnipTip/>
+// leyendo esta forma; la lib/sniptip lo setea con el rect del chip para posicionar.
+export interface SnipTipState {
+  text: string
+  rect: DOMRect
+}
+
+// Modelo/esfuerzo elegidos, por sesión (deck-switch:<sesión>, app.js:361-376).
+// Se recarga en cada cambio de sesión para que las pills muestren lo correcto.
+export interface SwitchState {
+  model?: string
+  effort?: string
+}
+
 const ACTIVE_SESSION_KEY = 'deck-active-session'
 
 interface DeckStore {
@@ -50,14 +76,21 @@ interface DeckStore {
   connected: boolean
   hintOpen: boolean
   composerOpen: boolean
+  composerSession: string | null
+  composerSnipsOpen: boolean
+  draftSaved: boolean
   scrollbackOpen: boolean
   hostSheetOpen: boolean
   switchMenu: SwitchMenuKind
+  switchState: SwitchState
+  imgChip: ImgChip | null
+  snipTip: SnipTipState | null
 
   // --- acciones ---
   setActiveTab: (tab: Tab) => void
   setAuthError: (v: boolean) => void
   setSession: (name: string, persist?: boolean) => void
+  setSwitchState: (sw: SwitchState) => void
   refreshGit: () => Promise<void>
 
   // --- terminal + sesiones (Fase 2) ---
@@ -117,9 +150,15 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   connected: false,
   hintOpen: false,
   composerOpen: false,
+  composerSession: null,
+  composerSnipsOpen: false,
+  draftSaved: false,
   scrollbackOpen: false,
   hostSheetOpen: false,
   switchMenu: null,
+  switchState: {},
+  imgChip: null,
+  snipTip: null,
 
   setActiveTab: (tab) => {
     set({ activeTab: tab })
@@ -131,9 +170,13 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   setAuthError: (v) => set({ authError: v }),
 
   setSession: (name, persist = true) => {
-    set({ session: name })
+    // switchState sale de deck-switch:<sesión>: las pills tienen que mostrar el
+    // modelo/esfuerzo de ESTA sesión ya en el arranque (app.js:473 renderSwitchPills).
+    set({ session: name, switchState: loadSwitch(name) })
     if (persist) persistActiveSession(name)
   },
+
+  setSwitchState: (sw) => set({ switchState: sw }),
 
   // app.js:1651-1672 (solo la parte que la Fase 1 necesita: el badge). El header
   // de rama y la lista de archivos los pinta ChangesView en la Fase 5.
@@ -190,12 +233,14 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     set({ sessions: names.map((n) => ({ name: n, state: stateByName[n] })) })
   },
 
-  // app.js:1500-1512. Persistir, cerrar hint/menú/composer, reconectar el WS a
-  // la nueva sesión y refrescar git/sessions. (Fase 3: renderSwitchPills +
-  // guardar borrador al cerrar composer. Fase 5: refreshTree si tab=files.)
+  // app.js:1500-1512. Persistir, cerrar hint/menú/composer (guardando el
+  // borrador de la sesión saliente), reconectar el WS a la nueva sesión y
+  // refrescar git/sessions. (Fase 5: refreshTree si tab=files.)
   selectSession: (name) => {
     if (name === get().session) return
-    set({ session: name, switchMenu: null, composerOpen: false })
+    closeComposer() // guarda el borrador de la sesión actual antes de cambiarla
+    closeSwitchMenu()
+    set({ session: name, switchState: loadSwitch(name) })
     persistActiveSession(name)
     get().hideHint()
     window.claudeConn?.reconnect()
@@ -274,7 +319,11 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       } catch {
         /* ignore */
       }
-      // Fase 3: si el composer está abierto para esta sesión, seguirla.
+      // recargar las pills desde la key ya migrada
+      set({ switchState: loadSwitch(newName) })
+      // si el composer está abierto para esta sesión, que siga al nombre nuevo
+      // (el WS no se reconecta: el attach tmux sobrevive al rename)
+      if (get().composerSession === name) set({ composerSession: newName })
     }
     get().refreshSessions()
     get().refreshGit()
@@ -308,7 +357,9 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     }
     const def = get().defaultSession
     const next = names.includes(def) ? def : names[0] || def
-    set({ session: next, switchMenu: null, composerOpen: false })
+    closeComposer()
+    closeSwitchMenu()
+    set({ session: next, switchState: loadSwitch(next) })
     persistActiveSession(next)
     get().hideHint()
     window.claudeConn?.reconnect()
