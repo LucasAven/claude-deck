@@ -5,6 +5,7 @@ import { usePolling } from './hooks/usePolling'
 import { TabBar } from './components/TabBar'
 import { AuthError } from './components/AuthError'
 import { SnipTip } from './components/SnipTip'
+import { ClaudeView } from './components/claude/ClaudeView'
 
 // Shell de la app (index.html:20-203). Las tres <section class="view"> están
 // SIEMPRE montadas y se togglea .active por CSS — la vista Claude no puede
@@ -21,7 +22,9 @@ export function App() {
   // se crea en la Fase 2; acá solo dejamos elegida la sesión y el primer git.
   useEffect(() => {
     restoreInitialSession().then(() => {
-      useDeckStore.getState().refreshGit() // primer badge de Cambios sin esperar el poll
+      const s = useDeckStore.getState()
+      s.refreshSessions() // primeros chips sin esperar el poll
+      s.refreshGit() // primer badge de Cambios sin esperar el poll
     })
   }, [])
 
@@ -33,8 +36,10 @@ export function App() {
   return (
     <>
       <div id="app">
-        {/* Pestaña Claude — SessionRow + Terminal + ControlBar (Fases 2/3) */}
-        <section id="view-claude" className={cls('claude')} />
+        {/* Pestaña Claude — SessionRow + Terminal + ControlBar (Fase 2/3) */}
+        <section id="view-claude" className={cls('claude')}>
+          <ClaudeView />
+        </section>
 
         {/* Pestaña Cambios — header + lista + diff (Fase 5) */}
         <section id="view-changes" className={cls('changes')} />

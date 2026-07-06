@@ -10,7 +10,7 @@
 
 - [x] Fase 0 — Scaffolding (Vite + server dual-root)
 - [x] Fase 1 — Shell: store, api, tabs, CSS, init
-- [ ] Fase 2 — Terminal + sesiones (el core)
+- [x] Fase 2 — Terminal + sesiones (el core)
 - [ ] Fase 3 — Controlbar: switchers, adjuntar/imagen, composer, snippets
 - [ ] Fase 4 — Overlays: scrollback legible + panel de host
 - [ ] Fase 5 — Pestañas Cambios y Archivos
@@ -218,7 +218,7 @@ vistas, badge de Cambios funciona contra el server real. Sin terminal todavía.
 
 **Tareas:**
 
-- [ ] `lib/term.ts`: **port literal** de `createTermConnection` (app.js:45-231) y
+- [x] `lib/term.ts`: **port literal** de `createTermConnection` (app.js:45-231) y
   `wireTouchScroll` (app.js:239-278). Es TypeScript plano sin React — cambiar solo:
   - `getSession` → `() => useDeckStore.getState().session`
   - los efectos DOM (`setConn`, `showHint`, guard anti-resurrección, fallback) →
@@ -230,10 +230,10 @@ vistas, badge de Cambios funciona contra el server real. Sin terminal todavía.
     `refresh` watchdog de 2s post-resume, `meta gone` → fallback, guard anti-resurrección
     (`m.created && !== defaultSession && !== expectCreate` → DELETE + fallback),
     shift+enter → `\x1b\r`, `create=1` solo si `session === expectCreate`.
-- [ ] `Terminal.tsx`: div `#term-claude`, en un efecto (una vez) crea el singleton,
+- [x] `Terminal.tsx`: div `#term-claude`, en un efecto (una vez) crea el singleton,
   `term.open(el)`, wirea touch-scroll. El indicador `#conn-claude` sale del store
   (la conexión setea `connected` vía callback).
-- [ ] `SessionRow.tsx` + chips: port de `refreshSessions/selectSession/killSession/
+- [x] `SessionRow.tsx` + chips: port de `refreshSessions/selectSession/killSession/
   renameSession/createSession/fallbackToLiveSession/nextSessionName` (app.js:1441-1628).
   En React el `chipsKey` anti-parpadeo ya no hace falta (reconciliación), pero el
   **orden y estructura del DOM sí**: `.chip` con `.chip-dot chip-dot-<estado>` opcional
@@ -244,8 +244,8 @@ vistas, badge de Cambios funciona contra el server real. Sin terminal todavía.
   - `killSession`: limpia `deck-switch:<name>` y `draft:<name>` de localStorage.
   - `renameSession`: migra esas dos keys al nombre nuevo, **sin reconectar el WS**
     (el attach tmux sobrevive al rename), sigue al composer abierto si era esa sesión.
-- [ ] `Hint.tsx`: port de show/hide con timer de 15s (app.js:285-296) + `fit()` en rAF.
-- [ ] QuickKeys en `ControlBar.tsx`: botones `[data-k]` con `useTap` → `sendKeys(KEYS[k])`
+- [x] `Hint.tsx`: port de show/hide con timer de 15s (app.js:285-296) + `fit()` en rAF.
+- [x] QuickKeys en `ControlBar.tsx`: botones `[data-k]` con `useTap` → `sendKeys(KEYS[k])`
   (app.js:301-339). Mantener el orden: `nl` primero, `slash` segundo.
 
 **Aceptación (en el teléfono, contra sesiones reales):** attach a `deck` en vivo,

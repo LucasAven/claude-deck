@@ -5,18 +5,18 @@ import { useDeckStore } from '../store'
 // visibilitychange (app.js:2185-2208). refreshGit corre en cualquier tab para
 // mantener al día el badge de Cambios.
 //
-// Fase 1: solo presencia (sendVis) + git. sessions/host/tree se suman cuando sus
-// refreshers existan (Fases 2/4/5) — ver docs/REACT-PORT.md §3, Fase 1.
+// Fase 1: presencia (sendVis) + git. Fase 2 suma sessions (solo en la tab
+// claude). host/tree se suman en las Fases 4/5 — ver docs/REACT-PORT.md §3.
 export function usePolling() {
   useEffect(() => {
-    const { refreshGit } = useDeckStore.getState()
+    const { refreshGit, refreshSessions } = useDeckStore.getState()
 
     const id = setInterval(() => {
       if (document.visibilityState !== 'visible') return
       window.claudeConn?.sendVis() // re-afirmar presencia: el server la expira a los 25 s
       refreshGit()
-      // Fase 2/4/5: refreshHost(); if (tab==='claude') refreshSessions();
-      //             if (tab==='files') refreshTree(false)
+      if (useDeckStore.getState().activeTab === 'claude') refreshSessions()
+      // Fase 4/5: refreshHost(); if (tab==='files') refreshTree(false)
     }, 8000)
 
     const onVis = () => {
@@ -25,6 +25,7 @@ export function usePolling() {
       window.claudeConn?.sendVis()
       if (document.visibilityState === 'visible') {
         refreshGit()
+        refreshSessions()
         // iOS suele matar los WS en background: reconectar sin esperar backoff
         window.claudeConn?.resume()
       }

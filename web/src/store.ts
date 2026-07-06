@@ -48,6 +48,7 @@ interface DeckStore {
   // --- UI / overlays ---
   authError: boolean
   connected: boolean
+  hintOpen: boolean
   composerOpen: boolean
   scrollbackOpen: boolean
   hostSheetOpen: boolean
@@ -58,7 +59,29 @@ interface DeckStore {
   setAuthError: (v: boolean) => void
   setSession: (name: string, persist?: boolean) => void
   refreshGit: () => Promise<void>
+
+  // --- terminal + sesiones (Fase 2) ---
+  setConnected: (on: boolean) => void
+  showHint: () => void
+  hideHint: () => void
+  refreshSessions: () => Promise<void>
+  selectSession: (name: string) => void
+  killSession: (name: string) => Promise<void>
+  renameSession: (name: string) => Promise<void>
+  createSession: () => Promise<void>
+  fallbackToLiveSession: () => Promise<void>
 }
+
+// Caer a otra sesión viva: la default si existe (se recrea vacía si no queda
+// ninguna), si no la primera de la lista. app.js:1612-1617.
+function nextSessionName(existing: string[], base: string): string {
+  let n = 2
+  while (existing.includes(`${base}-${n}`)) n++
+  return `${base}-${n}`
+}
+
+// timer del hint de sesión nueva: module-level como el hintTimer de app.js:285.
+let hintTimer: ReturnType<typeof setTimeout> | null = null
 
 // query de sesión para los endpoints con repo (app.js:1635-1637)
 export function sessionQuery(session: string | null): string {
@@ -92,6 +115,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
 
   authError: false,
   connected: false,
+  hintOpen: false,
   composerOpen: false,
   scrollbackOpen: false,
   hostSheetOpen: false,
@@ -124,6 +148,172 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     } catch (e) {
       if (String((e as Error).message) !== '401') set({ git: null })
     }
+  },
+
+  // -------------------------------------------------------------------------
+  // Terminal + sesiones (Fase 2). El indicador #conn-claude sale de este flag;
+  // la conexión (lib/term.ts) lo setea vía callback (app.js:80).
+  setConnected: (on) => set({ connected: on }),
+
+  // Hint de sesión nueva (app.js:285-296): timer de 15 s + fit en rAF (le come
+  // filas a la terminal, hay que re-medir cuando aparece/desaparece — §5.5).
+  showHint: () => {
+    set({ hintOpen: true })
+    if (hintTimer) clearTimeout(hintTimer)
+    hintTimer = setTimeout(() => get().hideHint(), 15000)
+    requestAnimationFrame(() => window.claudeConn?.fit())
+  },
+  hideHint: () => {
+    if (hintTimer) clearTimeout(hintTimer)
+    hintTimer = null
+    set({ hintOpen: false })
+    requestAnimationFrame(() => window.claudeConn?.fit())
+  },
+
+  // Chips de sesiones (app.js:1443-1498). React reconcilia el DOM, así que el
+  // chipsKey anti-parpadeo ya no hace falta; guardamos la lista normalizada
+  // {name, state} (ordenada, con la sesión activa siempre presente) y la pinta
+  // SessionRow. El .state es el semáforo escrito por los hooks (null → sin punto).
+  refreshSessions: async () => {
+    let sessions: Session[] = []
+    try {
+      sessions = (await (await api('/api/tmux/sessions')).json()) as Session[]
+    } catch {
+      return
+    }
+    const names = sessions.map((s) => s.name)
+    const cur = get().session
+    if (cur && !names.includes(cur)) names.push(cur)
+    names.sort()
+    const stateByName: Record<string, string | undefined> = {}
+    for (const s of sessions) stateByName[s.name] = (s.state as string) || undefined
+    set({ sessions: names.map((n) => ({ name: n, state: stateByName[n] })) })
+  },
+
+  // app.js:1500-1512. Persistir, cerrar hint/menú/composer, reconectar el WS a
+  // la nueva sesión y refrescar git/sessions. (Fase 3: renderSwitchPills +
+  // guardar borrador al cerrar composer. Fase 5: refreshTree si tab=files.)
+  selectSession: (name) => {
+    if (name === get().session) return
+    set({ session: name, switchMenu: null, composerOpen: false })
+    persistActiveSession(name)
+    get().hideHint()
+    window.claudeConn?.reconnect()
+    get().refreshSessions()
+    get().refreshGit()
+  },
+
+  // app.js:1514-1531. El estado de switchers y el borrador del composer son por
+  // sesión: mueren con ella. Si mataron la activa, caer a una viva.
+  killSession: async (name) => {
+    if (!window.confirm(`¿Matar la sesión "${name}"? Se cierra lo que esté corriendo adentro.`)) return
+    try {
+      await api(`/api/tmux/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' })
+    } catch {
+      return
+    }
+    try {
+      localStorage.removeItem(`deck-switch:${name}`)
+      localStorage.removeItem(`draft:${name}`)
+    } catch {
+      /* ignore */
+    }
+    if (get().session === name) await get().fallbackToLiveSession()
+    else get().refreshSessions()
+  },
+
+  // app.js:1557-1610. El attach tmux sobrevive al rename (tmux no desconecta
+  // clientes): NO se reconecta el WS, solo se actualiza el nombre con el que
+  // habla la API y se migran las keys por-sesión de localStorage.
+  renameSession: async (name) => {
+    const input = window.prompt('Nuevo nombre para la sesión:', name)
+    if (input === null) return
+    const newName = input.trim()
+    if (!newName || newName === name) return
+    if (!SESSION_NAME_RE.test(newName) || newName.endsWith('-shell')) {
+      alert('Nombre inválido: letras, números, "-" y "_" (máx 32), sin terminar en -shell')
+      return
+    }
+    try {
+      const res = await api(`/api/tmux/sessions/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ newName }),
+      })
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try {
+          msg = (await res.json()).error || msg
+        } catch {
+          /* sin body json */
+        }
+        alert(`No se pudo renombrar: ${msg}`)
+        return
+      }
+    } catch {
+      return
+    }
+
+    if (get().session === name) {
+      set({ session: newName })
+      persistActiveSession(newName) // sin esto un reload vuelve al nombre viejo (y recrea la default vacía)
+      try {
+        // el estado de switchers y el borrador del composer se guardan por
+        // sesión: migrarlos al nuevo nombre
+        const moves: [string, string][] = [
+          [`deck-switch:${name}`, `deck-switch:${newName}`],
+          [`draft:${name}`, `draft:${newName}`],
+        ]
+        for (const [oldKey, newKey] of moves) {
+          const val = localStorage.getItem(oldKey)
+          if (val !== null) {
+            localStorage.setItem(newKey, val)
+            localStorage.removeItem(oldKey)
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      // Fase 3: si el composer está abierto para esta sesión, seguirla.
+    }
+    get().refreshSessions()
+    get().refreshGit()
+  },
+
+  // app.js:1619-1628. Creación pedida por el usuario (botón +): expectCreate
+  // exime al guard anti-resurrección, así el attach con create=1 la levanta.
+  createSession: async () => {
+    let existing: string[] = []
+    try {
+      existing = ((await (await api('/api/tmux/sessions')).json()) as Session[]).map((s) => s.name)
+    } catch {
+      /* sin lista: nextSessionName arranca en base-2 igual */
+    }
+    const cur = get().session
+    if (cur && !existing.includes(cur)) existing.push(cur)
+    const name = nextSessionName(existing, get().defaultSession)
+    set({ expectCreate: name })
+    get().selectSession(name)
+  },
+
+  // app.js:1535-1553. La default si existe (se recrea vacía si no queda
+  // ninguna); si no, la primera viva. Usado al matar la activa y por el guard
+  // anti-resurrección. (Fase 5: treeSession=null + refreshTree.)
+  fallbackToLiveSession: async () => {
+    let names: string[] = []
+    try {
+      names = ((await (await api('/api/tmux/sessions')).json()) as Session[]).map((s) => s.name)
+    } catch {
+      /* sin lista: cae a la default */
+    }
+    const def = get().defaultSession
+    const next = names.includes(def) ? def : names[0] || def
+    set({ session: next, switchMenu: null, composerOpen: false })
+    persistActiveSession(next)
+    get().hideHint()
+    window.claudeConn?.reconnect()
+    get().refreshGit()
+    get().refreshSessions()
   },
 }))
 
