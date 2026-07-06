@@ -162,6 +162,10 @@ const pastedTexts = await page.evaluate(async () => {
     el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
   };
   tap(document.querySelector('#btn-attach'));
+  // el menú abre por setState (render async en React): esperar a que el
+  // AttachMenu monte antes de buscar el ítem "Pegar" (en el vanilla el DOM se
+  // actualizaba sincrónico y esto no hacía falta)
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   tap([...document.querySelectorAll('#switch-menu .mi')].find((m) => m.textContent.includes('Pegar')));
   await new Promise((r) => setTimeout(r, 300));
   claudeConn.term.paste = orig;
@@ -599,6 +603,7 @@ const sbRun = await page.evaluate(async () => {
   // A+ sube el tamaño y lo persiste
   out.bFontBefore = getComputedStyle(document.querySelector('#scrollback-text')).fontSize;
   tap(document.querySelector('#scrollback-bigger'));
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // React: el font var se aplica en el próximo render
   out.bFontAfter = getComputedStyle(document.querySelector('#scrollback-text')).fontSize;
   out.bFontStored = localStorage.getItem('deck-sb-font');
   // "Cargar más": pide más líneas y mantiene el ancla de lectura (no salta al fondo)
@@ -608,6 +613,7 @@ const sbRun = await page.evaluate(async () => {
   out.bMoreHidden = document.querySelector('#scrollback-more').classList.contains('hidden');
   out.bKeptAnchor = body.scrollTop < body.scrollHeight - body.clientHeight - 4;
   tap(document.querySelector('#scrollback-close'));
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // React: la clase hidden se aplica en el próximo render
   out.closed = document.querySelector('#scrollback').classList.contains('hidden');
   out.emptied = document.querySelector('#scrollback-text').textContent === ''
     && document.querySelector('#scrollback-turns').textContent === '';
@@ -800,12 +806,19 @@ const tipRun = await page.evaluate(async () => {
   const out = {};
 
   // hover (mouse) sobre el largo: tip con el texto completo; leave lo oculta
-  chips[1].dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+  // React sintetiza onPointerEnter/Leave a partir de pointerover/out delegados en
+  // el root: hay que disparar esos (bubbling), no pointerenter/leave crudos (que
+  // React no escucha directamente). Y esperar un render: el tip sale por setState.
+  const raf = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  chips[1].dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+  await raf();
   out.hoverShown = !tip.classList.contains('hidden') && tip.textContent === LONG;
-  chips[1].dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
+  chips[1].dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse' }));
+  await raf();
   out.hoverHidden = tip.classList.contains('hidden');
   // hover sobre el corto: no está truncado → nada
-  chips[0].dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+  chips[0].dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+  await raf();
   out.shortNoTip = tip.classList.contains('hidden');
 
   // long-press (touch) sobre el largo: tip mientras se sostiene, release sin insertar
@@ -915,6 +928,7 @@ const hostRun = await page.evaluate(async () => {
 
   // tap en el fondo cierra el sheet
   sheet.click();
+  await frame(); // React: la clase hidden se aplica en el próximo render
   out.sheetClosed = sheet.classList.contains('hidden');
 
   window.fetch = realFetch;

@@ -32,7 +32,7 @@ export function battLow(status: HostStatus | null): boolean {
   return !!(b && b.state === 'discharging' && b.pct < status!.alert.threshold)
 }
 
-export async function refreshHost() {
+export async function refreshHost(): Promise<void> {
   let status: HostStatus
   try {
     const res = await api('/api/host/status')
@@ -111,3 +111,7 @@ export function editHostThreshold() {
   }
   postHostAlert({ threshold: n })
 }
+
+// puente para ui-test.mjs: la sección de host mockea fetch y llama refreshHost()
+// (global) para repintar chip/banner/sheet, igual que en el vanilla
+if (typeof window !== 'undefined') window.refreshHost = refreshHost

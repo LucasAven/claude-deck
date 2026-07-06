@@ -16,6 +16,9 @@ interface ClaudeConn {
 
 interface Window {
   claudeConn?: ClaudeConn
-  // puente para ui-test.mjs: espía el árbol de Archivos con `await refreshTree(false)`
+  // puentes para ui-test.mjs: el test mockea fetch y llama estos refreshers
+  // globales (como en el vanilla) para probar árbol / semáforo / host
   refreshTree?: (force: boolean) => Promise<void>
+  refreshSessions?: () => Promise<void>
+  refreshHost?: () => Promise<void>
 }

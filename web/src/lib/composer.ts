@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom'
 import { useDeckStore } from '../store'
 import { closeSwitchMenu } from './switch'
 import { hideSnipTip } from './sniptip'
@@ -62,7 +63,10 @@ export function openComposer() {
     /* ignore */
   }
   if (ta) ta.value = draft
-  useDeckStore.setState({ composerOpen: true, composerSession: session, draftSaved: !!draft })
+  // flushSync fuerza el render AHORA (saca la clase hidden sincrónicamente): sin
+  // esto el setState es async y el ta?.focus() de abajo corre con el textarea
+  // todavía display:none → el foco no engancha y iOS no abre el teclado (§5.3).
+  flushSync(() => useDeckStore.setState({ composerOpen: true, composerSession: session, draftSaved: !!draft }))
   document.body.classList.add('composer-open')
   // focus sincrónico dentro del gesto: iOS no abre el teclado desde un timer.
   // El fit va en rAF (el sheet le comió filas a la terminal); si el teclado

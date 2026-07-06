@@ -482,3 +482,9 @@ export async function restoreInitialSession() {
 
   setSession(session) // la elección inicial queda como punto de partida del próximo reload
 }
+
+// puente para ui-test.mjs: el test mockea fetch y llama refreshSessions()
+// (global) para probar el semáforo de chips, igual que en el vanilla
+if (typeof window !== 'undefined') {
+  window.refreshSessions = () => useDeckStore.getState().refreshSessions()
+}
