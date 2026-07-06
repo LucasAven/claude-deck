@@ -14,7 +14,7 @@
 - [x] Fase 3 — Controlbar: switchers, adjuntar/imagen, composer, snippets
 - [x] Fase 4 — Overlays: scrollback legible + panel de host
 - [x] Fase 5 — Pestañas Cambios y Archivos
-- [ ] Fase 6 — PWA, swap de estáticos, tests y limpieza
+- [x] Fase 6 — PWA, swap de estáticos, tests y limpieza
 
 ---
 
@@ -359,16 +359,17 @@ renderizado, seguimiento del cwd de la sesión al hacer `cd`.
   (Vite los emite a `web/dist/`). SW registrado en `main.tsx` igual que hoy
   (app.js:2220-2222). Verificado: server sirve `/manifest.json` `/sw.js` (no-cache)
   `/icon.svg` con 200 y MIME correcto desde `web/dist`.
-- [ ] Verificación de paridad completa (checklist §6) hecha por Lucas en el teléfono
-  con `npm run build` servido por el server real + tailscale. **(pendiente — Lucas)**
-- [x] `test/ui-test.mjs`: revisado — no requiere cambios. Apunta al server real
-  (`:7433`, ahora sirviendo `web/dist`) y depende solo de ids/clases y `window.claudeConn`,
-  todos preservados. **Lucas lo corre.**
+- [x] Verificación de paridad completa (checklist §6) hecha por Lucas en el teléfono
+  con `npm run build` servido por el server real + tailscale.
+- [x] `test/ui-test.mjs`: verde — 101/101 checks, 0 fails contra la build de React
+  (`:7433` sirviendo `web/dist`). No requirió cambios: depende solo de ids/clases y
+  `window.claudeConn`, todos preservados.
 - [x] `test/shot-diff.mjs`: revisado — sigue útil sin cambios (usa `#diff-view`,
   `.file-row`, `.d2h-*`, presentes en `ChangesView`).
-- [ ] Borrar `public/` (el server ya solo sirve `web/dist`); simplificar el dual-root
-  del server si se quiere, o dejarlo (inofensivo). **(pendiente — recién tras la
-  verificación de paridad de Lucas; hasta entonces `public/` es el fallback seguro.)**
+- [x] Borrado `public/` (el server ya solo sirve `web/dist`). El dual-root del server
+  se dejó como está (inofensivo: siempre resuelve `web/dist`; sin build, 404 — buildear
+  ahora es obligatorio). Con esto la app vanilla (`app.js`/`index.html`/`style.css`) que
+  este doc usa de referencia dejó de existir: el port está completo, el código vive en `web/`.
 - [x] Docs: README §Setup (`npm --prefix web install` + `npm run build` antes de
   `deck start`/LaunchAgent, y `dev:web` para iterar), `docs/SETUP.md` (idem), y nota en
   `docs/SPEC.md` §3 de que el stack de frontend quedó obsoleto (ahora React).
@@ -436,17 +437,17 @@ Matices de comportamiento (el "por qué" está comentado en app.js — migrar co
 
 ## 6. Checklist de paridad final (Fase 6, en el teléfono)
 
-- [ ] Auth: `?token=` → cookie → recarga sin token; 401 muestra `#auth-error`.
-- [ ] Terminal en vivo bidireccional con VS Code; teclado/rotación/background-resume.
-- [ ] Quickkeys, mode switcher, modelo/esfuerzo por sesión.
-- [ ] Multi-sesión: crear (+), renombrar (tap en nombre), matar (✕), fallback,
+- [x] Auth: `?token=` → cookie → recarga sin token; 401 muestra `#auth-error`.
+- [x] Terminal en vivo bidireccional con VS Code; teclado/rotación/background-resume.
+- [x] Quickkeys, mode switcher, modelo/esfuerzo por sesión.
+- [x] Multi-sesión: crear (+), renombrar (tap en nombre), matar (✕), fallback,
   semáforo (verde/ámbar/gris), deep-link `?session=` desde push.
-- [ ] Composer: borrador por sesión, dictado iOS, \n, snippets en cursor, enviar.
-- [ ] Snippets: popover, edición, orden, sync entre dispositivos, tooltip long-press.
-- [ ] Imagen: cámara/galería/portapapeles → chip → confirmar → `[Image #N]`.
-- [ ] Scrollback: transcript con markdown, cargar más sin saltos, A−/A+, fallback pane.
-- [ ] Host: chip batería, sheet, toggle/umbral de alerta, banner por episodio.
-- [ ] Cambios: badge, staged/unstaged, +/−, diff line-by-line, auto-refresh 8s.
-- [ ] Archivos: árbol lazy, iconos, syntax highlight, .md renderizado, sigue el cwd.
-- [ ] PWA: instalable, presencia suprime push (mirando la app no llega push).
-- [ ] `test/ui-test.mjs` verde (lo corre Lucas).
+- [x] Composer: borrador por sesión, dictado iOS, \n, snippets en cursor, enviar.
+- [x] Snippets: popover, edición, orden, sync entre dispositivos, tooltip long-press.
+- [x] Imagen: cámara/galería/portapapeles → chip → confirmar → `[Image #N]`.
+- [x] Scrollback: transcript con markdown, cargar más sin saltos, A−/A+, fallback pane.
+- [x] Host: chip batería, sheet, toggle/umbral de alerta, banner por episodio.
+- [x] Cambios: badge, staged/unstaged, +/−, diff line-by-line, auto-refresh 8s.
+- [x] Archivos: árbol lazy, iconos, syntax highlight, .md renderizado, sigue el cwd.
+- [x] PWA: instalable, presencia suprime push (mirando la app no llega push).
+- [x] `test/ui-test.mjs` verde — 101/101 checks, 0 fails contra la build de React.
