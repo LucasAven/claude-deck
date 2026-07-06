@@ -953,6 +953,90 @@ ok('host: toggle manda POST {enabled:false} y se apaga',
   hostRun.toggleOff && hostRun.posts.some((p) => p.enabled === false));
 ok('host: tap en el fondo cierra el sheet', hostRun.sheetClosed);
 
+// 18. worktree en un tap (tarea 5): long-press en el + abre el menú CREAR
+// (el tap corto sigue creando sesión — acá NO se tapea corto para no crear una
+// real); "Nuevo worktree…" abre el sheet. /api/git/branches mockeado para
+// checks deterministas; nunca se postea un worktree real.
+const wtRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  window.fetch = (url, opts) => {
+    if (String(url).includes('/api/git/branches')) {
+      return Promise.resolve(new Response(JSON.stringify({
+        repo: 'claude-deck', branches: ['main', 'feat/x'], current: 'feat/x',
+      }), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const menu = document.querySelector('#create-menu');
+  const sheet = document.querySelector('#worktree-sheet');
+  const btn = document.querySelector('#btn-new-session');
+  const out = {};
+
+  out.hiddenByDefault = menu.classList.contains('hidden') && sheet.classList.contains('hidden');
+  const activeChip = () => document.querySelector('#session-chips .chip.active span:not(.chip-dot)').textContent;
+  const activeBefore = activeChip();
+
+  // long-press: down + ~600 ms + up (el hold es de 500). El release del
+  // long-press NO debe contar como tap (crearía una sesión real).
+  const r = btn.getBoundingClientRect();
+  const xy = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+  btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, ...xy }));
+  await sleep(620);
+  btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, ...xy }));
+  await frame();
+  out.menuOpen = !menu.classList.contains('hidden');
+  out.items = [...menu.querySelectorAll('.mi span')].map((e) => e.textContent);
+  out.noSessionCreated = activeChip() === activeBefore;
+
+  // "Nuevo worktree…" abre el sheet (ramas del fetch mockeado)
+  const wtBtn = [...menu.querySelectorAll('.mi')].find((e) => e.textContent.includes('worktree'));
+  wtBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  wtBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  await sleep(150);
+  await frame();
+  out.sheetOpen = !sheet.classList.contains('hidden');
+  out.menuClosedAfter = menu.classList.contains('hidden');
+  out.baseOptions = [...document.querySelectorAll('#wt-base option')].map((o) => o.value);
+  out.basePreselected = document.querySelector('#wt-base').value;
+
+  // el info box refleja el último segmento de la rama tipeada (input controlado
+  // de React: setear el value por el setter nativo + evento input)
+  const input = document.querySelector('#wt-branch');
+  const setVal = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  setVal.call(input, 'feat/composer');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await frame();
+  out.infoPath = document.querySelector('#wt-info').textContent.includes('../claude-deck-composer');
+
+  // submit sin rama → error inline, sin POST (validación client-side)
+  setVal.call(input, '');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  document.querySelector('#wt-submit').click();
+  await frame();
+  const err = document.querySelector('#wt-error');
+  out.emptyError = !err.classList.contains('hidden') && err.textContent.includes('rama');
+
+  // tap en el fondo cierra
+  sheet.click();
+  await frame();
+  out.sheetClosed = sheet.classList.contains('hidden');
+
+  window.fetch = realFetch;
+  return out;
+});
+ok('worktree: menú CREAR y sheet montados ocultos por default', wtRun.hiddenByDefault);
+ok('worktree: long-press en + abre el menú sin crear sesión', wtRun.menuOpen && wtRun.noSessionCreated);
+ok('worktree: menú con Nueva sesión + Nuevo worktree…',
+  wtRun.items.includes('Nueva sesión') && wtRun.items.includes('Nuevo worktree…'));
+ok('worktree: Nuevo worktree… abre el sheet y cierra el menú', wtRun.sheetOpen && wtRun.menuClosedAfter);
+ok('worktree: dropdown con las ramas y la actual preseleccionada',
+  JSON.stringify(wtRun.baseOptions) === JSON.stringify(['main', 'feat/x']) && wtRun.basePreselected === 'feat/x');
+ok('worktree: info box muestra el path hermano ../<repo>-<segmento>', wtRun.infoPath);
+ok('worktree: submit sin rama → error inline en el sheet', wtRun.emptyError);
+ok('worktree: tap en el fondo cierra el sheet', wtRun.sheetClosed);
+
 // screenshot de la paleta contra el server real (fetch ya restaurado)
 await tapSel('#btn-snippets');
 await new Promise((r) => setTimeout(r, 400));

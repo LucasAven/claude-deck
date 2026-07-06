@@ -848,6 +848,110 @@ app.get('/api/git/log', async (c) => {
   return c.json(await gitLog(dir, n))
 })
 
+// Ramas del repo de la sesión (tarea 5): alimenta el dropdown "Basado en" del
+// sheet de worktree. `repo` (basename del toplevel) va para que el sheet pueda
+// mostrar la ruta del worktree antes de crear nada. Repo sin commits → listas
+// vacías, no error (igual que gitLog).
+app.get('/api/git/branches', async (c) => {
+  const dir = await resolveGitDir(c.req.query('session'))
+  let current = ''
+  try {
+    current = (await execFileP('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
+  } catch {
+    /* repo sin commits: sin HEAD */
+  }
+  if (current === 'HEAD') current = '' // detached: nada que preseleccionar
+  let branches: string[] = []
+  try {
+    branches = (await execFileP('git', ['-C', dir, 'branch', '--format=%(refname:short)'])).stdout
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  } catch {
+    /* sin ramas todavía */
+  }
+  return c.json({ repo: path.basename(dir), branches, current })
+})
+
+// Worktree en un tap (tarea 5): git worktree add + rama nueva + sesión tmux en
+// una sola llamada. El path del worktree es HERMANO del repo
+// (../<repo>-<último-segmento-de-la-rama>): queda fuera del repo pero tiene que
+// seguir dentro de WORKSPACES_ROOT (si el repo ES la raíz, el hermano cae
+// afuera → 400).
+//
+// La rama NO valida con SESSION_RE (feat/composer lleva "/"): regex propia.
+// Los "/" y los ".." se controlan acá porque el último segmento se joinea a un
+// path y el nombre entero viaja como argv de git (nunca shell, pero un leading
+// "-" se volvería flag).
+const BRANCH_RE = /^[A-Za-z0-9._/-]{1,80}$/
+function checkBranchName(name: string, what: string): string {
+  const segs = name.split('/')
+  if (
+    !BRANCH_RE.test(name) ||
+    name.startsWith('-') ||
+    name.includes('..') ||
+    segs.some((s) => !s || /^\.+$/.test(s)) // "//", "/" al borde, segmentos solo-puntos
+  ) {
+    throw new HttpError(400, `${what} inválido: letras, números, ".", "_", "-" y "/" (máx 80), sin ".." ni "-" inicial`)
+  }
+  return name
+}
+
+// nombre de sesión tmux derivado de la rama: sanitizado a SESSION_RE (como
+// session_name_for_cwd en scripts/deck), esquivando el sufijo reservado -shell
+// y colisiones con sesiones vivas
+async function worktreeSessionName(branch: string): Promise<string> {
+  let base = branch.replace(/[^A-Za-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'wt'
+  if (base.endsWith('-shell')) base = `${base.slice(0, -'-shell'.length)}-s`
+  let name = base
+  for (let n = 2; (await tmuxHasSession(name)) || (await tmuxHasSession(`${name}-shell`)); n++) {
+    name = `${base.slice(0, 32 - 1 - String(n).length)}-${n}`
+  }
+  return name
+}
+
+app.post('/api/worktree', async (c) => {
+  const repo = await resolveGitDir(c.req.query('session'))
+  let body: { branch?: unknown; base?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const branch = checkBranchName(typeof body.branch === 'string' ? body.branch.trim() : '', 'nombre de rama')
+  const base = checkBranchName(typeof body.base === 'string' ? body.base.trim() : '', 'rama base')
+
+  // el destino no existe todavía → no se puede realpathear: se realpathea el
+  // PADRE (el dir del repo, que sí existe) y se prefix-checkea el join
+  const parent = fs.realpathSync(path.dirname(repo))
+  const lastSeg = branch.split('/').pop() as string
+  const wtPath = path.join(parent, `${path.basename(repo)}-${lastSeg}`)
+  if (!insideDir(wtPath, fs.realpathSync(WORKSPACES_ROOT))) {
+    throw new HttpError(400, `el worktree caería fuera de WORKSPACES_ROOT: ${wtPath}`)
+  }
+  if (fs.existsSync(wtPath)) throw new HttpError(409, `ya existe ${wtPath}`)
+
+  try {
+    await execFileP('git', ['-C', repo, 'worktree', 'add', wtPath, '-b', branch, base])
+  } catch (e: any) {
+    // rama existente, base inexistente, etc. — el primer renglón de git alcanza
+    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    throw new HttpError(400, `git worktree add falló: ${msg}`)
+  }
+
+  const session = await worktreeSessionName(branch)
+  try {
+    await execFileP('tmux', ['new-session', '-d', '-s', session, '-c', wtPath])
+  } catch (e: any) {
+    // el worktree quedó creado pero sin sesión: avisar sin inventar rollback
+    // (borrar un worktree recién pedido sería peor que dejarlo attacheable)
+    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    throw new HttpError(500, `worktree creado en ${wtPath}, pero tmux falló: ${msg}`)
+  }
+  console.log(`[deck] ${new Date().toISOString()} worktree ${branch} -> ${wtPath} (sesión ${session})`)
+  return c.json({ session, path: wtPath, branch })
+})
+
 // File browser (solo lectura). ?path= relativo a la raíz de la sesión;
 // vacío → la raíz misma.
 app.get('/api/fs/list', async (c) => {

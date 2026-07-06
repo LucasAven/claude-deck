@@ -123,6 +123,8 @@ interface DeckStore {
   scrollbackOpen: boolean
   scrollback: ScrollbackState
   hostSheetOpen: boolean
+  createMenuOpen: boolean
+  worktreeSheetOpen: boolean
   switchMenu: SwitchMenuKind
   switchState: SwitchState
   imgChip: ImgChip | null
@@ -208,6 +210,8 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     renderNonce: 0,
   },
   hostSheetOpen: false,
+  createMenuOpen: false,
+  worktreeSheetOpen: false,
   switchMenu: null,
   switchState: {},
   imgChip: null,

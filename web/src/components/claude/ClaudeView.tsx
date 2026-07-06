@@ -1,4 +1,5 @@
 import { SessionRow } from './SessionRow'
+import { CreateMenu } from './CreateMenu'
 import { Hint } from './Hint'
 import { HostBanner } from './HostBanner'
 import { Terminal } from './Terminal'
@@ -16,6 +17,7 @@ export function ClaudeView() {
   return (
     <>
       <SessionRow />
+      <CreateMenu />
       <Hint />
       <HostBanner />
       <Terminal />

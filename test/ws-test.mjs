@@ -340,6 +340,63 @@ try {
   else fs.rmSync(ALERT_FILE, { force: true });
 }
 
+// 9h. GET /api/git/branches + POST /api/worktree (tarea 5): worktree + rama +
+// sesión tmux en un tap. Repo scratch DENTRO de WORKSPACES_ROOT (el hermano
+// ../<repo>-<seg> tiene que caer dentro del perímetro) con sesión tmux propia
+// deck-wt; la sesión derivada sale de sanitizar la rama (feat/composer →
+// feat-composer). Todo se limpia en el finally.
+const WROOT = fs.readFileSync(new URL('../.env', import.meta.url), 'utf8')
+  .match(/WORKSPACES_ROOT=(.+)/)[1].trim();
+const WT_REPO = `${WROOT}/deck-wt-ws-test`;
+const WT_SIB = `${WROOT}/deck-wt-ws-test-composer`;
+const wtPost = (body, q = 'session=deck-wt') => fetch(`${HTTP}/api/worktree?${q}`, {
+  method: 'POST',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+try {
+  fs.rmSync(WT_REPO, { recursive: true, force: true });
+  fs.rmSync(WT_SIB, { recursive: true, force: true });
+  fs.mkdirSync(WT_REPO, { recursive: true });
+  execFileSync('git', ['-C', WT_REPO, 'init', '-q', '-b', 'main']);
+  execFileSync('git', ['-C', WT_REPO, '-c', 'user.email=t@t', '-c', 'user.name=t',
+    'commit', '-q', '--allow-empty', '-m', 'init']);
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-wt', '-c', WT_REPO]);
+
+  const br = await fetch(`${HTTP}/api/git/branches?session=deck-wt`, { headers: { 'x-deck-token': TOKEN } });
+  const brJson = await br.json();
+  ok('branches → 200 con repo/current/lista', br.status === 200
+    && brJson.repo === 'deck-wt-ws-test' && brJson.current === 'main' && brJson.branches.includes('main'));
+
+  const wt = await wtPost({ branch: 'feat/composer', base: 'main' });
+  const wtJson = await wt.json();
+  let wtSessionAlive = false;
+  let paneDir = '';
+  try {
+    execFileSync('tmux', ['has-session', '-t', '=feat-composer'], { stdio: 'ignore' });
+    wtSessionAlive = true;
+    paneDir = execFileSync('tmux', ['display-message', '-p', '-t', '=feat-composer:', '#{pane_current_path}']).toString().trim();
+  } catch { /* la sesión no se creó: los checks de abajo fallan solos */ }
+  ok('worktree → 200: dir hermano + sesión tmux con cwd correcto', wt.status === 200
+    && wtJson.session === 'feat-composer' && wtJson.path === WT_SIB
+    && fs.existsSync(WT_SIB) && wtSessionAlive && paneDir === WT_SIB);
+  let wtBranch = '';
+  try { wtBranch = execFileSync('git', ['-C', WT_SIB, 'branch', '--show-current']).toString().trim(); } catch {}
+  ok('worktree: rama nueva checkouteada en el worktree', wtBranch === 'feat/composer');
+
+  ok('worktree rama con .. → 400', (await wtPost({ branch: 'a..b', base: 'main' })).status === 400);
+  ok('worktree rama con leading dash → 400', (await wtPost({ branch: '-x', base: 'main' })).status === 400);
+  ok('worktree path ya tomado → 409', (await wtPost({ branch: 'other/composer', base: 'main' })).status === 409);
+  ok('worktree base inexistente → 400', (await wtPost({ branch: 'feat/x', base: 'nope' })).status === 400);
+  ok('worktree sesión inexistente → 404', (await wtPost({ branch: 'a', base: 'main' }, 'session=no-existe-x')).status === 404);
+} finally {
+  for (const s of ['deck-wt', 'feat-composer']) {
+    try { execFileSync('tmux', ['kill-session', '-t', `=${s}`], { stdio: 'ignore' }); } catch {}
+  }
+  fs.rmSync(WT_SIB, { recursive: true, force: true });
+  fs.rmSync(WT_REPO, { recursive: true, force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);

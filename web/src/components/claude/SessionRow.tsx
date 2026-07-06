@@ -1,5 +1,7 @@
 import { useDeckStore } from '../../store'
 import { battLow, openHostSheet } from '../../lib/host'
+import { openCreateMenu } from '../../lib/worktree'
+import { useTap } from '../../hooks/useTap'
 
 // Fila de sesiones (index.html:23-33): chips + botón +, chip de host (Fase 4) y
 // el punto de conexión. Port de refreshSessions/selectSession/renameSession/
@@ -57,6 +59,10 @@ export function SessionRow() {
   const createSession = useDeckStore((s) => s.createSession)
   const hostStatus = useDeckStore((s) => s.hostStatus)
 
+  // tarea 5: el + pasó de click simple a useTap para ganar el long-press (menú
+  // CREAR); el tap corto sigue creando sesión igual que siempre
+  const addTap = useTap(() => createSession(), openCreateMenu)
+
   // chip 🔋 solo si el host reporta batería (Mac de escritorio / pmset ilegible
   // → null); la barrita interna del ícono refleja el nivel (ancho útil 13.2px)
   const batt = hostStatus?.battery
@@ -69,13 +75,7 @@ export function SessionRow() {
           <Chip key={s.name} name={s.name} state={s.state} active={s.name === session} />
         ))}
       </div>
-      {/* + usa click simple, como el vanilla (app.js:2182) — no useTap */}
-      <button
-        id="btn-new-session"
-        className="chip chip-add"
-        title="Nueva sesión"
-        onClick={() => createSession()}
-      >
+      <button id="btn-new-session" className="chip chip-add" title="Nueva sesión" {...addTap}>
         +
       </button>
       {/* chip de batería del host: pineado como el +, tap abre el sheet */}

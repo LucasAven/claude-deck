@@ -123,7 +123,15 @@ body {
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
-.chip-add { min-width: 40px; font-size: 16px; }
+.chip-add {
+  min-width: 40px;
+  font-size: 16px;
+  /* el + ahora tiene long-press (menú CREAR, tarea 5): sin esto el hold
+     selecciona el "+" como texto (y en iOS abre el callout) */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
 
 /* chip de batería del host (tarea 17): pineado a la derecha como el + y el
    dot de conexión; solo se renderiza cuando la Mac reporta batería */
@@ -437,14 +445,16 @@ body.composer-open .tabbar { display: none; }
   max-height: 45dvh;
   overflow-y: auto;
 }
-.switch-menu .mh {
+.switch-menu .mh,
+.create-menu .mh {
   padding: 8px 12px 4px;
   font-size: 11px;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-.switch-menu .mi {
+.switch-menu .mi,
+.create-menu .mi {
   display: flex;
   width: 100%;
   align-items: center;
@@ -461,8 +471,10 @@ body.composer-open .tabbar { display: none; }
   cursor: pointer;
   touch-action: manipulation;
 }
-.switch-menu .mi:active { background: #1b1f26; }
-.switch-menu .mi svg { flex: none; color: var(--muted); }
+.switch-menu .mi:active,
+.create-menu .mi:active { background: #1b1f26; }
+.switch-menu .mi svg,
+.create-menu .mi svg { flex: none; color: var(--muted); }
 .switch-menu .mi.sel { color: var(--accent); }
 .switch-menu .mi .mi-check { margin-left: auto; color: var(--accent); }
 .switch-menu .mdiv { height: 1px; background: #2a2f37; margin: 6px 4px; }
@@ -487,6 +499,89 @@ body.composer-open .tabbar { display: none; }
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* ---------- menú CREAR (tarea 5): long-press en el + ---------- */
+/* mismo lenguaje visual que .switch-menu (los .mh/.mi de arriba llevan los dos
+   scopes), anclado bajo la fila de chips en vez de sobre la controlbar */
+#view-claude { position: relative; } /* ancla del popover .create-menu */
+.create-menu {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 50px); /* justo bajo la session-row */
+  left: 10px;
+  z-index: 40;
+  min-width: 250px;
+  max-width: calc(100% - 20px);
+  background: #14171c;
+  border: 1px solid #2a2f37;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+}
+
+/* ---------- sheet de worktree (tarea 5) ---------- */
+/* el contenedor/panel/grip/título reusan las clases del host-sheet; acá solo
+   el formulario. Ámbar = único acento del tema: el error también va ámbar. */
+.wt-label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.wt-input,
+.wt-select {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+}
+.wt-input:focus,
+.wt-select:focus { outline: none; border-color: var(--accent); }
+.wt-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237d8590' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+.wt-info {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.55;
+  word-break: break-word;
+}
+.wt-info code { font-family: var(--mono); color: #8fbe6b; } /* verde chip-dot-working */
+.wt-error {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--accent);
+}
+.wt-submit {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 14px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--bg);
+  font-family: var(--mono);
+  font-size: 15px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.wt-submit:active { background: var(--accent-dim); }
+.wt-submit:disabled { opacity: 0.6; }
 
 /* ---------- paleta de snippets (tarea 10) ---------- */
 /* clases sin scope a .switch-menu: la misma paleta se pinta en el popover y

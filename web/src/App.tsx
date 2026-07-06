@@ -9,7 +9,9 @@ import { ClaudeView } from './components/claude/ClaudeView'
 import { ChangesView } from './components/changes/ChangesView'
 import { FilesView } from './components/files/FilesView'
 import { HostSheet } from './components/claude/HostSheet'
+import { WorktreeSheet } from './components/claude/WorktreeSheet'
 import { closeSwitchMenu } from './lib/switch'
+import { closeCreateMenu } from './lib/worktree'
 import { refreshHost } from './lib/host'
 import { hideComposerSnips } from './lib/composer'
 import { attachImage, pasteTextToPrompt } from './lib/image'
@@ -48,6 +50,9 @@ export function App() {
       const t = e.target as HTMLElement | null
       if (!t?.closest('#switch-menu, #btn-mode, #btn-model, #btn-attach, #btn-snippets')) closeSwitchMenu()
       if (!t?.closest('#composer-snips, #composer-snippets')) hideComposerSnips()
+      // el menú CREAR se abre con long-press: el pointerdown sobre el propio +
+      // corre ANTES de que el hold dispare, así que cerrarlo acá no lo pisa
+      if (!t?.closest('#create-menu')) closeCreateMenu()
     }
     const onPaste = (e: ClipboardEvent) => {
       if (useDeckStore.getState().activeTab !== 'claude') return
@@ -94,8 +99,9 @@ export function App() {
           <FilesView />
         </section>
 
-        {/* overlays globales siempre montados: host-sheet (Fase 4), snip-tip */}
+        {/* overlays globales siempre montados: host-sheet (Fase 4), worktree-sheet (tarea 5), snip-tip */}
         <HostSheet />
+        <WorktreeSheet />
         <SnipTip />
 
         <TabBar />
