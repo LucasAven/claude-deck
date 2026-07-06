@@ -117,6 +117,8 @@ web/
 ```
 
 El server pasa a servir `web/dist/` si existe, si no `public/` (transición sin riesgo).
+(Post-paridad el dual-root se retiró: `PUBLIC_DIR` es fijo `web/dist` y sin build el
+server frena al boot — ver el cierre de la Fase 6.)
 
 ---
 
@@ -366,10 +368,17 @@ renderizado, seguimiento del cwd de la sesión al hacer `cd`.
   `window.claudeConn`, todos preservados.
 - [x] `test/shot-diff.mjs`: revisado — sigue útil sin cambios (usa `#diff-view`,
   `.file-row`, `.d2h-*`, presentes en `ChangesView`).
-- [x] Borrado `public/` (el server ya solo sirve `web/dist`). El dual-root del server
-  se dejó como está (inofensivo: siempre resuelve `web/dist`; sin build, 404 — buildear
-  ahora es obligatorio). Con esto la app vanilla (`app.js`/`index.html`/`style.css`) que
-  este doc usa de referencia dejó de existir: el port está completo, el código vive en `web/`.
+- [x] Borrado `public/` (el server ya solo sirve `web/dist`). Con esto la app vanilla
+  (`app.js`/`index.html`/`style.css`) que este doc usa de referencia dejó de existir:
+  el port está completo, el código vive en `web/`.
+- [x] Post-paridad — dual-root retirado: `PUBLIC_DIR` fijo a `web/dist`; sin build el
+  server frena al boot con error claro (`corré npm run build`) en vez de 404s silenciosos.
+- [x] Post-paridad — `manualChunks` en `vite.config.ts`: vendors separados del código
+  de app (`react`/`xterm`/`hljs`/`markdown`/`diff2html` + `index` de ~56KB). Los assets
+  se sirven immutable con nombre hasheado, así tras un deploy el teléfono re-baja solo
+  el chunk que cambió (normalmente `index`, ~18KB gzip) y no el bundle entero. Ojo:
+  `react-dom/client` va explícito en el chunk react (module id distinto de `react-dom`;
+  sin eso react-dom cae al chunk de app). ui-test 101/101 con la build chunkeada.
 - [x] Docs: README §Setup (`npm --prefix web install` + `npm run build` antes de
   `deck start`/LaunchAgent, y `dev:web` para iterar), `docs/SETUP.md` (idem), y nota en
   `docs/SPEC.md` §3 de que el stack de frontend quedó obsoleto (ahora React).
