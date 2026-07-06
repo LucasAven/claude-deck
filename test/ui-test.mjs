@@ -528,7 +528,9 @@ const sbRun = await page.evaluate(async () => {
   let transcriptMode = 'turns'; // 'turns' | 'empty' (sin transcript → fallback)
   const TURNS = [
     { role: 'user', text: 'probá el overlay' },
-    { role: 'assistant', text: 'dale, lo pruebo' },
+    // el asistente trae markdown (se renderiza) y un intento de XSS (DOMPurify
+    // tiene que dejar el img sin handler y sin ejecutar nada)
+    { role: 'assistant', text: 'dale, **lo pruebo** con `eco`\n\n<img src=x onerror="window.__sbxss=1">' },
     { role: 'tool', text: 'Bash: echo hola' },
   ];
   window.fetch = (url, opts) => {
@@ -561,7 +563,15 @@ const sbRun = await page.evaluate(async () => {
   out.aSession = document.querySelector('#scrollback-session').textContent;
   out.aSrc = document.querySelector('#scrollback-src').textContent;
   out.aTurns = [...document.querySelectorAll('#scrollback-turns .sb-turn')]
-    .map((d) => `${d.className}|${d.textContent}`);
+    .map((d) => d.className);
+  out.aUserText = document.querySelector('#scrollback-turns .sb-user').textContent;
+  out.aToolText = document.querySelector('#scrollback-turns .sb-tool').textContent;
+  const asst = document.querySelector('#scrollback-turns .sb-assistant');
+  out.aMd = {
+    strong: (asst.querySelector('strong') || {}).textContent,
+    code: (asst.querySelector('code') || {}).textContent,
+    clean: !asst.querySelector('script, [onerror]') && window.__sbxss === undefined,
+  };
   out.aPreHidden = document.querySelector('#scrollback-text').classList.contains('hidden');
   out.aMoreShown = !document.querySelector('#scrollback-more').classList.contains('hidden');
   // cargar más: duplica bytes; el mock devuelve los mismos turnos (sin
@@ -608,10 +618,13 @@ const sbRun = await page.evaluate(async () => {
 ok('📜 abre en modo transcript: turnos con clase por rol y pre oculto',
   sbRun.aOpen && sbRun.aSession === 'deck' && sbRun.aSrc === '· transcript' && sbRun.aPreHidden
   && JSON.stringify(sbRun.aTurns) === JSON.stringify([
-    'sb-turn sb-user|probá el overlay',
-    'sb-turn sb-assistant|dale, lo pruebo',
-    'sb-turn sb-tool|Bash: echo hola',
-  ]));
+    'sb-turn sb-user',
+    'sb-turn sb-assistant md-body',
+    'sb-turn sb-tool',
+  ])
+  && sbRun.aUserText === 'probá el overlay' && sbRun.aToolText === 'Bash: echo hola');
+ok('turno del asistente renderizado como markdown (sanitizado, sin XSS)',
+  sbRun.aMd.strong === 'lo pruebo' && sbRun.aMd.code === 'eco' && sbRun.aMd.clean);
 ok('transcript "cargar más": duplica bytes y se oculta si no crece',
   sbRun.aMoreShown && sbRun.aMoreHidden
   && sbRun.served.transcript[0] === 2 * 1024 * 1024 && sbRun.served.transcript[1] === 4 * 1024 * 1024);

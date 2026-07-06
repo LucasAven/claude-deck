@@ -343,6 +343,23 @@ body.composer-open .controlbar { display: none; }
   white-space: nowrap; /* one-liner: el resumen ya viene truncado del server */
 }
 .sb-tool::before { content: "\23FA"; color: var(--accent-dim); margin-right: 7px; }
+/* asistente renderizado como markdown: reusa .md-body (pestaña Archivos) pero
+   hereda la letra del overlay (--sb-font, escala con A−/A+) y anula el
+   pre-wrap del contenedor — el HTML renderizado trae su propio espaciado */
+.sb-turn.md-body {
+  padding: 0;
+  font-size: inherit;
+  line-height: 1.55;
+  white-space: normal;
+}
+.sb-turn.md-body h1 { font-size: 1.3em; }
+.sb-turn.md-body h2 { font-size: 1.15em; }
+.sb-turn.md-body h3 { font-size: 1.05em; }
+.sb-turn.md-body h4, .sb-turn.md-body h5, .sb-turn.md-body h6 { font-size: 1em; }
+.sb-turn.md-body code { font-size: 0.92em; }
+.sb-turn.md-body pre code { font-size: 0.95em; }
+.sb-turn.md-body table { font-size: 0.92em; }
+.sb-turn.md-body > *:last-child { margin-bottom: 0; }
 .scrollback-more {
   display: block;
   margin: 10px auto 0;

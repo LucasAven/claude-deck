@@ -1138,7 +1138,20 @@ async function sbFetchTranscript(bytes, keepAnchor) {
     const div = document.createElement('div');
     const role = t.role === 'user' || t.role === 'tool' ? t.role : 'assistant';
     div.className = `sb-turn sb-${role}`;
-    div.textContent = t.text; // textContent siempre: el transcript es input no confiable
+    // el texto del asistente es markdown: renderizarlo (misma dupla marked +
+    // DOMPurify que la vista de archivos .md; sanitizado obligatorio, el
+    // transcript es input no confiable). User y tool quedan como texto plano:
+    // los prompts suelen traer paths/código literal que el md manglaría.
+    if (role === 'assistant' && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+      try {
+        div.innerHTML = DOMPurify.sanitize(marked.parse(t.text, { breaks: true }));
+        div.classList.add('md-body'); // reusa los estilos de Archivos (adaptados en .sb-turn.md-body)
+      } catch (_) {
+        div.textContent = t.text;
+      }
+    } else {
+      div.textContent = t.text;
+    }
     box.appendChild(div);
   }
   // ocultar "cargar más" al llegar al techo o si un re-fetch no creció (techo

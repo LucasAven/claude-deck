@@ -67,8 +67,9 @@
 
       <!-- scrollback legible (tarea 9): overlay fullscreen de solo lectura.
            Fuente primaria: el transcript .jsonl de la sesión como turnos
-           (#scrollback-turns); fallback para shells: capture-pane como texto
-           plano (#scrollback-text). HTML plano en ambos: scroll, selección,
+           (#scrollback-turns; el asistente renderizado como markdown, user y
+           tool como texto plano); fallback para shells: capture-pane como
+           texto plano (#scrollback-text). HTML plano: scroll, selección,
            copy y find-in-page nativos (nada de eso existe en el canvas) -->
       <div id="scrollback" class="scrollback hidden">
         <div class="scrollback-head">
