@@ -6,6 +6,8 @@
   "description": "Panel remoto móvil (PWA) para sesiones locales de Claude Code vía tmux + Tailscale",
   "scripts": {
     "dev": "tsx watch server/index.ts",
+    "dev:web": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
     "start": "tsx server/index.ts",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },

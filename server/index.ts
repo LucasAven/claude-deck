@@ -19,7 +19,12 @@ import { fileURLToPath } from 'node:url'
 const execFileP = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(__dirname, '..')
-const PUBLIC_DIR = path.join(ROOT, 'public')
+// Dual-root de la migración a React (docs/REACT-PORT.md): servimos el build de
+// Vite (web/dist) si existe, si no la app vanilla (public/). Resuelto una sola
+// vez al boot — la app desplegada no cambia hasta que web/dist tenga paridad.
+const WEB_DIST = path.join(ROOT, 'web', 'dist')
+const PUBLIC_DIR =
+  fs.existsSync(path.join(WEB_DIST, 'index.html')) ? WEB_DIST : path.join(ROOT, 'public')
 
 // ---------------------------------------------------------------------------
 // Configuración (.env)
@@ -1058,7 +1063,7 @@ setInterval(async () => {
   } catch { /* el watcher jamás tira el server */ }
 }, BATT_WATCH_MS)
 
-// Estáticos (con auth, servidos desde public/)
+// Estáticos (con auth, servidos desde PUBLIC_DIR: web/dist o public/)
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -1067,6 +1072,8 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json',
+  '.woff2': 'font/woff2',
+  '.map': 'application/json; charset=utf-8',
 }
 
 app.get('*', (c) => {
@@ -1076,9 +1083,14 @@ app.get('*', (c) => {
   if (!insideDir(abs, PUBLIC_DIR)) return c.text('Not found', 404)
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return c.text('Not found', 404)
   const body = new Uint8Array(fs.readFileSync(abs))
+  // Vite emite /assets/* con nombres hasheados por contenido → cachear a full;
+  // el resto (index.html, sw.js, manifest…) sigue no-cache para no servir stale.
+  const cacheControl = p.startsWith('/assets/')
+    ? 'public, max-age=31536000, immutable'
+    : 'no-cache'
   return c.body(body, 200, {
     'content-type': MIME[path.extname(abs)] || 'application/octet-stream',
-    'cache-control': 'no-cache',
+    'cache-control': cacheControl,
   })
 })
 
