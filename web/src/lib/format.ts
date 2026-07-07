@@ -9,6 +9,16 @@ export function fmtSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// Preview de imágenes (tarea 16): lista PROPIA, no reusa extClass. svg se
+// previsualiza aunque extClass lo catalogue como ft-html; ico/heic (que sí caen
+// en ft-img) quedan afuera: heic no renderiza en la mayoría de browsers y se
+// dejan en la nota de "archivo binario". Coincide con la whitelist del server.
+const PREVIEW_IMG_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']
+export function isPreviewImage(name: string): boolean {
+  const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : ''
+  return PREVIEW_IMG_EXTS.includes(ext)
+}
+
 // tinte de un archivo por extensión (los iconos salen de lib/icons.tsx)
 export function extClass(name: string): string {
   const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : ''

@@ -345,6 +345,49 @@ await page.click('#btn-file-back');
 await new Promise((r) => setTimeout(r, 300));
 ok('botón ← vuelve al árbol', !(await page.$eval('#file-tree', (el) => el.classList.contains('hidden'))));
 
+// 9d. preview de imágenes (tarea 16): un archivo de imagen del repo se pinta con
+// <img src=/api/fs/raw> en vez del fetch JSON de texto; los no-imagen no cambian.
+// Se navega hasta web/public/icon.svg (siempre presente en el repo claude-deck).
+const expandDir = async (name) => {
+  const rows = await page.$$('#file-tree .ft-row.dir');
+  for (const r of rows) {
+    const t = await (await r.getProperty('textContent')).jsonValue();
+    if (t.trim() === name || t.includes(name)) { await r.click(); return true; }
+  }
+  return false;
+};
+await expandDir('web');
+await new Promise((r) => setTimeout(r, 600));
+await expandDir('public');
+await new Promise((r) => setTimeout(r, 600));
+const svgClicked = await page.evaluate(() => {
+  const r = [...document.querySelectorAll('#file-tree .ft-row.file')].find((x) => x.textContent.includes('icon.svg'));
+  if (r) { r.click(); return true; } return false;
+});
+if (svgClicked) {
+  await page.waitForSelector('#file-view .img-preview img', { timeout: 8000 }).catch(() => {});
+  const imgPreview = await page.evaluate(() => {
+    const img = document.querySelector('#file-view .img-preview img');
+    return { present: !!img, raw: img ? img.getAttribute('src').includes('/api/fs/raw') : false, noPre: !document.querySelector('#file-view .file-pre') };
+  });
+  ok('imagen (icon.svg) se renderiza como <img> src=/api/fs/raw en Archivos', imgPreview.present && imgPreview.raw && imgPreview.noPre);
+  await page.click('#btn-file-back');
+  await new Promise((r) => setTimeout(r, 300));
+} else {
+  ok('imagen (icon.svg) se renderiza como <img> src=/api/fs/raw en Archivos', false);
+}
+// un archivo no-imagen sigue mostrando su contenido de texto (no preview): abrir
+// package.json del nivel raíz y verificar que usa .file-pre, no .img-preview
+const jsonClicked = await page.evaluate(() => {
+  const r = [...document.querySelectorAll('#file-tree > .ft-row.file')].find((x) => /package\.json$/.test(x.textContent));
+  if (r) { r.click(); return true; } return false;
+});
+await page.waitForSelector('#file-view .file-pre', { timeout: 8000 }).catch(() => {});
+const nonImg = await page.evaluate(() => ({ pre: !!document.querySelector('#file-view .file-pre'), noImg: !document.querySelector('#file-view .img-preview') }));
+ok('archivo no-imagen (package.json) sigue mostrando texto, sin preview', jsonClicked && nonImg.pre && nonImg.noImg);
+await page.click('#btn-file-back');
+await new Promise((r) => setTimeout(r, 300));
+
 // 10. service worker registrado + manifest
 const swReg = await page.evaluate(async () => {
   const reg = await navigator.serviceWorker.getRegistration();

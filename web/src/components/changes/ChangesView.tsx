@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { html as diff2htmlHtml } from 'diff2html'
 import { useDeckStore, type GitFile } from '../../store'
 import { stageFile, fetchDiff } from '../../lib/git'
+import { rawImageUrl } from '../../lib/files'
+import { isPreviewImage } from '../../lib/format'
 
 // Pestaña Cambios (index.html:136-148, app.js:1633-1785). El header + la lista
 // salen de `git` (refreshGit vive en el store); el diff es estado local (esta
@@ -15,6 +17,7 @@ interface DiffState {
   loading: boolean
   error: string | null
   html: string | null // null + !loading + !error → sin diferencias (binario/vacío)
+  image: boolean // tarea 16: preview de la versión del worktree en vez del text diff
 }
 
 function FileRow({ f, onOpen }: { f: GitFile; onOpen: (f: GitFile) => void }) {
@@ -54,11 +57,17 @@ export function ChangesView() {
 
   const openDiff = async (file: GitFile) => {
     useDeckStore.setState({ inDiff: true }) // bloquea el auto-refresh (no pisar la vista)
-    setDiff({ file, loading: true, error: null, html: null })
+    // tarea 16: imágenes → preview de la versión del worktree (via /api/fs/raw)
+    // en vez del inútil "Binary files differ"; borradas no tienen blob en disco.
+    if (isPreviewImage(file.path)) {
+      setDiff({ file, loading: false, error: null, html: null, image: true })
+      return
+    }
+    setDiff({ file, loading: true, error: null, html: null, image: false })
     try {
       const text = await fetchDiff(file)
       if (!text.trim()) {
-        setDiff({ file, loading: false, error: null, html: null })
+        setDiff({ file, loading: false, error: null, html: null, image: false })
         return
       }
       setDiff({
@@ -68,9 +77,10 @@ export function ChangesView() {
         // salida de git, ya escapada por diff2html → seguro para innerHTML (§5.7);
         // line-by-line siempre: nunca side-by-side en móvil
         html: diff2htmlHtml(text, { drawFileList: false, matching: 'lines', outputFormat: 'line-by-line' }),
+        image: false,
       })
     } catch (e) {
-      setDiff({ file, loading: false, error: (e as Error).message, html: null })
+      setDiff({ file, loading: false, error: (e as Error).message, html: null, image: false })
     }
   }
 
@@ -131,15 +141,25 @@ export function ChangesView() {
         />
       ) : (
         <div id="diff-view" ref={diffRef} className={'scroll' + (diff ? '' : ' hidden')}>
-          {diff && (
-            <div className="empty-state">
-              {diff.loading
-                ? 'Cargando diff…'
-                : diff.error
-                  ? `No se pudo cargar el diff: ${diff.error}`
-                  : 'Sin diferencias (¿archivo binario o vacío?)'}
-            </div>
-          )}
+          {diff &&
+            (diff.image ? (
+              diff.file.status === 'D' ? (
+                <div className="empty-state">Imagen borrada (sin versión en el worktree)</div>
+              ) : (
+                <div className="img-preview">
+                  <img src={rawImageUrl(diff.file.path)} alt={diff.file.path} />
+                  <div className="img-caption">{diff.file.path.split('/').pop()}</div>
+                </div>
+              )
+            ) : (
+              <div className="empty-state">
+                {diff.loading
+                  ? 'Cargando diff…'
+                  : diff.error
+                    ? `No se pudo cargar el diff: ${diff.error}`
+                    : 'Sin diferencias (¿archivo binario o vacío?)'}
+              </div>
+            ))}
         </div>
       )}
     </>

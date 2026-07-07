@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useDeckStore } from '../../store'
-import { fetchList, fetchFile, registerTree, refreshTree, type FsEntry } from '../../lib/files'
+import { fetchList, fetchFile, rawImageUrl, registerTree, refreshTree, type FsEntry } from '../../lib/files'
 import { FT_ICONS, fileIcon } from '../../lib/icons'
-import { fmtSize, highlightCode, canRenderMd } from '../../lib/format'
+import { fmtSize, highlightCode, canRenderMd, isPreviewImage } from '../../lib/format'
 
 // Pestaña Archivos (index.html:150-164, app.js:1787-2081): árbol read-only del
 // directorio de la sesión, carga lazy por nivel. Cada nodo guarda su propio
@@ -15,14 +15,14 @@ import { fmtSize, highlightCode, canRenderMd } from '../../lib/format'
 const emptyNote = (text: string) => <div className="empty-state">{text}</div>
 
 // --- nodo del árbol (recursivo) ---
-function TreeNode({ ent, base, depth, onOpenFile }: { ent: FsEntry; base: string; depth: number; onOpenFile: (rel: string) => void }) {
+function TreeNode({ ent, base, depth, onOpenFile }: { ent: FsEntry; base: string; depth: number; onOpenFile: (rel: string, size: number) => void }) {
   const rel = base ? `${base}/${ent.name}` : ent.name
   const pad = { paddingLeft: `${12 + depth * 16}px` }
 
   if (ent.type !== 'dir') {
     const { cls, icon } = fileIcon(ent.name)
     return (
-      <div className="ft-row file" style={pad} onClick={() => onOpenFile(rel)}>
+      <div className="ft-row file" style={pad} onClick={() => onOpenFile(rel, ent.size ?? 0)}>
         <span className={`ft-ico ${cls}`}>{icon}</span>
         <span className="ft-name">{ent.name}</span>
       </div>
@@ -81,6 +81,7 @@ interface OpenFile {
   loading: boolean
   error: string | null
   binary: boolean
+  image: boolean
   content: string
   truncated: boolean
   size: number
@@ -161,17 +162,23 @@ export function FilesView() {
     if (file && fileRef.current) fileRef.current.scrollTop = 0
   }, [file?.rel, file?.content, mdRender])
 
-  const openFile = async (rel: string) => {
+  const openFile = async (rel: string, size = 0) => {
     setMdRender(false)
-    setFile({ rel, loading: true, error: null, binary: false, content: '', truncated: false, size: 0 })
+    // imágenes: se saltan el fetch JSON de /api/fs/file y se pintan con <img
+    // src=/api/fs/raw> (tarea 16); el tamaño del caption lo trae el árbol.
+    if (isPreviewImage(rel)) {
+      setFile({ rel, loading: false, error: null, binary: false, image: true, content: '', truncated: false, size })
+      return
+    }
+    setFile({ rel, loading: true, error: null, binary: false, image: false, content: '', truncated: false, size: 0 })
     let data
     try {
       data = await fetchFile(rel)
     } catch (e) {
-      setFile({ rel, loading: false, error: String((e as Error).message) === '401' ? null : `No se pudo leer el archivo: ${(e as Error).message}`, binary: false, content: '', truncated: false, size: 0 })
+      setFile({ rel, loading: false, error: String((e as Error).message) === '401' ? null : `No se pudo leer el archivo: ${(e as Error).message}`, binary: false, image: false, content: '', truncated: false, size: 0 })
       return
     }
-    setFile({ rel, loading: false, error: null, binary: !!data.binary, content: data.content ?? '', truncated: !!data.truncated, size: data.size })
+    setFile({ rel, loading: false, error: null, binary: !!data.binary, image: false, content: data.content ?? '', truncated: !!data.truncated, size: data.size })
   }
 
   const canMd = !!file && !file.binary && !file.loading && !file.error && canRenderMd(file.rel)
@@ -182,6 +189,16 @@ export function FilesView() {
   if (file) {
     if (file.loading) fileBody = emptyNote('Cargando…')
     else if (file.error) fileBody = emptyNote(file.error)
+    else if (file.image)
+      fileBody = (
+        <div className="img-preview">
+          <img src={rawImageUrl(file.rel)} alt={file.rel} />
+          <div className="img-caption">
+            {file.rel.split('/').pop()}
+            {file.size ? ` · ${fmtSize(file.size)}` : ''}
+          </div>
+        </div>
+      )
     else if (file.binary) fileBody = emptyNote(`Archivo binario · ${fmtSize(file.size)}`)
     else {
       const note = file.truncated ? emptyNote(`… truncado a 512 KB (el archivo pesa ${fmtSize(file.size)})`) : null

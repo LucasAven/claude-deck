@@ -206,6 +206,41 @@ try {
   fs.rmSync(`${stageDir}/${fsRel}`, { recursive: true, force: true });
 }
 
+// 9i. GET /api/fs/raw (tarea 16): byte crudo de imágenes del repo para <img
+// src>, whitelist de extensiones + cap 5 MB + headers anti-SVG-activo. Fixtures
+// bajo el mismo stageDir (deck-2 resuelve ahí), limpiadas en el finally.
+const rawRel = `.tmp-ws-test-raw-${Date.now()}`;
+fs.mkdirSync(`${stageDir}/${rawRel}`, { recursive: true });
+// PNG 1x1 válido
+fs.writeFileSync(`${stageDir}/${rawRel}/pix.png`, Buffer.from(
+  '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6300010000050001' +
+  '0d0a2db40000000049454e44ae426082', 'hex'));
+fs.writeFileSync(`${stageDir}/${rawRel}/evil.svg`, '<svg xmlns="http://www.w3.org/2000/svg" onload="window.x=1"><script>1</script></svg>');
+fs.writeFileSync(`${stageDir}/${rawRel}/code.ts`, 'export const x = 1\n');
+fs.writeFileSync(`${stageDir}/${rawRel}/big.gif`, Buffer.alloc(6 * 1024 * 1024));
+const rawGet = async (p) => {
+  const res = await fetch(`${HTTP}/api/fs/raw?session=deck-2&path=${encodeURIComponent(`${rawRel}/${p}`)}`, { headers: { 'x-deck-token': TOKEN } });
+  return { status: res.status, ct: res.headers.get('content-type') || '', csp: res.headers.get('content-security-policy') || '', nosniff: res.headers.get('x-content-type-options') || '' };
+};
+try {
+  const png = await rawGet('pix.png');
+  ok('fs/raw png → 200 image/png', png.status === 200 && png.ct === 'image/png');
+  const svg = await rawGet('evil.svg');
+  ok('fs/raw svg → 200 con CSP sandbox + nosniff + script-src none',
+    svg.status === 200 && svg.ct === 'image/svg+xml'
+    && svg.csp.includes('sandbox') && svg.csp.includes("script-src 'none'") && svg.nosniff === 'nosniff');
+  const ts = await rawGet('code.ts');
+  ok('fs/raw extensión no-imagen → 415', ts.status === 415);
+  const big = await rawGet('big.gif');
+  ok('fs/raw imagen > 5 MB → 413', big.status === 413);
+  const missing = await rawGet('no-existe.png');
+  ok('fs/raw inexistente → 404', missing.status === 404);
+  const trav = await fetch(`${HTTP}/api/fs/raw?session=deck-2&path=${encodeURIComponent('../secret.png')}`, { headers: { 'x-deck-token': TOKEN } });
+  ok('fs/raw path traversal → 400', trav.status === 400);
+} finally {
+  fs.rmSync(`${stageDir}/${rawRel}`, { recursive: true, force: true });
+}
+
 // 9d. GET /api/tmux/scrollback (tarea 9): capture-pane como text/plain para el
 // overlay de lectura. Se manda un marcador al shell de deck-2 (sesión scratch
 // del test, nunca la deck real) y tiene que volver por el endpoint.

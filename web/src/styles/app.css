@@ -1157,6 +1157,23 @@ body.composer-open .tabbar { display: none; }
   overflow-x: visible; /* el scroll horizontal lo maneja .file-pre */
 }
 
+/* ---------- preview de imágenes (tarea 16) ---------- */
+.img-preview { padding: 12px; text-align: center; }
+.img-preview img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  /* fondo a cuadros para ver transparencia (screenshots con alpha) */
+  background:
+    repeating-conic-gradient(#2a2a2a 0% 25%, #222 0% 50%) 0 / 16px 16px;
+}
+.img-caption {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
 /* ---------- markdown renderizado (#btn-md-render) ---------- */
 .md-body {
   padding: 14px 14px 24px;

@@ -11,6 +11,7 @@ import { api } from './api'
 export interface FsEntry {
   name: string
   type: 'dir' | 'file'
+  size?: number
 }
 export interface FsList {
   root: string
@@ -41,6 +42,12 @@ export async function fetchFile(rel: string): Promise<FsFile> {
     throw new Error((err && err.error) || `HTTP ${res.status}`)
   }
   return res.json()
+}
+
+// URL del byte crudo de una imagen del repo, para <img src> (tarea 16). La auth
+// viaja en la cookie httpOnly existente — no hay que meter token en la query.
+export function rawImageUrl(rel: string): string {
+  return `/api/fs/raw?path=${encodeURIComponent(rel)}&${sessionQuery(useDeckStore.getState().session)}`
 }
 
 let treeRefresh: ((force: boolean) => Promise<void>) | null = null

@@ -566,6 +566,37 @@ function fsReadFile(dir: string, rel: string) {
   return { path: rel, size: st.size, binary, truncated, content: binary ? '' : buf.toString('utf8') }
 }
 
+// Preview de imágenes (tarea 16): sirve el BYTE crudo de un archivo de imagen
+// del repo para <img src>. Lista de extensiones PROPIA (no reusa extClass del
+// frontend): svg SÍ se sirve (extClass lo cataloga como ft-html), y heic/ico
+// quedan afuera (heic no renderiza en la mayoría de browsers). Cap chico: las
+// screenshots de test entran de sobra.
+const FS_RAW_LIMIT = 5 * 1024 * 1024
+const FS_RAW_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+}
+
+function fsRawFile(dir: string, rel: string): { body: Uint8Array; type: string } {
+  const abs = checkRepoPath(dir, rel)
+  const ext = path.extname(rel).toLowerCase()
+  const type = FS_RAW_MIME[ext]
+  if (!type) throw new HttpError(415, 'extensión no servible como imagen')
+  let st: fs.Stats
+  try {
+    st = fs.statSync(abs)
+  } catch {
+    throw new HttpError(404, 'archivo no encontrado')
+  }
+  if (!st.isFile()) throw new HttpError(400, 'no es un archivo')
+  if (st.size > FS_RAW_LIMIT) throw new HttpError(413, 'imagen demasiado grande (máx 5 MB)')
+  return { body: new Uint8Array(fs.readFileSync(abs)), type }
+}
+
 // ---------------------------------------------------------------------------
 // Rate limit básico (endpoints HTTP)
 // ---------------------------------------------------------------------------
@@ -962,6 +993,23 @@ app.get('/api/fs/list', async (c) => {
 app.get('/api/fs/file', async (c) => {
   const dir = await resolveFsDir(c.req.query('session'))
   return c.json(fsReadFile(dir, c.req.query('path') || ''))
+})
+
+// Byte crudo de una imagen del repo, para <img src> (tarea 16). Sólo lectura,
+// extensión whitelisteada, Content-Type real. Un SVG puede llevar <script>/
+// handlers: como <img src> el browser NO los ejecuta, pero una navegación
+// DIRECTA a esta URL sí abriría el SVG como documento de nuestro origen. Por
+// eso mandamos CSP sandbox (documento sin scripts/mismo-origen) + nosniff +
+// script-src 'none': aunque alguien pegue la URL en la barra, nada corre.
+app.get('/api/fs/raw', async (c) => {
+  const dir = await resolveFsDir(c.req.query('session'))
+  const { body, type } = fsRawFile(dir, c.req.query('path') || '')
+  return c.body(body, 200, {
+    'content-type': type,
+    'cache-control': 'no-cache',
+    'content-security-policy': "sandbox; default-src 'none'; script-src 'none'; style-src 'unsafe-inline'",
+    'x-content-type-options': 'nosniff',
+  })
 })
 
 // Snippets (tarea 10): lista GLOBAL de frases para la paleta del frontend.
