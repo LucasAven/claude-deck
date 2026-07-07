@@ -526,19 +526,59 @@ async function gitPush(dir: string): Promise<void> {
   }
 }
 
-async function gitLog(dir: string, n: number) {
+// Historial de commits (tarea 14): hash/subject/autor/epoch + stats +N −M
+// agregadas de --numstat. Separador %x00 (no aparece en subjects); cada commit
+// arranca con %x01 y le siguen sus líneas de numstat (binarios emiten `-`/`-`
+// → cuentan 0). El tiempo relativo lo calcula el cliente desde `ts` (endpoint
+// locale-free).
+interface Commit {
+  hash: string
+  subject: string
+  author: string
+  ts: number
+  add: number
+  del: number
+}
+async function gitLog(dir: string, n: number): Promise<Commit[]> {
   try {
-    const { stdout } = await execFileP('git', ['-C', dir, 'log', '--no-color', '--oneline', '-n', String(n)])
-    return stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const sp = line.indexOf(' ')
-        return { hash: sp === -1 ? line : line.slice(0, sp), subject: sp === -1 ? '' : line.slice(sp + 1) }
-      })
+    const { stdout } = await execFileP(
+      'git',
+      ['-C', dir, 'log', '--no-color', '-n', String(n), '--format=%x01%h%x00%s%x00%an%x00%ct', '--numstat'],
+      { maxBuffer: 10 * 1024 * 1024 },
+    )
+    const commits: Commit[] = []
+    let cur: Commit | null = null
+    for (const line of stdout.split('\n')) {
+      if (line.startsWith('\x01')) {
+        const [hash, subject, author, ct] = line.slice(1).split('\x00')
+        cur = { hash, subject: subject ?? '', author: author ?? '', ts: Number(ct) || 0, add: 0, del: 0 }
+        commits.push(cur)
+      } else if (line.trim() && cur) {
+        const [a, d] = line.split('\t')
+        cur.add += a === '-' ? 0 : Number(a) || 0
+        cur.del += d === '-' ? 0 : Number(d) || 0
+      }
+    }
+    return commits
   } catch {
     return [] // repo sin commits todavía
   }
+}
+
+// git show de un commit (tarea 14): mismo visor diff2html que /api/git/diff.
+// El hash se valida ANTES con ^[0-9a-f]{7,40}$ (nunca refs/rangos/HEAD^ sin
+// validar); 404 si git falla (hash desconocido).
+async function gitShow(dir: string, hash: string): Promise<string> {
+  let out = ''
+  try {
+    out = (await execFileP('git', ['-C', dir, 'show', '--no-color', hash], { maxBuffer: 10 * 1024 * 1024 })).stdout
+  } catch {
+    throw new HttpError(404, 'commit no encontrado')
+  }
+  if (Buffer.byteLength(out) > DIFF_LIMIT) {
+    out = out.slice(0, DIFF_LIMIT) + '\n... [diff truncado: supera 500 KB]\n'
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -910,6 +950,14 @@ app.get('/api/git/log', async (c) => {
   if (!Number.isFinite(n)) n = 15
   n = Math.min(Math.max(n, 1), 200)
   return c.json(await gitLog(dir, n))
+})
+
+// Diff completo de un commit (tarea 14): visor diff2html vía git show.
+app.get('/api/git/show', async (c) => {
+  const dir = await resolveGitDir(c.req.query('session'))
+  const hash = c.req.query('hash') || ''
+  if (!/^[0-9a-f]{7,40}$/.test(hash)) throw new HttpError(400, 'hash inválido')
+  return c.text(await gitShow(dir, hash))
 })
 
 // Ramas del repo de la sesión (tarea 5): alimenta el dropdown "Basado en" del

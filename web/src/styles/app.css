@@ -1123,6 +1123,39 @@ body.composer-open .tabbar { display: none; }
 }
 .commit-btn:disabled { opacity: 0.4; }
 
+/* ---------- historial de commits (tarea 14) ---------- */
+#git-branch.tappable { cursor: pointer; }
+#git-branch.tappable:active { opacity: 0.6; }
+.commit-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-family: var(--mono);
+}
+.commit-row:active { background: var(--panel); }
+.commit-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.commit-hash { color: var(--accent); flex: none; }
+.commit-subject {
+  flex: 1;
+  color: var(--text);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commit-stats { flex: none; font-size: 12px; }
+.stat-add { color: #8fbe6b; }
+.stat-del { color: #d97a6b; }
+.commit-meta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 /* ---------- comentar una línea del diff (tarea 13) ---------- */
 /* highlight ámbar de la fila seleccionada (toggle imperativo sobre el <tr>) */
 #diff-view tr.diff-comment-line td { box-shadow: inset 3px 0 0 var(--accent); }

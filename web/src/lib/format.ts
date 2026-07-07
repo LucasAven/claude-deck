@@ -55,6 +55,23 @@ export function highlightCode(name: string, content: string): string | null {
   return null
 }
 
+// tiempo relativo en español desde un epoch en segundos (tarea 14: el endpoint
+// devuelve `ts` locale-free y el cliente lo formatea). "hace 6 min", "ayer", …
+export function relTime(ts: number): string {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts))
+  if (s < 60) return 'recién'
+  const min = Math.floor(s / 60)
+  if (min < 60) return `hace ${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `hace ${h} h`
+  const d = Math.floor(h / 24)
+  if (d === 1) return 'ayer'
+  if (d < 30) return `hace ${d} días`
+  const mo = Math.floor(d / 30)
+  if (mo < 12) return `hace ${mo} mes${mo > 1 ? 'es' : ''}`
+  return `hace ${Math.floor(mo / 12)} año${Math.floor(mo / 12) > 1 ? 's' : ''}`
+}
+
 export function canRenderMd(rel: string): boolean {
   return /\.md$/i.test(rel)
 }

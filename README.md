@@ -189,7 +189,8 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 | `POST /api/git/stage?session=<s>` | Stage/unstage de un archivo. Body JSON: `{ "path": "<rel>", "action": "stage"\|"unstage" }`. Unstage usa `git restore --staged` (o `git rm -r --cached` si el repo no tiene commits) |
 | `POST /api/git/commit?session=<s>` | Commitea lo staged. Body JSON: `{ "message": "<texto>" }` (argv único, sin flags; máx 2000 chars). Devuelve `{ hash }` (short HEAD nuevo). El mensaje lo tipea el usuario; la app no genera mensajes |
 | `POST /api/git/push?session=<s>` | `git push` sin flags del cliente (`--force` nunca existe); si la rama no tiene upstream, degrada a `git push -u origin <rama>`. Errores de git/auth suben verbatim |
-| `GET /api/git/log?n=15&session=<s>` | Últimos commits |
+| `GET /api/git/log?n=15&session=<s>` | Últimos commits para el historial: `{ hash, subject, author, ts, add, del }[]` (`ts` epoch —el tiempo relativo lo calcula el cliente—, `add`/`del` agregados de `--numstat`, binarios cuentan 0) |
+| `GET /api/git/show?hash=<h>&session=<s>` | Diff completo de un commit (`text/plain`, truncado a 500 KB) para el visor del historial. `hash` validado `^[0-9a-f]{7,40}$` (nunca refs/rangos); 404 si es desconocido |
 | `GET /api/git/branches?session=<s>` | Ramas del repo de la sesión: `{ repo, branches, current }` — alimenta el "Basado en" del sheet de worktree |
 | `POST /api/worktree?session=<s>` | Crea worktree + rama + sesión tmux en un paso (long-press en `+` → "Nuevo worktree…"). Body JSON: `{ "branch": "feat/x", "base": "main" }`. El worktree nace como HERMANO del repo (`../<repo>-<último-segmento>`, siempre dentro de `WORKSPACES_ROOT`); la sesión toma el nombre de la rama sanitizado. 409 si el path ya existe |
 | `GET /api/fs/list?path=<rel>&session=<s>` | Lista un directorio (no recursivo; carpetas primero, excluye `.git`, máx 500 entradas). `path` vacío → raíz de la sesión (toplevel git del pane, o el dir del pane si no es repo) |

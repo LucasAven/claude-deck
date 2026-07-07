@@ -58,3 +58,28 @@ export async function fetchDiff(file: GitFile): Promise<string> {
   if (!res.ok) throw new Error(await res.text())
   return res.text()
 }
+
+// Historial de commits (tarea 14). El endpoint /api/git/log ya existía (hash +
+// subject); ahora trae autor/epoch/stats — este es su primer consumidor.
+export interface Commit {
+  hash: string
+  subject: string
+  author: string
+  ts: number
+  add: number
+  del: number
+}
+
+export async function fetchLog(n = 30): Promise<Commit[]> {
+  const q = sessionQuery(useDeckStore.getState().session)
+  const res = await api(`/api/git/log?n=${n}${q ? `&${q}` : ''}`)
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()) as Commit[]
+}
+
+export async function fetchShow(hash: string): Promise<string> {
+  const q = sessionQuery(useDeckStore.getState().session)
+  const res = await api(`/api/git/show?hash=${encodeURIComponent(hash)}${q ? `&${q}` : ''}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.text()
+}

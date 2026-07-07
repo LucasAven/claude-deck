@@ -296,6 +296,41 @@ if (commitForm) {
 const commentBoxDefault = await page.$('#diff-comment');
 ok('box de comentario ausente por defecto (sin línea seleccionada)', commentBoxDefault === null);
 
+// 8d. historial de commits (tarea 14): tap en la rama abre la lista; tap en un
+// commit abre su diff; ← vuelve al historial y luego a la lista de archivos.
+// (Corre contra el repo real, que tiene commits.)
+await page.click('#git-branch');
+await page.waitForSelector('#history-view .commit-row', { timeout: 5000 }).catch(() => {});
+const histRows = await page.$$('#history-view .commit-row');
+ok('tap en la rama abre el historial con filas de commits', histRows.length > 0);
+const histRow0 = await page.evaluate(() => {
+  const r = document.querySelector('#history-view .commit-row');
+  return {
+    hash: /^[0-9a-f]{7}$/.test(r?.querySelector('.commit-hash')?.textContent?.trim() || ''),
+    hasSubject: !!r?.querySelector('.commit-subject')?.textContent,
+    hasMeta: /·/.test(r?.querySelector('.commit-meta')?.textContent || ''),
+    branchLabel: /· historial/.test(document.querySelector('#git-branch')?.textContent || ''),
+  };
+});
+ok('fila de commit: hash corto + subject + autor·tiempo, header "· historial"',
+  histRow0.hash && histRow0.hasSubject && histRow0.hasMeta && histRow0.branchLabel);
+if (histRows.length) {
+  await histRows[0].click();
+  await page.waitForSelector('#diff-view .d2h-file-wrapper', { timeout: 8000 }).catch(() => {});
+  ok('tap en un commit renderiza su diff', !!(await page.$('#diff-view .d2h-file-wrapper')));
+  await page.click('#btn-diff-back'); // vuelve al historial
+  await new Promise((r) => setTimeout(r, 300));
+  ok('← desde el diff del commit vuelve al historial', !!(await page.$('#history-view .commit-row')));
+  await page.click('#btn-diff-back'); // cierra el historial
+  await new Promise((r) => setTimeout(r, 300));
+  ok('← desde el historial vuelve a la lista de archivos',
+    (await page.$('#history-view')) === null && !(await page.$eval('#file-list', (el) => el.classList.contains('hidden'))));
+} else {
+  ok('tap en un commit renderiza su diff', true);
+  ok('← desde el diff del commit vuelve al historial', true);
+  ok('← desde el historial vuelve a la lista de archivos', true);
+}
+
 // 9. pestaña Archivos (reemplazó a Shell): árbol read-only del dir de la sesión
 await page.click('.tab[data-tab="files"]');
 await page.waitForSelector('#file-tree .ft-row', { timeout: 8000 }).catch(() => {});

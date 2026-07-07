@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { html as diff2htmlHtml } from 'diff2html'
 import { useDeckStore, type GitFile } from '../../store'
-import { stageFile, fetchDiff, commitChanges, pushChanges } from '../../lib/git'
+import { stageFile, fetchDiff, commitChanges, pushChanges, fetchLog, fetchShow, type Commit } from '../../lib/git'
 import { pasteTextToPrompt } from '../../lib/image'
+import { relTime } from '../../lib/format'
 
 // Pestaña Cambios (index.html:136-148, app.js:1633-1785). El header + la lista
 // salen de `git` (refreshGit vive en el store); el diff es estado local (esta
@@ -12,10 +13,19 @@ import { pasteTextToPrompt } from '../../lib/image'
 const BADGES: Record<string, string> = { M: 'M', A: 'A', D: 'D', R: 'R', C: 'C', U: 'U', T: 'T', '??': '??' }
 
 interface DiffState {
-  file: GitFile
+  title: string // clave de scroll/header: path del archivo o "hash subject"
+  from: 'files' | 'history' // de dónde se abrió (a dónde vuelve el ←)
+  file: GitFile | null // null en diffs de commit (deshabilita comentar, tarea 13)
   loading: boolean
   error: string | null
   html: string | null // null + !loading + !error → sin diferencias (binario/vacío)
+}
+
+// diff2html: line-by-line siempre (nunca side-by-side en móvil). Compartido por
+// el diff de un archivo y el `git show` de un commit (tarea 14). Salida de git
+// ya escapada → seguro para innerHTML (§5.7).
+function renderDiff(text: string): string {
+  return diff2htmlHtml(text, { drawFileList: false, matching: 'lines', outputFormat: 'line-by-line' })
 }
 
 function FileRow({ f, onOpen }: { f: GitFile; onOpen: (f: GitFile) => void }) {
@@ -117,6 +127,10 @@ export function ChangesView() {
   const gitNoRepo = useDeckStore((s) => s.gitNoRepo)
   const refreshGit = useDeckStore((s) => s.refreshGit)
   const [diff, setDiff] = useState<DiffState | null>(null)
+  // Historial de commits (tarea 14): lista o null (cerrado). Tap en la rama del
+  // header lo abre; tap en un commit abre su `git show` en el mismo visor.
+  const [history, setHistory] = useState<Commit[] | null>(null)
+  const [historyErr, setHistoryErr] = useState<string | null>(null)
   const diffRef = useRef<HTMLDivElement>(null)
   // Comentar una línea del diff (tarea 13): estado {path, line} de la línea
   // seleccionada. La fila resaltada vive dentro de dangerouslySetInnerHTML, así
@@ -129,7 +143,7 @@ export function ChangesView() {
   // (van en el elemento memoizado del diff — ver diffBody) así que no pueden
   // cerrar sobre `diff` directamente sin quedar viejos.
   const diffFileRef = useRef<string | null>(null)
-  diffFileRef.current = diff?.file.path ?? null
+  diffFileRef.current = diff?.file?.path ?? null
 
   // Limpia el highlight ámbar de cualquier fila marcada dentro del diff.
   const clearHighlight = useCallback(() => {
@@ -180,36 +194,67 @@ export function ChangesView() {
     clearComment()
   }
 
-  // diff recién pintado (o cambio de archivo): al tope, como view.scrollTop = 0
+  // diff recién pintado (o cambio de archivo/commit): al tope, como scrollTop = 0
   useEffect(() => {
     if (diff && diffRef.current) diffRef.current.scrollTop = 0
-  }, [diff?.html, diff?.file.path])
+  }, [diff?.html, diff?.title])
 
   const openDiff = async (file: GitFile) => {
     useDeckStore.setState({ inDiff: true }) // bloquea el auto-refresh (no pisar la vista)
-    setDiff({ file, loading: true, error: null, html: null })
+    setDiff({ title: file.path, from: 'files', file, loading: true, error: null, html: null })
     try {
       const text = await fetchDiff(file)
       if (!text.trim()) {
-        setDiff({ file, loading: false, error: null, html: null })
+        setDiff({ title: file.path, from: 'files', file, loading: false, error: null, html: null })
         return
       }
-      setDiff({
-        file,
-        loading: false,
-        error: null,
-        // salida de git, ya escapada por diff2html → seguro para innerHTML (§5.7);
-        // line-by-line siempre: nunca side-by-side en móvil
-        html: diff2htmlHtml(text, { drawFileList: false, matching: 'lines', outputFormat: 'line-by-line' }),
-      })
+      setDiff({ title: file.path, from: 'files', file, loading: false, error: null, html: renderDiff(text) })
     } catch (e) {
-      setDiff({ file, loading: false, error: (e as Error).message, html: null })
+      setDiff({ title: file.path, from: 'files', file, loading: false, error: (e as Error).message, html: null })
+    }
+  }
+
+  // Historial (tarea 14): abre la lista de commits. inDiff bloquea el poll
+  // también acá (para no repintar sobre la lista/el diff del commit).
+  const openHistory = async () => {
+    useDeckStore.setState({ inDiff: true })
+    setHistory([])
+    setHistoryErr(null)
+    try {
+      setHistory(await fetchLog(30))
+    } catch (e) {
+      if (String((e as Error).message) !== '401') setHistoryErr((e as Error).message)
+    }
+  }
+
+  const closeHistory = () => {
+    useDeckStore.setState({ inDiff: false })
+    setHistory(null)
+    setHistoryErr(null)
+    refreshGit()
+  }
+
+  // Tap en un commit → su diff completo en el mismo visor (from: 'history').
+  const openCommit = async (commit: Commit) => {
+    const title = `${commit.hash} ${commit.subject}`
+    setDiff({ title, from: 'history', file: null, loading: true, error: null, html: null })
+    try {
+      const text = await fetchShow(commit.hash)
+      setDiff({ title, from: 'history', file: null, loading: false, error: null, html: text.trim() ? renderDiff(text) : null })
+    } catch (e) {
+      setDiff({ title, from: 'history', file: null, loading: false, error: (e as Error).message, html: null })
     }
   }
 
   const closeDiff = () => {
-    useDeckStore.setState({ inDiff: false })
     clearComment() // tarea 13: el box y su highlight se desarman con el diff
+    // Diff abierto desde el historial → vuelve a la lista de commits (sigue
+    // montada, inDiff sigue true). Desde la lista de archivos → cierra del todo.
+    if (diff?.from === 'history') {
+      setDiff(null)
+      return
+    }
+    useDeckStore.setState({ inDiff: false })
     setDiff(null)
     refreshGit()
   }
@@ -253,28 +298,63 @@ export function ChangesView() {
     )
   }, [diff, onDiffPointerDown, onDiffPointerUp])
 
+  const inHistory = history !== null
+
   return (
     <>
       <div className="changes-header">
         <button
           id="btn-diff-back"
-          className={'icon-btn' + (diff ? '' : ' hidden')}
-          onClick={closeDiff}
+          className={'icon-btn' + (diff || inHistory ? '' : ' hidden')}
+          onClick={diff ? closeDiff : closeHistory}
         >
           ←
         </button>
         <div className="branch-info">
-          <span id="git-branch">{git ? `⎇ ${git.branch || '?'}` : gitNoRepo ? '' : '(sin datos git)'}</span>
+          {/* tap en la rama abre el historial (tarea 14); sin repo no hace nada */}
+          <span
+            id="git-branch"
+            className={git && !diff && !inHistory ? 'tappable' : ''}
+            onClick={() => git && !diff && !inHistory && openHistory()}
+          >
+            {git ? `⎇ ${git.branch || '?'}${inHistory ? ' · historial' : ''}` : gitNoRepo ? '' : '(sin datos git)'}
+          </span>
           <span id="git-ab" className="muted">
-            {ab.join('  ')}
+            {inHistory ? '' : ab.join('  ')}
           </span>
         </div>
-        <button id="btn-refresh" className="icon-btn" onClick={() => !diff && refreshGit()}>
+        <button id="btn-refresh" className="icon-btn" onClick={() => !diff && !inHistory && refreshGit()}>
           ↻
         </button>
       </div>
 
-      <div id="file-list" className={'scroll' + (diff ? ' hidden' : '')}>
+      {inHistory && !diff && (
+        <div id="history-view" className="scroll">
+          {historyErr ? (
+            <div className="empty-state">No se pudo cargar el historial: {historyErr}</div>
+          ) : history.length === 0 ? (
+            <div className="empty-state">Sin commits todavía</div>
+          ) : (
+            history.map((cmt) => (
+              <div key={cmt.hash} className="commit-row" onClick={() => openCommit(cmt)}>
+                <div className="commit-line1">
+                  <span className="commit-hash">{cmt.hash}</span>
+                  <span className="commit-subject">{cmt.subject}</span>
+                  <span className="commit-stats">
+                    {cmt.add > 0 && <span className="stat-add">+{cmt.add}</span>}
+                    {cmt.del > 0 && <span className="stat-del"> −{cmt.del}</span>}
+                  </span>
+                </div>
+                <div className="commit-meta">
+                  {cmt.author} · {relTime(cmt.ts)}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      <div id="file-list" className={'scroll' + (diff || inHistory ? ' hidden' : '')}>
         {gitNoRepo && <div className="empty-state">Esta sesión no está en un repo git</div>}
         {git && !git.files.length && <div className="empty-state">Árbol de trabajo limpio ✓</div>}
         {!!staged.length && <div className="file-section">Staged</div>}
@@ -313,7 +393,7 @@ export function ChangesView() {
         </div>
       )}
 
-      {!diff && !!staged.length && <CommitForm stagedCount={staged.length} />}
+      {!diff && !inHistory && !!staged.length && <CommitForm stagedCount={staged.length} />}
     </>
   )
 }

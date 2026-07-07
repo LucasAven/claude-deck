@@ -458,6 +458,58 @@ try {
   for (const p of [CI_REPO, CI_BARE, CI_NOREMOTE]) fs.rmSync(p, { recursive: true, force: true });
 }
 
+// 9j. GET /api/git/log extendido + /api/git/show (tarea 14): historial con
+// stats y el diff de un commit. Repo scratch con subjects raros + un binario
+// (numstat -/-  → 0) y validación estricta del hash.
+const HL_REPO = `${WROOT}/deck-hist-ws-test`;
+try {
+  fs.rmSync(HL_REPO, { recursive: true, force: true });
+  execFileSync('git', ['init', '-q', '-b', 'main', HL_REPO]);
+  const gc = (...a) => execFileSync('git', ['-C', HL_REPO, '-c', 'user.email=t@t', '-c', 'user.name=Lucas', ...a]);
+  fs.writeFileSync(`${HL_REPO}/f.txt`, 'a\nb\nc\n');
+  gc('add', 'f.txt'); gc('commit', '-q', '-m', 'primer commit con "comillas" y espacios');
+  fs.writeFileSync(`${HL_REPO}/f.txt`, 'a\nX\nc\nd\n');
+  fs.writeFileSync(`${HL_REPO}/bin.dat`, Buffer.from([0, 1, 2, 3]));
+  gc('add', 'f.txt', 'bin.dat'); gc('commit', '-q', '-m', 'segundo: café ☕');
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-hist', '-c', HL_REPO]);
+
+  const logRes = await fetch(`${HTTP}/api/git/log?session=deck-hist&n=10`, { headers: { 'x-deck-token': TOKEN } });
+  const log = await logRes.json();
+  ok('log extendido → 2 commits con hash/subject/author/ts/stats',
+    log.length === 2
+    && /^[0-9a-f]{7,40}$/.test(log[0].hash)
+    && log[0].subject === 'segundo: café ☕' && log[0].author === 'Lucas'
+    && typeof log[0].ts === 'number' && log[0].ts > 0
+    && log[0].add === 2 && log[0].del === 1 // f.txt; bin.dat binario cuenta 0
+    && log[1].subject === 'primer commit con "comillas" y espacios' && log[1].add === 3);
+
+  const showRes = await fetch(`${HTTP}/api/git/show?session=deck-hist&hash=${log[0].hash}`, { headers: { 'x-deck-token': TOKEN } });
+  const showTxt = await showRes.text();
+  ok('show hash válido → 200 con el diff del commit',
+    showRes.status === 200 && showTxt.includes('diff --git') && showTxt.includes('café'));
+
+  for (const bad of ['HEAD', 'main..x', '--stat', 'a'.repeat(41), 'zzz']) {
+    ok(`show hash inválido "${bad}" → 400`,
+      (await fetch(`${HTTP}/api/git/show?session=deck-hist&hash=${encodeURIComponent(bad)}`, { headers: { 'x-deck-token': TOKEN } })).status === 400);
+  }
+  ok('show hash válido pero inexistente → 404',
+    (await fetch(`${HTTP}/api/git/show?session=deck-hist&hash=0000000`, { headers: { 'x-deck-token': TOKEN } })).status === 404);
+
+  // repo sin commits → log []
+  const HL_EMPTY = `${WROOT}/deck-hist-empty`;
+  fs.rmSync(HL_EMPTY, { recursive: true, force: true });
+  execFileSync('git', ['init', '-q', '-b', 'main', HL_EMPTY]);
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-histe', '-c', HL_EMPTY]);
+  const emptyLog = await (await fetch(`${HTTP}/api/git/log?session=deck-histe`, { headers: { 'x-deck-token': TOKEN } })).json();
+  ok('log de repo sin commits → []', Array.isArray(emptyLog) && emptyLog.length === 0);
+  fs.rmSync(HL_EMPTY, { recursive: true, force: true });
+} finally {
+  for (const s of ['deck-hist', 'deck-histe']) {
+    try { execFileSync('tmux', ['kill-session', '-t', `=${s}`], { stdio: 'ignore' }); } catch {}
+  }
+  fs.rmSync(HL_REPO, { recursive: true, force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);
