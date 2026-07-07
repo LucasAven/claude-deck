@@ -82,7 +82,6 @@ export function useChipDrag(sessions: Session[]) {
 
   const finish = () => {
     clearTimer()
-    const st = startRef.current
     startRef.current = null
     if (draggingRef.current) {
       draggingRef.current = false

@@ -13,12 +13,13 @@ export function pushSupported(): boolean {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 }
 
-// base64url (VAPID) → Uint8Array para applicationServerKey.
-function urlB64ToUint8(base64: string): Uint8Array {
+// base64url (VAPID) → Uint8Array para applicationServerKey. El tipo del buffer
+// va explícito en ArrayBuffer: BufferSource no admite ArrayBufferLike (TS 5.7).
+function urlB64ToUint8(base64: string): Uint8Array<ArrayBuffer> {
   const pad = '='.repeat((4 - (base64.length % 4)) % 4)
   const b64 = (base64 + pad).replace(/-/g, '+').replace(/_/g, '/')
   const raw = atob(b64)
-  const out = new Uint8Array(raw.length)
+  const out = new Uint8Array(new ArrayBuffer(raw.length))
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
   return out
 }
