@@ -123,7 +123,6 @@ Otros subcomandos: `deck status` (server / agente / tailscale / sueño / baterí
 | `TMUX_SESSION`    | no          | `deck`                   | Nombre de la sesión tmux de Claude                  |
 | `DECK_PORT`       | no          | `7433`                   | Puerto local  |
 | `DECK_URL`        | no          | —                        | URL pública del panel (la escriben solos `deck install`/`deck url`); el server la usa como contacto VAPID del Web Push (Apple valida el subject) |
-| `DECK_PRESENCE_IDLE` | no       | `300`                    | Segundos sin teclado/mouse para que la Mac deje de contar como "estás mirando" (supresión de push por presencia) |
 | `DECK_BATT_WATCH_MS` | no       | `60000`                  | Intervalo (ms) del watcher de batería (la alerta proactiva); existe sobre todo para poder testearlo sin esperar minutos |
 | `DECK_VAPID_SUBJECT` | no       | `DECK_URL`               | Contacto VAPID (mailto/URL) que viaja al push service, por si querés otro distinto de `DECK_URL` |
 
@@ -149,7 +148,7 @@ El push es **contextual**: el título es el nombre de la sesión tmux, y el cuer
 
 `notify.sh` solo notifica sesiones que corren **dentro de tmux** (las que podés controlar remoto); un `claude` en una terminal común no manda push, porque estás mirando la pantalla.
 
-Además el push se **suprime si ya estás mirando** (presencia): con la Mac desbloqueada y actividad de teclado/mouse en los últimos 5 min (`DECK_PRESENCE_IDLE` en segundos para cambiarlo), o con la PWA visible en primer plano en cualquier dispositivo (`GET /api/presence` — bloquear el celular o cambiar de app te vuelve "ausente" al instante). El push suprimido se descarta, no se encola. Todos los chequeos fallan abiertos: si algo no se puede leer, el push sale igual.
+Además el push se **suprime si ya estás mirando la app** (presencia): con la PWA visible en primer plano en cualquier dispositivo (`GET /api/presence` — bloquear el celular o cambiar de app te vuelve "ausente" al instante). El push suprimido se descarta, no se encola. El chequeo falla abierto: si algo no se puede leer, el push sale igual. (La señal "Mac desbloqueada y en uso" existió y se retiró: dejar la compu un rato y seguir desde el celu suprimía pushes queridos.)
 
 ### Semáforo de sesiones (punto en el chip)
 

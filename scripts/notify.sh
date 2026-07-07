@@ -96,36 +96,20 @@ ${DESC:0:200}"
 fi
 
 # Presencia (tarea 3): si ya estás mirando, el push sobra — se DESCARTA (no
-# hay push silencioso; decidido 2026-07-04). Dos señales, alcanza una:
-#   (a) Mac presente: pantalla desbloqueada + input hace < DECK_PRESENCE_IDLE
-#       segundos (HIDIdleTime; default 5 min — tolera leer output largo).
-#   (b) Celu presente: alguna PWA visible en primer plano — el server lo sabe
-#       por los reports {t:'vis'} del WS (GET /api/presence, TTL 25 s). Al
-#       bloquear el celu o cambiar de app, visibilitychange lo apaga.
-# Todo falla ABIERTO: error, timeout o lectura rara = mandar el push igual
-# (perder una notificación es peor que una redundante).
-IDLE_MAX="${DECK_PRESENCE_IDLE:-$(env_get DECK_PRESENCE_IDLE)}"
-IDLE_MAX="${IDLE_MAX:-300}"
-
-mac_present() {
-  # pantalla bloqueada → ausente. macOS moderno (probado en Darwin 25) expone
-  # IOConsoleLocked (siempre presente, true/false — y recién pasa a true cuando
-  # vence el "require password after", no al apagarse la pantalla); versiones
-  # viejas mostraban CGSSessionScreenIsLocked solo al bloquear. Se aceptan las
-  # dos: cualquiera en <true/> = bloqueada.
-  LOCKED="$(ioreg -n Root -d1 -a 2>/dev/null | grep -A1 -E 'IOConsoleLocked|CGSSessionScreenIsLocked' | grep -c '<true/>')"
-  [ "${LOCKED:-0}" -gt 0 ] && return 1
-  IDLE="$(ioreg -c IOHIDSystem 2>/dev/null | awk '/HIDIdleTime/ {print int($NF/1000000000); exit}')"
-  case "$IDLE" in '' | *[!0-9]*) return 1 ;; esac # sin lectura → no afirmar presencia
-  [ "$IDLE" -lt "$IDLE_MAX" ]
-}
-
+# hay push silencioso; decidido 2026-07-04). Única señal: alguna PWA visible en
+# primer plano — el server lo sabe por los reports {t:'vis'} del WS
+# (GET /api/presence, TTL 25 s). Al bloquear el celu o cambiar de app,
+# visibilitychange lo apaga. Falla ABIERTO: error, timeout o lectura rara =
+# mandar el push igual (perder una notificación es peor que una redundante).
+# La señal "Mac presente" (pantalla desbloqueada + HIDIdleTime) se RETIRÓ a
+# pedido de Lucas 2026-07-07: dejar la compu un rato y seguir desde el celu
+# suprimía pushes que sí quería recibir.
 phone_present() {
   curl -s -m 1 -H "x-deck-token: $AUTH_TOKEN" \
     "http://127.0.0.1:${DECK_PORT}/api/presence" 2>/dev/null | grep -q '"visible":true'
 }
 
-if mac_present || phone_present; then
+if phone_present; then
   exit 0
 fi
 
