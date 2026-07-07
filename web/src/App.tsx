@@ -57,22 +57,22 @@ export function App() {
     }
     const onPaste = (e: ClipboardEvent) => {
       if (useDeckStore.getState().activeTab !== 'claude') return
-      // foco en un campo editable (el textarea del composer, o cualquier input) →
-      // comportamiento nativo: el texto queda ahí, editable, y no viaja al pty. El
-      // único camino a la terminal es el botón + → "Pegar portapapeles". Cubrimos
-      // también composerOpen por si el paste llega sin target editable (globito de
-      // iOS) con el composer abierto.
-      const t = e.target as HTMLElement | null
-      if (t?.closest?.('textarea, input, [contenteditable="true"]') || useDeckStore.getState().composerOpen) return
       const items = e.clipboardData?.items ?? []
+      // La imagen SIEMPRE dispara el chip de preview (flujo de imágenes intacto),
+      // incluso con el composer abierto: el textarea no la maneja de forma útil.
       const img = [...items].find((i) => i.type.startsWith('image/'))
       if (img) {
         e.preventDefault()
         attachImage(img.getAsFile(), 'Imagen del portapapeles')
         return
       }
-      // texto: solo si el foco NO está en la terminal (xterm ya pega solo)
-      if ((e.target as HTMLElement | null)?.closest?.('.term-wrap')) return
+      // TEXTO con foco en un campo editable (el textarea del composer, o cualquier
+      // input) → comportamiento nativo: el texto queda ahí, editable, y no viaja al
+      // pty. El único camino a la terminal es el botón + → "Pegar portapapeles".
+      // Cubrimos también composerOpen por si el paste llega sin target editable
+      // (globito de iOS) con el composer abierto. La terminal (xterm) ya pega sola.
+      const t = e.target as HTMLElement | null
+      if (t?.closest?.('textarea, input, [contenteditable="true"], .term-wrap') || useDeckStore.getState().composerOpen) return
       const text = e.clipboardData?.getData('text/plain')
       if (text) {
         e.preventDefault()

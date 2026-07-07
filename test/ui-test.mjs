@@ -674,8 +674,30 @@ const compPaste = await page.evaluate(() => {
   claudeConn.sendKeys = origSend;
   return { pastes, keys };
 });
-ok('paste con composer abierto NO llega al pty (0 term.paste, 0 sendKeys)',
+ok('paste de TEXTO con composer abierto NO llega al pty (0 term.paste, 0 sendKeys)',
   compPaste.pastes.length === 0 && compPaste.keys.length === 0);
+
+// 14b-ter (tarea 21). el guard es SOLO-TEXTO: pegar una IMAGEN con el composer
+// abierto igual dispara el chip de preview (flujo de imágenes intacto). No se
+// sube nada solo (dos pasos): el chip queda pending, sin POST a paste-image.
+const imgPasteReqs0 = pasteReqs;
+const compImgPaste = await page.evaluate(async () => {
+  const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  const file = new File([arr], 'x.png', { type: 'image/png' });
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  document.querySelector('#composer-text').dispatchEvent(
+    new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+  await new Promise((r) => setTimeout(r, 400));
+  return { chip: !document.querySelector('#img-chip')?.classList.contains('hidden') };
+});
+ok('paste de IMAGEN con composer abierto abre el chip de preview (flujo intacto)',
+  compImgPaste.chip === true && pasteReqs === imgPasteReqs0);
+// limpiar el chip pending para no ensuciar el resto de la corrida (✕ = onClick)
+await page.evaluate(() => document.querySelector('#img-chip-close').click());
+await new Promise((r) => setTimeout(r, 150));
 
 // 14c. el borrador sobrevive a un reload (iOS matando la pestaña) y se
 // restaura al reabrir el composer para esa sesión
