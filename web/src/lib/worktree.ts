@@ -25,6 +25,58 @@ export function closeWorktreeSheet() {
   useDeckStore.setState({ worktreeSheetOpen: false })
 }
 
+// Despachar con prompt… (tarea 6): tercera entrada del menú CREAR. Mismo patrón
+// que el worktree sheet — estado open en el store, formulario local del sheet.
+export function openDispatchSheet() {
+  closeCreateMenu()
+  useDeckStore.setState({ dispatchSheetOpen: true })
+}
+
+export function closeDispatchSheet() {
+  useDeckStore.setState({ dispatchSheetOpen: false })
+}
+
+// subdirectorios de primer nivel de WORKSPACES_ROOT (endpoint propio; /api/fs/list
+// no sirve — sin session cae a DEFAULT_DIR y mezcla archivos)
+export async function fetchWorkspaces(): Promise<string[] | null> {
+  try {
+    const res = await api('/api/workspaces')
+    if (!res.ok) return null
+    return ((await res.json()) as { dirs: string[] }).dirs
+  } catch {
+    return null
+  }
+}
+
+// modo del agente → valor de --permission-mode
+export type DispatchMode = 'plan' | 'acceptEdits' | 'bypassPermissions'
+
+export type DispatchResult = { ok: true; session: string } | { ok: false; error: string }
+
+export async function dispatchAgent(dir: string, prompt: string, mode: DispatchMode): Promise<DispatchResult> {
+  try {
+    const res = await api('/api/dispatch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dir, prompt, mode }),
+    })
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`
+      try {
+        msg = (await res.json()).error || msg
+      } catch {
+        /* sin body json */
+      }
+      return { ok: false, error: msg }
+    }
+    const data = (await res.json()) as { session: string }
+    return { ok: true, session: data.session }
+  } catch (e) {
+    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
+    return { ok: false, error: 'error de red' }
+  }
+}
+
 export interface BranchInfo {
   repo: string
   branches: string[]

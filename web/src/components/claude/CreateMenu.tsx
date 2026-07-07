@@ -1,6 +1,6 @@
 import { useDeckStore } from '../../store'
 import { useTap } from '../../hooks/useTap'
-import { closeCreateMenu, openWorktreeSheet } from '../../lib/worktree'
+import { closeCreateMenu, openWorktreeSheet, openDispatchSheet } from '../../lib/worktree'
 
 // Menú CREAR (tarea 5, design-refs/task05-06-menu-crear.png): popover bajo la
 // fila de chips, abierto con long-press en el +. Siempre montado (toggle
@@ -16,6 +16,7 @@ export function CreateMenu() {
     createSession()
   })
   const wtTap = useTap(() => openWorktreeSheet())
+  const dispatchTap = useTap(() => openDispatchSheet())
 
   return (
     <div id="create-menu" className={'create-menu' + (open ? '' : ' hidden')}>
@@ -35,6 +36,13 @@ export function CreateMenu() {
           <path d="M7 8.5v7M17 11.5c0 3.5-4 3-7.5 4.5" />
         </svg>
         <span>Nuevo worktree…</span>
+      </button>
+      <button className="mi" {...dispatchTap}>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 12h13M13 6l6 6-6 6" />
+          <path d="M4 5v14" />
+        </svg>
+        <span>Despachar con prompt…</span>
       </button>
     </div>
   )

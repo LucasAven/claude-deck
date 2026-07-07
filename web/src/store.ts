@@ -125,6 +125,7 @@ interface DeckStore {
   hostSheetOpen: boolean
   createMenuOpen: boolean
   worktreeSheetOpen: boolean
+  dispatchSheetOpen: boolean
   switchMenu: SwitchMenuKind
   switchState: SwitchState
   imgChip: ImgChip | null
@@ -212,6 +213,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   hostSheetOpen: false,
   createMenuOpen: false,
   worktreeSheetOpen: false,
+  dispatchSheetOpen: false,
   switchMenu: null,
   switchState: {},
   imgChip: null,

@@ -928,12 +928,20 @@ function checkBranchName(name: string, what: string): string {
   return name
 }
 
+// sanitiza un string arbitrario (rama, basename de dir) a un nombre válido de
+// sesión tmux (SESSION_RE), esquivando el sufijo reservado -shell (como
+// session_name_for_cwd en scripts/deck)
+function sanitizeToSession(s: string, fallback: string): string {
+  let base = s.replace(/[^A-Za-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || fallback
+  if (base.endsWith('-shell')) base = `${base.slice(0, -'-shell'.length)}-s`
+  return base
+}
+
 // nombre de sesión tmux derivado de la rama: sanitizado a SESSION_RE (como
 // session_name_for_cwd en scripts/deck), esquivando el sufijo reservado -shell
 // y colisiones con sesiones vivas
 async function worktreeSessionName(branch: string): Promise<string> {
-  let base = branch.replace(/[^A-Za-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'wt'
-  if (base.endsWith('-shell')) base = `${base.slice(0, -'-shell'.length)}-s`
+  const base = sanitizeToSession(branch, 'wt')
   let name = base
   for (let n = 2; (await tmuxHasSession(name)) || (await tmuxHasSession(`${name}-shell`)); n++) {
     name = `${base.slice(0, 32 - 1 - String(n).length)}-${n}`
@@ -981,6 +989,125 @@ app.post('/api/worktree', async (c) => {
   }
   console.log(`[deck] ${new Date().toISOString()} worktree ${branch} -> ${wtPath} (sesión ${session})`)
   return c.json({ session, path: wtPath, branch })
+})
+
+// Directorios candidatos para despachar (tarea 6): subdirectorios de PRIMER
+// nivel de WORKSPACES_ROOT, solo dirs, NO recursivo. /api/fs/list no sirve para
+// esto: sin session cae a DEFAULT_DIR (que suele ser un repo → devuelve su
+// toplevel, no la raíz) y mezcla archivos. Acá listamos la raíz misma.
+app.get('/api/workspaces', (c) => {
+  const root = fs.realpathSync(WORKSPACES_ROOT)
+  const dirs: string[] = []
+  for (const d of fs.readdirSync(root, { withFileTypes: true })) {
+    if (d.name.startsWith('.')) continue // .git, dotdirs
+    const target = path.join(root, d.name)
+    try {
+      const s = fs.statSync(target) // sigue symlinks
+      if (s.isDirectory() && insideDir(fs.realpathSync(target), root)) dirs.push(d.name)
+    } catch {
+      continue // symlink roto / sin permisos
+    }
+  }
+  dirs.sort((a, b) => a.localeCompare(b))
+  return c.json({ root, dirs })
+})
+
+// Despachar un agente (tarea 6, design-refs/task06-dispatch-sheet.png): crea una
+// sesión tmux nueva en un dir de WORKSPACES_ROOT y lanza `claude` con un prompt
+// inicial + permission-mode. Fire-and-forget desde el celu; se sigue como un
+// chip normal (con dot de estado de la tarea 4).
+//
+// Entrega del prompt (decidido con prototipo contra un claude real, tarea 6):
+// argv posicional `claude $'<prompt>' --permission-mode <m>` vía send-keys -l
+// (quoting ANSI-C, ver shQuote). Se probó (a) argv vs (b) paste con
+// bracketed-paste; (a) resultó 100% confiable en la matriz de quoting (comillas
+// dobles/simples, $(), backticks, y prompts MULTILÍNEA) y se validó end-to-end
+// con un claude real en modo plan (recibió el prompt como argumento posicional
+// y arrancó en plan). (b) quedó descartado: más frágil (delay de readiness del
+// TUI + envelope de bracketed-paste racy) sin ganar nada. Con single-quote plano
+// un \n crudo dejaba a zsh en continuación `quote>` (colgaba si se perdía un
+// char); ANSI-C mantiene todo en una línea y evita esa trampa.
+const DISPATCH_MODES = ['plan', 'acceptEdits', 'bypassPermissions']
+// binario a lanzar; override SOLO para tests (un stub que ecoa su argv, así la
+// matriz de quoting se aserta sin lanzar un claude real — jamás un
+// bypassPermissions de verdad en tests). En producción siempre 'claude'.
+const CLAUDE_BIN = process.env.DECK_CLAUDE_BIN || 'claude'
+// Quoting ANSI-C ($'...') en vez de single-quote plano: mantiene TODO en una
+// sola línea física (los \n del prompt viajan como la secuencia de dos chars
+// `\n`, no como bytes newline crudos). Con single-quote un newline crudo hacía
+// que zsh entrara en continuación `quote>` — si un char se perdiera en el
+// send-keys, la comilla quedaría abierta y el shell colgaría esperando input.
+// Dentro de $'...' NO hay expansión de $(), backticks ni $VAR (quedan literales
+// → el prompt llega verbatim). Asume shell zsh/bash (el login shell del user).
+function shQuote(s: string): string {
+  return (
+    "$'" +
+    s
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t') +
+    "'"
+  )
+}
+app.post('/api/dispatch', async (c) => {
+  let body: { dir?: unknown; prompt?: unknown; mode?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const dirName = typeof body.dir === 'string' ? body.dir : ''
+  const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+  const mode = typeof body.mode === 'string' ? body.mode : ''
+
+  if (!DISPATCH_MODES.includes(mode)) throw new HttpError(400, 'modo inválido')
+  if (!prompt) throw new HttpError(400, 'prompt vacío')
+  if (prompt.length > 10000) throw new HttpError(400, 'prompt demasiado largo (máx 10000)')
+  // dir es un basename de primer nivel: sin separadores ni "." especiales
+  if (!dirName || dirName.includes('/') || dirName.includes(path.sep) || dirName === '.' || dirName === '..') {
+    throw new HttpError(400, 'directorio inválido')
+  }
+  const root = fs.realpathSync(WORKSPACES_ROOT)
+  let dir: string
+  try {
+    dir = fs.realpathSync(path.join(root, dirName))
+  } catch {
+    throw new HttpError(404, 'directorio no encontrado')
+  }
+  // hijo DIRECTO de la raíz (no un nieto tras seguir un symlink) y un dir real
+  if (path.dirname(dir) !== root || !fs.statSync(dir).isDirectory()) {
+    throw new HttpError(400, 'el directorio debe ser hijo directo de WORKSPACES_ROOT')
+  }
+
+  // decisión de Lucas (a): un dir que ya tiene sesión → 409, nunca <nombre>-2
+  const session = sanitizeToSession(path.basename(dir), 'sess')
+  if ((await tmuxHasSession(session)) || (await tmuxHasSession(`${session}-shell`))) {
+    throw new HttpError(409, 'ya hay una sesión ahí')
+  }
+
+  try {
+    await execFileP('tmux', ['new-session', '-d', '-s', session, '-c', dir])
+  } catch (e: any) {
+    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    throw new HttpError(500, `tmux falló: ${msg}`)
+  }
+
+  // el shell recién nacido tarda un toque en estar listo; luego mandamos la
+  // línea literal y, con otro respiro, el Enter (mismo patrón que el prototipo)
+  const line = `${CLAUDE_BIN} ${shQuote(prompt)} --permission-mode ${mode}`
+  await new Promise((r) => setTimeout(r, 250))
+  try {
+    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, '-l', line])
+    await new Promise((r) => setTimeout(r, 150))
+    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, 'Enter'])
+  } catch (e: any) {
+    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    throw new HttpError(500, `sesión ${session} creada, pero el envío del prompt falló: ${msg}`)
+  }
+  console.log(`[deck] ${new Date().toISOString()} dispatch ${dirName} (modo ${mode}) -> sesión ${session}`)
+  return c.json({ session, dir, mode })
 })
 
 // File browser (solo lectura). ?path= relativo a la raíz de la sesión;
