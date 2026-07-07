@@ -463,6 +463,7 @@ try {
   ok('dispatch modo bypassPermissions (fuera del whitelist) → 400',
     (await dispPost({ dir: DISP_NAME, prompt: 'x', mode: 'bypassPermissions' })).status === 400);
   ok('dispatch modelo inválido → 400', (await dispPost({ dir: DISP_NAME, prompt: 'x', mode: 'plan', model: 'gpt' })).status === 400);
+  ok('dispatch effort inválido → 400', (await dispPost({ dir: DISP_NAME, prompt: 'x', mode: 'plan', effort: 'ultra' })).status === 400);
   ok('dispatch prompt vacío → 400', (await dispPost({ dir: DISP_NAME, prompt: '   ', mode: 'plan' })).status === 400);
   ok('dispatch dir con "/" → 400', (await dispPost({ dir: 'a/b', prompt: 'x', mode: 'plan' })).status === 400);
   ok('dispatch dir ".." → 400', (await dispPost({ dir: '..', prompt: 'x', mode: 'plan' })).status === 400);

@@ -1317,6 +1317,8 @@ const dispRun = await page.evaluate(async () => {
   out.planActiveByDefault = document.querySelector('#dp-modes .dp-pill.active')?.textContent === 'Plan';
   out.modelPills = [...document.querySelectorAll('#dp-models .dp-pill')].map((e) => e.textContent);
   out.modelDefaultActive = document.querySelector('#dp-models .dp-pill.active')?.textContent === 'Default';
+  out.effortPills = [...document.querySelectorAll('#dp-efforts .dp-pill')].map((e) => e.textContent);
+  out.effortDefaultActive = document.querySelector('#dp-efforts .dp-pill.active')?.textContent === 'Default';
 
   // tipear un prompt (textarea controlado de React: setter nativo + input)
   const ta = document.querySelector('#dp-prompt');
@@ -1336,6 +1338,12 @@ const dispRun = await page.evaluate(async () => {
   modelPill('Opus').click();
   await frame();
   out.opusActive = document.querySelector('#dp-models .dp-pill.active').textContent === 'Opus';
+
+  // elegir un effort (pill High)
+  const effortPill = (label) => [...document.querySelectorAll('#dp-efforts .dp-pill')].find((e) => e.textContent === label);
+  effortPill('High').click();
+  await frame();
+  out.highActive = document.querySelector('#dp-efforts .dp-pill.active').textContent === 'High';
 
   // Autorun: primer tap arma la confirmación SIN postear
   pill('Autorun').click();
@@ -1364,13 +1372,17 @@ ok('dispatch: pills Plan/Auto-edits/Autorun, Plan activo por default',
   JSON.stringify(dispRun.modePills) === JSON.stringify(['Plan', 'Auto-edits', 'Autorun']) && dispRun.planActiveByDefault);
 ok('dispatch: pills de modelo Default/Sonnet/Opus/Haiku, Default activo por default',
   JSON.stringify(dispRun.modelPills) === JSON.stringify(['Default', 'Sonnet', 'Opus', 'Haiku']) && dispRun.modelDefaultActive);
-ok('dispatch: las pills togglean modo y modelo activos', dispRun.autoEditsActive && dispRun.opusActive);
+ok('dispatch: pills de effort Default/Low/Medium/High/xHigh/Max, Default activo por default',
+  JSON.stringify(dispRun.effortPills) === JSON.stringify(['Default', 'Low', 'Medium', 'High', 'xHigh', 'Max']) && dispRun.effortDefaultActive);
+ok('dispatch: las pills togglean modo, modelo y effort activos',
+  dispRun.autoEditsActive && dispRun.opusActive && dispRun.highActive);
 ok('dispatch: Autorun arma confirmación "auto-aprueba" sin postear',
   dispRun.armedLabel && dispRun.noPostOnArm);
-ok('dispatch: el segundo tap confirma y postea el body correcto (mode auto + model opus)',
+ok('dispatch: el segundo tap confirma y postea el body correcto (mode auto + model opus + effort high)',
   dispRun.postedBody && dispRun.postedBody.dir === 'claude-deck'
   && dispRun.postedBody.prompt === 'arreglá los tests'
-  && dispRun.postedBody.mode === 'auto' && dispRun.postedBody.model === 'opus' && dispRun.sheetClosedAfterPost);
+  && dispRun.postedBody.mode === 'auto' && dispRun.postedBody.model === 'opus'
+  && dispRun.postedBody.effort === 'high' && dispRun.sheetClosedAfterPost);
 
 await browser.close();
 console.log(results.join('\n'));

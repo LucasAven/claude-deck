@@ -6,6 +6,7 @@ import {
   fetchWorkspaces,
   type DispatchMode,
   type DispatchModel,
+  type DispatchEffort,
 } from '../../lib/worktree'
 
 // Sheet "Despachar agente" (tarea 6, design-refs/task06-dispatch-sheet.png):
@@ -29,6 +30,16 @@ const MODELS: Array<{ key: DispatchModel; label: string }> = [
   { key: 'haiku', label: 'Haiku' },
 ]
 
+// effort del agente; '' = default del CLI
+const EFFORTS: Array<{ key: DispatchEffort; label: string }> = [
+  { key: '', label: 'Default' },
+  { key: 'low', label: 'Low' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'high', label: 'High' },
+  { key: 'xhigh', label: 'xHigh' },
+  { key: 'max', label: 'Max' },
+]
+
 export function DispatchSheet() {
   const open = useDeckStore((s) => s.dispatchSheetOpen)
   const selectSession = useDeckStore((s) => s.selectSession)
@@ -37,6 +48,7 @@ export function DispatchSheet() {
   const [prompt, setPrompt] = useState('')
   const [mode, setMode] = useState<DispatchMode>('plan')
   const [model, setModel] = useState<DispatchModel>('')
+  const [effort, setEffort] = useState<DispatchEffort>('')
   // Autorun (--permission-mode auto) exige una confirmación extra antes de
   // lanzar (decisión de Lucas): el botón se arma con un estado de confirmación
   // que avisa que auto-aprueba acciones, en vez de un alert.
@@ -82,7 +94,7 @@ export function DispatchSheet() {
     }
     setBusy(true)
     setError('')
-    const res = await dispatchAgent(dir, prompt.trim(), mode, model)
+    const res = await dispatchAgent(dir, prompt.trim(), mode, model, effort)
     setBusy(false)
     if (!res.ok) {
       setError(res.error)
@@ -164,6 +176,20 @@ export function DispatchSheet() {
               onClick={() => setModel(m.key)}
             >
               {m.label}
+            </button>
+          ))}
+        </div>
+
+        <label className="wt-label">Effort</label>
+        <div id="dp-efforts" className="dp-modes dp-wrap">
+          {EFFORTS.map((e) => (
+            <button
+              key={e.key || 'default'}
+              className={'dp-pill' + (effort === e.key ? ' active' : '')}
+              data-effort={e.key || 'default'}
+              onClick={() => setEffort(e.key)}
+            >
+              {e.label}
             </button>
           ))}
         </div>
