@@ -93,6 +93,11 @@ body {
   font-family: var(--mono);
   font-size: 13px;
   cursor: pointer;
+  /* al arrastrar para reordenar (tarea 19) el hold no debe seleccionar el texto
+     del chip ni abrir el callout de iOS — mismo fix que .chip-add en la tarea 5 */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .chip-x {
   color: var(--muted);
