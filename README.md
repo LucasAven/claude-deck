@@ -93,6 +93,14 @@ scripts/deck install
 
 Instala el server como **LaunchAgent** (`~/Library/LaunchAgents/com.claude-deck.plist`): arranca al iniciar sesión, se relevanta solo si se cae, loguea en `~/Library/Logs/claude-deck.log`. Ya no hay que "prender" nada. También agrega una regla sudoers acotada (`/etc/sudoers.d/claude-deck`) para poder alternar `pmset disablesleep` sin password — es lo único que requiere root y solo cubre esos dos comandos exactos —, configura `tailscale serve` si falta y termina imprimiendo la URL del panel con token (**`deck url`** la muestra cuando quieras, con un QR escaneable si instalaste `qrencode` — así el celular se configura escaneando en vez de tipear la URL).
 
+> **Push desde Cambios bajo el LaunchAgent (tarea 12):** el agente corre con un
+> entorno que no es tu shell interactivo, así que puede faltarle el
+> `ssh-agent`/credential helper que usás a mano — un `git push` que anda con
+> `npm run dev` puede fallar bajo launchd. El error llega **verbatim** al celu.
+> Si pasa, configurá un helper que no dependa del agente: `git config --global
+> credential.helper osxkeychain` (HTTPS) o una clave SSH sin passphrase para el
+> deploy. No es un bug del panel: `push` es un subcomando fijo sin flags.
+
 **Cada vez que te vas** (esto sí es el "un comando"):
 
 ```bash
@@ -191,6 +199,7 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 | `POST /api/git/push?session=<s>` | `git push` sin flags del cliente (`--force` nunca existe); si la rama no tiene upstream, degrada a `git push -u origin <rama>`. Errores de git/auth suben verbatim |
 | `GET /api/git/log?n=15&session=<s>` | Últimos commits para el historial: `{ hash, subject, author, ts, add, del }[]` (`ts` epoch —el tiempo relativo lo calcula el cliente—, `add`/`del` agregados de `--numstat`, binarios cuentan 0) |
 | `GET /api/git/show?hash=<h>&session=<s>` | Diff completo de un commit (`text/plain`, truncado a 500 KB) para el visor del historial. `hash` validado `^[0-9a-f]{7,40}$` (nunca refs/rangos); 404 si es desconocido |
+| `GET /api/git/checks?session=<s>` | Estado del PR/CI de la rama vía `gh pr view` (subcomando y campos fijos): `{ pr: { number, title, state, checks: { total, passed, failed, pending }, mergeable } \| null }`. Degradación silenciosa (siempre 200): sin `gh` / sin auth / sin remote / sin PR → `{ pr: null }` y el chip no aparece. Cache por dir ~60 s (el poll de 8 s no quema rate limit). Auth = el login existente del `gh` CLI, no un token en `.env` |
 | `GET /api/git/branches?session=<s>` | Ramas del repo de la sesión: `{ repo, branches, current }` — alimenta el "Basado en" del sheet de worktree |
 | `POST /api/worktree?session=<s>` | Crea worktree + rama + sesión tmux en un paso (long-press en `+` → "Nuevo worktree…"). Body JSON: `{ "branch": "feat/x", "base": "main" }`. El worktree nace como HERMANO del repo (`../<repo>-<último-segmento>`, siempre dentro de `WORKSPACES_ROOT`); la sesión toma el nombre de la rama sanitizado. 409 si el path ya existe |
 | `GET /api/fs/list?path=<rel>&session=<s>` | Lista un directorio (no recursivo; carpetas primero, excluye `.git`, máx 500 entradas). `path` vacío → raíz de la sesión (toplevel git del pane, o el dir del pane si no es repo) |

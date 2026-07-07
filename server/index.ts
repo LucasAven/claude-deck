@@ -581,6 +581,59 @@ async function gitShow(dir: string, hash: string): Promise<string> {
   return out
 }
 
+// Chip de estado CI/PR (tarea 15): normaliza `gh pr view` a un JSON chico.
+// DEGRADACIÓN SILENCIOSA ES EL CONTRATO: gh ausente (ENOENT) / sin auth / sin
+// remote de GitHub / sin PR para la rama → { pr: null } con 200, nunca un
+// error que la UI tenga que pintar (el chip simplemente no aparece). Cache por
+// dir con TTL corto: el frontend pollea cada 8 s y pegarle a la API de GitHub
+// en cada uno quemaría el rate limit sin ganar frescura. Ojo: bajo launchd gh
+// puede faltar del PATH (el plist ya agrega el bin de homebrew para tmux/git);
+// si falta, ENOENT → degradación, así que no rompe.
+interface PrChecks {
+  number: number
+  title: string
+  state: string
+  checks: { total: number; passed: number; failed: number; pending: number }
+  mergeable: string
+}
+const checksCache = new Map<string, { ts: number; data: { pr: PrChecks | null } }>()
+const CHECKS_TTL = 60_000
+
+async function gitChecks(dir: string): Promise<{ pr: PrChecks | null }> {
+  const cached = checksCache.get(dir)
+  if (cached && Date.now() - cached.ts < CHECKS_TTL) return cached.data
+
+  let data: { pr: PrChecks | null } = { pr: null }
+  try {
+    const { stdout } = await execFileP(
+      'gh',
+      ['pr', 'view', '--json', 'number,title,state,mergeable,statusCheckRollup'],
+      { cwd: dir, timeout: 10_000 },
+    )
+    const pr = JSON.parse(stdout)
+    const checks = { total: 0, passed: 0, failed: 0, pending: 0 }
+    for (const c of pr.statusCheckRollup || []) {
+      checks.total++
+      if (c.state) {
+        // StatusContext (checks legacy de la API de status)
+        if (c.state === 'SUCCESS') checks.passed++
+        else if (c.state === 'PENDING' || c.state === 'EXPECTED') checks.pending++
+        else checks.failed++
+      } else {
+        // CheckRun (GitHub Actions y afines)
+        if (c.status && c.status !== 'COMPLETED') checks.pending++
+        else if (['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(c.conclusion)) checks.passed++
+        else checks.failed++
+      }
+    }
+    data = { pr: { number: pr.number, title: pr.title, state: pr.state, checks, mergeable: pr.mergeable } }
+  } catch {
+    data = { pr: null } // contrato: cualquier fallo → sin chip
+  }
+  checksCache.set(dir, { ts: Date.now(), data })
+  return data
+}
+
 // ---------------------------------------------------------------------------
 // File browser (solo lectura, pestaña Archivos)
 // ---------------------------------------------------------------------------
@@ -950,6 +1003,18 @@ app.get('/api/git/log', async (c) => {
   if (!Number.isFinite(n)) n = 15
   n = Math.min(Math.max(n, 1), 200)
   return c.json(await gitLog(dir, n))
+})
+
+// Chip de CI/PR (tarea 15). Degradación silenciosa: sin repo/gh/PR → { pr:null }
+// con 200 (nunca error — el chip solo no aparece).
+app.get('/api/git/checks', async (c) => {
+  let dir: string
+  try {
+    dir = await resolveGitDir(c.req.query('session'))
+  } catch {
+    return c.json({ pr: null })
+  }
+  return c.json(await gitChecks(dir))
 })
 
 // Diff completo de un commit (tarea 14): visor diff2html vía git show.

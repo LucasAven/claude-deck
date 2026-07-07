@@ -331,6 +331,42 @@ if (histRows.length) {
   ok('← desde el historial vuelve a la lista de archivos', true);
 }
 
+// 8e. chip de CI/PR (tarea 15): /api/git/checks mockeado sobre window.fetch.
+// pr:null → sin chip; con PR → chip + card. (Determinista, no depende de gh.)
+const prNull = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  window.__realFetch = realFetch;
+  window.__setChecks = (body) => { window.__checks = body; };
+  window.fetch = (url, opts) => {
+    if (String(url).includes('/api/git/checks')) {
+      return Promise.resolve(new Response(JSON.stringify(window.__checks ?? { pr: null }), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  window.__setChecks({ pr: null });
+  document.querySelector('#btn-refresh').click();
+  await new Promise((r) => setTimeout(r, 600));
+  return !document.querySelector('#pr-chip');
+});
+ok('chip de CI/PR ausente cuando el endpoint reporta pr:null', prNull);
+const prShown = await page.evaluate(async () => {
+  window.__setChecks({ pr: { number: 128, title: 'feat: x', state: 'OPEN', checks: { total: 4, passed: 4, failed: 0, pending: 0 }, mergeable: 'MERGEABLE' } });
+  document.querySelector('#btn-refresh').click();
+  await new Promise((r) => setTimeout(r, 600));
+  const chip = document.querySelector('#pr-chip');
+  if (!chip) return { chip: false };
+  chip.click();
+  await new Promise((r) => setTimeout(r, 100));
+  return {
+    chip: /✓ PR #128/.test(chip.textContent), passed: /pr-passed/.test(chip.className),
+    summary: document.querySelector('#pr-card .pr-card-summary')?.textContent?.trim(),
+  };
+});
+ok('chip verde "✓ PR #128" + card con "· merge listo"',
+  prShown.chip && prShown.passed && /merge listo/.test(prShown.summary || ''));
+// restaurar fetch para que las secciones siguientes peguen contra el server real
+await page.evaluate(() => { if (window.__realFetch) window.fetch = window.__realFetch; });
+
 // 9. pestaña Archivos (reemplazó a Shell): árbol read-only del dir de la sesión
 await page.click('.tab[data-tab="files"]');
 await page.waitForSelector('#file-tree .ft-row', { timeout: 8000 }).catch(() => {});

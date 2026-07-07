@@ -510,6 +510,29 @@ try {
   fs.rmSync(HL_REPO, { recursive: true, force: true });
 }
 
+// 9k. GET /api/git/checks (tarea 15): degradación silenciosa. Los casos
+// deterministas: repo scratch sin remote de GitHub → { pr: null } 200 (gh sale
+// con error → null), y sesión sin repo → { pr: null } 200. Nunca un error que
+// la UI tenga que pintar.
+const CK_REPO = `${WROOT}/deck-checks-ws-test`;
+try {
+  fs.rmSync(CK_REPO, { recursive: true, force: true });
+  execFileSync('git', ['init', '-q', '-b', 'main', CK_REPO]);
+  execFileSync('git', ['-C', CK_REPO, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-ck', '-c', CK_REPO]);
+
+  const noRemote = await fetch(`${HTTP}/api/git/checks?session=deck-ck`, { headers: { 'x-deck-token': TOKEN } });
+  const noRemoteJson = await noRemote.json();
+  ok('checks repo sin remote → { pr: null } 200', noRemote.status === 200 && noRemoteJson.pr === null);
+
+  const noSession = await fetch(`${HTTP}/api/git/checks?session=no-existe-ck`, { headers: { 'x-deck-token': TOKEN } });
+  const noSessionJson = await noSession.json();
+  ok('checks sesión sin repo → { pr: null } 200', noSession.status === 200 && noSessionJson.pr === null);
+} finally {
+  try { execFileSync('tmux', ['kill-session', '-t', '=deck-ck'], { stdio: 'ignore' }); } catch {}
+  fs.rmSync(CK_REPO, { recursive: true, force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);

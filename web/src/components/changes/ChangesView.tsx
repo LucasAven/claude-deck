@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { html as diff2htmlHtml } from 'diff2html'
-import { useDeckStore, type GitFile } from '../../store'
+import { useDeckStore, type GitFile, type PrChecks } from '../../store'
 import { stageFile, fetchDiff, commitChanges, pushChanges, fetchLog, fetchShow, type Commit } from '../../lib/git'
 import { pasteTextToPrompt } from '../../lib/image'
 import { relTime } from '../../lib/format'
@@ -19,6 +19,23 @@ interface DiffState {
   loading: boolean
   error: string | null
   html: string | null // null + !loading + !error → sin diferencias (binario/vacío)
+}
+
+// Estado agregado del chip de CI/PR (tarea 15): rojo si algo falló, ámbar si
+// algo corre, verde si todo pasó (leyenda del mockup).
+type PrAgg = 'passed' | 'pending' | 'failed'
+function prState(pr: PrChecks): PrAgg {
+  if (pr.checks.failed > 0) return 'failed'
+  if (pr.checks.pending > 0) return 'pending'
+  return 'passed'
+}
+const PR_ICON: Record<PrAgg, string> = { passed: '✓', pending: '●', failed: '✗' }
+function prSummary(pr: PrChecks): string {
+  const { total, passed, failed, pending } = pr.checks
+  if (failed > 0) return `✗ ${failed} check${failed > 1 ? 's' : ''} ${failed > 1 ? 'fallaron' : 'falló'}`
+  if (pending > 0) return `● ${passed}/${total} checks corriendo`
+  const base = `✓ ${passed} check${passed !== 1 ? 's' : ''} ${passed !== 1 ? 'pasaron' : 'pasó'}`
+  return pr.mergeable === 'MERGEABLE' ? `${base} · merge listo` : base
 }
 
 // diff2html: line-by-line siempre (nunca side-by-side en móvil). Compartido por
@@ -125,7 +142,9 @@ function CommitForm({ stagedCount }: { stagedCount: number }) {
 export function ChangesView() {
   const git = useDeckStore((s) => s.git)
   const gitNoRepo = useDeckStore((s) => s.gitNoRepo)
+  const gitChecks = useDeckStore((s) => s.gitChecks)
   const refreshGit = useDeckStore((s) => s.refreshGit)
+  const [prCardOpen, setPrCardOpen] = useState(false) // card expandida del chip CI/PR
   const [diff, setDiff] = useState<DiffState | null>(null)
   // Historial de commits (tarea 14): lista o null (cerrado). Tap en la rama del
   // header lo abre; tap en un commit abre su `git show` en el mismo visor.
@@ -319,6 +338,16 @@ export function ChangesView() {
           >
             {git ? `⎇ ${git.branch || '?'}${inHistory ? ' · historial' : ''}` : gitNoRepo ? '' : '(sin datos git)'}
           </span>
+          {/* chip de CI/PR (tarea 15): sólo en la vista base, con PR presente */}
+          {gitChecks && !diff && !inHistory && (
+            <span
+              id="pr-chip"
+              className={`pr-chip pr-${prState(gitChecks)}`}
+              onClick={() => setPrCardOpen((o) => !o)}
+            >
+              {PR_ICON[prState(gitChecks)]} PR #{gitChecks.number}
+            </span>
+          )}
           <span id="git-ab" className="muted">
             {inHistory ? '' : ab.join('  ')}
           </span>
@@ -327,6 +356,13 @@ export function ChangesView() {
           ↻
         </button>
       </div>
+
+      {gitChecks && prCardOpen && !diff && !inHistory && (
+        <div id="pr-card" className="pr-card">
+          <div className="pr-card-title">{gitChecks.title}</div>
+          <div className={`pr-card-summary pr-${prState(gitChecks)}`}>{prSummary(gitChecks)}</div>
+        </div>
+      )}
 
       {inHistory && !diff && (
         <div id="history-view" className="scroll">

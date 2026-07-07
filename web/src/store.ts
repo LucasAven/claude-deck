@@ -25,6 +25,16 @@ export interface GitSummary {
   files: GitFile[]
 }
 
+// Chip de CI/PR (tarea 15): forma normalizada de `gh pr view`. null → sin PR /
+// sin gh / sin remote (el chip no aparece). Se piggybackea en refreshGit.
+export interface PrChecks {
+  number: number
+  title: string
+  state: string
+  checks: { total: number; passed: number; failed: number; pending: number }
+  mergeable: string
+}
+
 // Formas que se completan en fases posteriores (sesiones: Fase 2,
 // snippets: Fase 3). Se dejan tipadas laxo por ahora.
 export type Session = { name: string; state?: string; [k: string]: unknown }
@@ -107,6 +117,7 @@ interface DeckStore {
   sessions: Session[]
   git: GitSummary | null
   gitNoRepo: boolean // el dir de la sesión existe pero no es repo git (distinto de "sin datos")
+  gitChecks: PrChecks | null // chip de CI/PR (tarea 15); null → sin chip
   hostStatus: HostStatus | null
   hostBannerDismissed: boolean
   snippets: string[] | null
@@ -186,6 +197,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   sessions: [],
   git: null,
   gitNoRepo: false,
+  gitChecks: null,
   hostStatus: null,
   hostBannerDismissed: false,
   snippets: null,
@@ -249,10 +261,16 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       if (!res.ok && res.status === 404 && q) res = await api('/api/git/summary')
       if (res.ok) {
         set({ git: (await res.json()) as GitSummary, gitNoRepo: false })
+        // Chip de CI/PR (tarea 15): piggyback tras un summary OK. Degradación
+        // silenciosa — cualquier error deja gitChecks en null (sin chip).
+        api(`/api/git/checks${q ? `?${q}` : ''}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => set({ gitChecks: (j?.pr as PrChecks) ?? null }))
+          .catch(() => set({ gitChecks: null }))
         return
       }
       if (res.status === 400) {
-        set({ git: null, gitNoRepo: true }) // dir sin git → mensaje propio en ChangesView
+        set({ git: null, gitNoRepo: true, gitChecks: null }) // dir sin git → mensaje propio en ChangesView
         return
       }
       throw new Error(`git summary ${res.status}`)
