@@ -1281,7 +1281,7 @@ app.get('/api/workspaces', (c) => {
 // chip normal (con dot de estado de la tarea 4).
 //
 // Entrega del prompt (decidido con prototipo contra un claude real, tarea 6):
-// argv posicional `claude $'<prompt>' --permission-mode <m>` vía send-keys -l
+// argv posicional `claude $'<prompt>' --permission-mode <m> [--model <a>]` vía send-keys -l
 // (quoting ANSI-C, ver shQuote). Se probó (a) argv vs (b) paste con
 // bracketed-paste; (a) resultó 100% confiable en la matriz de quoting (comillas
 // dobles/simples, $(), backticks, y prompts MULTILÍNEA) y se validó end-to-end
@@ -1290,10 +1290,17 @@ app.get('/api/workspaces', (c) => {
 // TUI + envelope de bracketed-paste racy) sin ganar nada. Con single-quote plano
 // un \n crudo dejaba a zsh en continuación `quote>` (colgaba si se perdía un
 // char); ANSI-C mantiene todo en una línea y evita esa trampa.
-const DISPATCH_MODES = ['plan', 'acceptEdits', 'bypassPermissions']
+// Pill Autorun → --permission-mode auto (elección de Lucas: más seguro que
+// bypassPermissions). Valores verificados contra el claude real (choices del
+// flag: acceptEdits/auto/bypassPermissions/manual/dontAsk/plan).
+const DISPATCH_MODES = ['plan', 'acceptEdits', 'auto']
+// Modelo opcional → --model <alias>. '' = sin flag (default del CLI). Aliases
+// verificados contra el claude real (--model opus arrancó [Opus 4.8]); el CLI no
+// valida el alias al parsear, así que acotamos server-side a este whitelist.
+const DISPATCH_MODELS = ['', 'sonnet', 'opus', 'haiku']
 // binario a lanzar; override SOLO para tests (un stub que ecoa su argv, así la
-// matriz de quoting se aserta sin lanzar un claude real — jamás un
-// bypassPermissions de verdad en tests). En producción siempre 'claude'.
+// matriz de quoting se aserta sin lanzar un claude real — jamás un auto/bypass
+// de verdad en tests). En producción siempre 'claude'.
 const CLAUDE_BIN = process.env.DECK_CLAUDE_BIN || 'claude'
 // Quoting ANSI-C ($'...') en vez de single-quote plano: mantiene TODO en una
 // sola línea física (los \n del prompt viajan como la secuencia de dos chars
@@ -1315,7 +1322,7 @@ function shQuote(s: string): string {
   )
 }
 app.post('/api/dispatch', async (c) => {
-  let body: { dir?: unknown; prompt?: unknown; mode?: unknown }
+  let body: { dir?: unknown; prompt?: unknown; mode?: unknown; model?: unknown }
   try {
     body = await c.req.json()
   } catch {
@@ -1324,8 +1331,10 @@ app.post('/api/dispatch', async (c) => {
   const dirName = typeof body.dir === 'string' ? body.dir : ''
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
   const mode = typeof body.mode === 'string' ? body.mode : ''
+  const model = typeof body.model === 'string' ? body.model : ''
 
   if (!DISPATCH_MODES.includes(mode)) throw new HttpError(400, 'modo inválido')
+  if (!DISPATCH_MODELS.includes(model)) throw new HttpError(400, 'modelo inválido')
   if (!prompt) throw new HttpError(400, 'prompt vacío')
   if (prompt.length > 10000) throw new HttpError(400, 'prompt demasiado largo (máx 10000)')
   // dir es un basename de primer nivel: sin separadores ni "." especiales
@@ -1359,7 +1368,9 @@ app.post('/api/dispatch', async (c) => {
 
   // el shell recién nacido tarda un toque en estar listo; luego mandamos la
   // línea literal y, con otro respiro, el Enter (mismo patrón que el prototipo)
-  const line = `${CLAUDE_BIN} ${shQuote(prompt)} --permission-mode ${mode}`
+  // sin modelo elegido NO se pasa --model (queda el default del CLI)
+  const modelFlag = model ? ` --model ${model}` : ''
+  const line = `${CLAUDE_BIN} ${shQuote(prompt)} --permission-mode ${mode}${modelFlag}`
   await new Promise((r) => setTimeout(r, 250))
   try {
     await execFileP('tmux', ['send-keys', '-t', `=${session}:`, '-l', line])
@@ -1369,8 +1380,8 @@ app.post('/api/dispatch', async (c) => {
     const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
     throw new HttpError(500, `sesión ${session} creada, pero el envío del prompt falló: ${msg}`)
   }
-  console.log(`[deck] ${new Date().toISOString()} dispatch ${dirName} (modo ${mode}) -> sesión ${session}`)
-  return c.json({ session, dir, mode })
+  console.log(`[deck] ${new Date().toISOString()} dispatch ${dirName} (modo ${mode}${model ? `, modelo ${model}` : ''}) -> sesión ${session}`)
+  return c.json({ session, dir, mode, model })
 })
 
 // File browser (solo lectura). ?path= relativo a la raíz de la sesión;

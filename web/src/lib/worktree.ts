@@ -48,17 +48,25 @@ export async function fetchWorkspaces(): Promise<string[] | null> {
   }
 }
 
-// modo del agente → valor de --permission-mode
-export type DispatchMode = 'plan' | 'acceptEdits' | 'bypassPermissions'
+// modo del agente → valor de --permission-mode. Autorun = 'auto' (elección de
+// Lucas: más seguro que bypassPermissions).
+export type DispatchMode = 'plan' | 'acceptEdits' | 'auto'
+// modelo → alias de --model; '' = default del CLI (no se pasa la flag)
+export type DispatchModel = '' | 'sonnet' | 'opus' | 'haiku'
 
 export type DispatchResult = { ok: true; session: string } | { ok: false; error: string }
 
-export async function dispatchAgent(dir: string, prompt: string, mode: DispatchMode): Promise<DispatchResult> {
+export async function dispatchAgent(
+  dir: string,
+  prompt: string,
+  mode: DispatchMode,
+  model: DispatchModel,
+): Promise<DispatchResult> {
   try {
     const res = await api('/api/dispatch', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dir, prompt, mode }),
+      body: JSON.stringify({ dir, prompt, mode, model }),
     })
     if (!res.ok) {
       let msg = `HTTP ${res.status}`

@@ -5,6 +5,7 @@ import {
   dispatchAgent,
   fetchWorkspaces,
   type DispatchMode,
+  type DispatchModel,
 } from '../../lib/worktree'
 
 // Sheet "Despachar agente" (tarea 6, design-refs/task06-dispatch-sheet.png):
@@ -17,7 +18,15 @@ import {
 const MODES: Array<{ key: DispatchMode; label: string }> = [
   { key: 'plan', label: 'Plan' },
   { key: 'acceptEdits', label: 'Auto-edits' },
-  { key: 'bypassPermissions', label: 'Autorun' },
+  { key: 'auto', label: 'Autorun' },
+]
+
+// modelo del agente; '' = default del CLI
+const MODELS: Array<{ key: DispatchModel; label: string }> = [
+  { key: '', label: 'Default' },
+  { key: 'sonnet', label: 'Sonnet' },
+  { key: 'opus', label: 'Opus' },
+  { key: 'haiku', label: 'Haiku' },
 ]
 
 export function DispatchSheet() {
@@ -27,9 +36,10 @@ export function DispatchSheet() {
   const [dir, setDir] = useState('')
   const [prompt, setPrompt] = useState('')
   const [mode, setMode] = useState<DispatchMode>('plan')
-  // Autorun (bypassPermissions) exige una confirmación extra antes de lanzar
-  // (decisión de Lucas): el botón se arma con un estado de confirmación que dice
-  // "corre sin pedir permisos" en vez de un alert.
+  const [model, setModel] = useState<DispatchModel>('')
+  // Autorun (--permission-mode auto) exige una confirmación extra antes de
+  // lanzar (decisión de Lucas): el botón se arma con un estado de confirmación
+  // que avisa que auto-aprueba acciones, en vez de un alert.
   const [armed, setArmed] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -65,14 +75,14 @@ export function DispatchSheet() {
       return
     }
     // primer tap en Autorun arma la confirmación en vez de lanzar
-    if (mode === 'bypassPermissions' && !armed) {
+    if (mode === 'auto' && !armed) {
       setArmed(true)
       setError('')
       return
     }
     setBusy(true)
     setError('')
-    const res = await dispatchAgent(dir, prompt.trim(), mode)
+    const res = await dispatchAgent(dir, prompt.trim(), mode, model)
     setBusy(false)
     if (!res.ok) {
       setError(res.error)
@@ -86,11 +96,11 @@ export function DispatchSheet() {
     selectSession(res.session)
   }
 
-  const confirming = mode === 'bypassPermissions' && armed
+  const confirming = mode === 'auto' && armed
   const launchLabel = busy
     ? 'Lanzando…'
     : confirming
-      ? 'Confirmar: corre sin pedir permisos'
+      ? 'Confirmar: Autorun auto-aprueba acciones'
       : '→ Lanzar agente'
 
   return (
@@ -138,6 +148,20 @@ export function DispatchSheet() {
               className={'dp-pill' + (mode === m.key ? ' active' : '')}
               data-mode={m.key}
               onClick={() => pickMode(m.key)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <label className="wt-label">Modelo</label>
+        <div id="dp-models" className="dp-modes">
+          {MODELS.map((m) => (
+            <button
+              key={m.key || 'default'}
+              className={'dp-pill' + (model === m.key ? ' active' : '')}
+              data-model={m.key || 'default'}
+              onClick={() => setModel(m.key)}
             >
               {m.label}
             </button>

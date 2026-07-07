@@ -1315,6 +1315,8 @@ const dispRun = await page.evaluate(async () => {
   out.dirOptions = [...document.querySelectorAll('#dp-dir option')].map((o) => o.value);
   out.modePills = [...document.querySelectorAll('#dp-modes .dp-pill')].map((e) => e.textContent);
   out.planActiveByDefault = document.querySelector('#dp-modes .dp-pill.active')?.textContent === 'Plan';
+  out.modelPills = [...document.querySelectorAll('#dp-models .dp-pill')].map((e) => e.textContent);
+  out.modelDefaultActive = document.querySelector('#dp-models .dp-pill.active')?.textContent === 'Default';
 
   // tipear un prompt (textarea controlado de React: setter nativo + input)
   const ta = document.querySelector('#dp-prompt');
@@ -1323,21 +1325,27 @@ const dispRun = await page.evaluate(async () => {
   ta.dispatchEvent(new Event('input', { bubbles: true }));
   await frame();
 
-  // pills togglean el activo
+  // pills de modo togglean el activo
   const pill = (label) => [...document.querySelectorAll('#dp-modes .dp-pill')].find((e) => e.textContent === label);
   pill('Auto-edits').click();
   await frame();
   out.autoEditsActive = document.querySelector('#dp-modes .dp-pill.active').textContent === 'Auto-edits';
+
+  // elegir un modelo (pill Opus)
+  const modelPill = (label) => [...document.querySelectorAll('#dp-models .dp-pill')].find((e) => e.textContent === label);
+  modelPill('Opus').click();
+  await frame();
+  out.opusActive = document.querySelector('#dp-models .dp-pill.active').textContent === 'Opus';
 
   // Autorun: primer tap arma la confirmación SIN postear
   pill('Autorun').click();
   await frame();
   document.querySelector('#dp-submit').click();
   await frame();
-  out.armedLabel = document.querySelector('#dp-submit').textContent.includes('sin pedir permisos');
+  out.armedLabel = document.querySelector('#dp-submit').textContent.includes('auto-aprueba');
   out.noPostOnArm = posted.length === 0;
 
-  // segundo tap confirma y postea con el body correcto (mode bypassPermissions)
+  // segundo tap confirma y postea con el body correcto (mode auto, model opus)
   document.querySelector('#dp-submit').click();
   await sleep(120);
   await frame();
@@ -1354,13 +1362,15 @@ ok('dispatch: la entrada abre el sheet con el dropdown de directorios',
   dispRun.sheetOpen && JSON.stringify(dispRun.dirOptions) === JSON.stringify(['claude-deck', 'otro-proyecto']));
 ok('dispatch: pills Plan/Auto-edits/Autorun, Plan activo por default',
   JSON.stringify(dispRun.modePills) === JSON.stringify(['Plan', 'Auto-edits', 'Autorun']) && dispRun.planActiveByDefault);
-ok('dispatch: las pills togglean el modo activo', dispRun.autoEditsActive);
-ok('dispatch: Autorun arma confirmación "corre sin pedir permisos" sin postear',
+ok('dispatch: pills de modelo Default/Sonnet/Opus/Haiku, Default activo por default',
+  JSON.stringify(dispRun.modelPills) === JSON.stringify(['Default', 'Sonnet', 'Opus', 'Haiku']) && dispRun.modelDefaultActive);
+ok('dispatch: las pills togglean modo y modelo activos', dispRun.autoEditsActive && dispRun.opusActive);
+ok('dispatch: Autorun arma confirmación "auto-aprueba" sin postear',
   dispRun.armedLabel && dispRun.noPostOnArm);
-ok('dispatch: el segundo tap confirma y postea el body correcto',
+ok('dispatch: el segundo tap confirma y postea el body correcto (mode auto + model opus)',
   dispRun.postedBody && dispRun.postedBody.dir === 'claude-deck'
   && dispRun.postedBody.prompt === 'arreglá los tests'
-  && dispRun.postedBody.mode === 'bypassPermissions' && dispRun.sheetClosedAfterPost);
+  && dispRun.postedBody.mode === 'auto' && dispRun.postedBody.model === 'opus' && dispRun.sheetClosedAfterPost);
 
 await browser.close();
 console.log(results.join('\n'));
