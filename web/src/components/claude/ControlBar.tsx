@@ -1,11 +1,12 @@
 import { useRef } from 'react'
-import { KEYS, MODELS, EFFORTS } from '../../lib/keys'
+import { KEYS, MODELS, EFFORTS, QUICKKEY_CATALOG } from '../../lib/keys'
 import { useTap } from '../../hooks/useTap'
 import { useDeckStore } from '../../store'
 import { cycleMode, openModelMenu, openAttachMenu } from '../../lib/switch'
 import { openSnippetsMenu } from '../../lib/snippets'
 import { openComposer } from '../../lib/composer'
 import { openScrollback } from '../../lib/scrollback'
+import { openQuickkeysSheet } from '../../lib/quickkeys'
 import { attachImage, sendPendingImage, hideImgChip } from '../../lib/image'
 import { SwitchMenu } from './SwitchMenu'
 
@@ -16,9 +17,11 @@ import { SwitchMenu } from './SwitchMenu'
 // foco del teclado virtual — §5.4, NO reemplazar por onClick). El scrollback
 // sigue inerte hasta la Fase 4.
 
-// Una quickkey: manda la secuencia cruda al terminal (app.js:301-339).
+// Una quickkey: manda la secuencia cruda al terminal (app.js:301-339). El
+// long-press (tarea 11b) abre el editor de la barra en vez de mandar la tecla
+// (useTap suprime el tap del release — mismo gesto que el + → menú CREAR).
 function QuickKey({ k, title, children }: { k: string; title?: string; children: React.ReactNode }) {
-  const tap = useTap(() => window.claudeConn?.sendKeys(KEYS[k]))
+  const tap = useTap(() => window.claudeConn?.sendKeys(KEYS[k]), openQuickkeysSheet)
   return (
     <button data-k={k} title={title} {...tap}>
       {children}
@@ -30,6 +33,7 @@ export function ControlBar() {
   const imgChip = useDeckStore((s) => s.imgChip)
   const sw = useDeckStore((s) => s.switchState)
   const snippetsActive = useDeckStore((s) => s.switchMenu === 'snippets')
+  const quickkeys = useDeckStore((s) => s.quickkeys)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const modeTap = useTap(() => cycleMode())
@@ -114,14 +118,18 @@ export function ControlBar() {
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5.5h16M4 9.5h16M4 13.5h10" /><path d="M17 21v-6M14 17.8l3 3 3-3" /></svg>
         </button>
         <span className="ctl-div" />
-        {/* orden: nl primero, slash segundo (app.js:249) */}
-        <QuickKey k="nl" title="Salto de línea (sin enviar)">{'\\n'}</QuickKey>
-        <QuickKey k="slash">/</QuickKey>
-        <QuickKey k="esc">esc</QuickKey>
-        <QuickKey k="up">&#8593;</QuickKey>
-        <QuickKey k="down">&#8595;</QuickKey>
-        <QuickKey k="tab">tab</QuickKey>
-        <QuickKey k="ctrlc">ctrl+c</QuickKey>
+        {/* tarea 11b: la fila sale del store (deck-quickkeys en localStorage);
+            el default conserva el orden histórico (nl primero — app.js:249).
+            long-press en cualquier tecla abre el editor. */}
+        {quickkeys.map((id) => {
+          const cat = QUICKKEY_CATALOG.find((c) => c.id === id)
+          if (!cat) return null
+          return (
+            <QuickKey key={id} k={id} title={cat.title}>
+              {cat.label}
+            </QuickKey>
+          )
+        })}
       </div>
     </div>
   )

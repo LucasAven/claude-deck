@@ -1704,6 +1704,62 @@ ok('push-banner: suscripto en este dispositivo → oculto', pushBannerRun.hidden
 ok('push-banner: ✕ descarta el count actual', pushBannerRun.dismissed);
 ok('push-banner: más perdidas tras el descarte → reaparece', pushBannerRun.reshownOnNewMisses);
 
+// 24. quickkeys configurables (tarea 11b): la barra se renderiza desde
+// localStorage['deck-quickkeys'] (default = orden histórico, que la sección 5
+// ya asserta con "nl" primero); long-press en una tecla abre el editor
+// #quickkeys-sheet. sendKeys espiado: nada llega a la sesión deck real.
+// localStorage limpiado al final (la config default no deja rastro).
+const qkRun = await page.evaluate(async () => {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const rowKeys = () => [...document.querySelectorAll('.quickkeys[data-term="claude"] button[data-k]')].map((b) => b.dataset.k);
+  const sent = [];
+  const realSend = claudeConn.sendKeys;
+  claudeConn.sendKeys = (s) => sent.push(s);
+  const down = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  const up = (el) => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  const tap = (el) => { down(el); up(el); };
+  const sheet = document.querySelector('#quickkeys-sheet');
+  const out = { present: !!sheet, hiddenDefault: sheet.classList.contains('hidden') };
+
+  // long-press abre el editor sin mandar la tecla (el release no tapea)
+  const esc = document.querySelector('.quickkeys [data-k="esc"]');
+  down(esc); await wait(620); up(esc); await frame();
+  out.longPressOpens = !sheet.classList.contains('hidden') && sent.length === 0;
+
+  // ✕ saca ctrl+c de la fila y de localStorage; + agrega ctrl+r al final;
+  // ◀ lo mueve un lugar antes — cada edición persiste al toque
+  tap(document.querySelector('#qk-current [data-qk="ctrlc"] .qk-del')); await frame();
+  out.removed = !rowKeys().includes('ctrlc') && !JSON.parse(localStorage.getItem('deck-quickkeys')).includes('ctrlc');
+  tap(document.querySelector('#qk-catalog [data-qk="ctrlr"]')); await frame();
+  out.added = rowKeys().at(-1) === 'ctrlr';
+  tap(document.querySelector('#qk-current [data-qk="ctrlr"] .qk-move')); await frame();
+  out.moved = rowKeys().at(-2) === 'ctrlr'
+    && JSON.parse(localStorage.getItem('deck-quickkeys')).at(-2) === 'ctrlr';
+
+  // el primer chip no ofrece ◀ (no hay "antes"); backdrop cierra
+  out.firstNoMove = !document.querySelector('#qk-current [data-qk="nl"] .qk-move');
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  out.backdropCloses = sheet.classList.contains('hidden');
+
+  // restaurar por defecto desde el editor → orden histórico de vuelta
+  down(esc); await wait(620); up(esc); await frame();
+  tap(document.querySelector('#qk-reset')); await frame();
+  out.reset = rowKeys().join(',') === 'nl,slash,esc,up,down,tab,ctrlc';
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+
+  claudeConn.sendKeys = realSend;
+  localStorage.removeItem('deck-quickkeys'); // dejar limpio
+  return out;
+});
+ok('quickkeys: sheet presente y oculto por defecto', qkRun.present && qkRun.hiddenDefault);
+ok('quickkeys: long-press abre el editor sin mandar la tecla', qkRun.longPressOpens);
+ok('quickkeys: ✕ saca la tecla (fila + localStorage)', qkRun.removed);
+ok('quickkeys: el catálogo agrega al final', qkRun.added);
+ok('quickkeys: ◀ mueve un lugar antes y persiste', qkRun.moved);
+ok('quickkeys: el primer chip no tiene ◀ y el backdrop cierra', qkRun.firstNoMove && qkRun.backdropCloses);
+ok('quickkeys: restaurar por defecto vuelve al orden histórico', qkRun.reset);
+
 await browser.close();
 console.log(results.join('\n'));
 process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);

@@ -195,6 +195,11 @@ body {
   font-size: 13px;
   cursor: pointer;
   touch-action: manipulation;
+  /* el long-press abre el editor (tarea 11b): sin esto iOS selecciona el label
+     del botón como texto durante el hold — mismo fix que .chip-add y los chips */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .quickkeys button:active {
   background: var(--panel-2);
@@ -997,6 +1002,62 @@ body.composer-open .tabbar { display: none; }
 }
 .host-val.warn { color: var(--accent); }
 .host-val.good { color: #8fbe6b; } /* mismo verde que chip-dot-working */
+/* ---------- editor de quickkeys (tarea 11b): reusa host-sheet ---------- */
+.qk-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 14px 0 8px;
+}
+.qk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.qk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.qk-act {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.qk-del { font-size: 12px; }
+.qk-chip.qk-add {
+  border-style: dashed;
+  color: var(--muted);
+  cursor: pointer;
+}
+.qk-chip.qk-add:active { color: var(--accent); border-color: var(--accent); }
+.qk-empty { font-size: 12px; color: var(--muted); padding: 6px 0; }
+.qk-reset {
+  display: block;
+  margin: 16px 0 2px;
+  border: 1px solid var(--border);
+  background: none;
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.qk-reset:active { color: var(--accent); border-color: var(--accent); }
+
 .host-alert {
   display: flex;
   align-items: center;

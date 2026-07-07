@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api } from './lib/api'
-import { SESSION_NAME_RE } from './lib/keys'
+import { SESSION_NAME_RE, loadQuickkeys } from './lib/keys'
 import { closeSwitchMenu, loadSwitch } from './lib/switch'
 import { closeComposer } from './lib/composer'
 import { invalidateTree, refreshTree } from './lib/files'
@@ -161,6 +161,9 @@ interface DeckStore {
   createMenuOpen: boolean
   worktreeSheetOpen: boolean
   dispatchSheetOpen: boolean
+  // quickkeys configurables (tarea 11b): orden de la barra + sheet de edición
+  quickkeys: string[]
+  quickkeysSheetOpen: boolean
   switchMenu: SwitchMenuKind
   switchState: SwitchState
   imgChip: ImgChip | null
@@ -258,6 +261,8 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   createMenuOpen: false,
   worktreeSheetOpen: false,
   dispatchSheetOpen: false,
+  quickkeys: loadQuickkeys(),
+  quickkeysSheetOpen: false,
   switchMenu: null,
   switchState: {},
   imgChip: null,
