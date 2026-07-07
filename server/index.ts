@@ -974,6 +974,21 @@ app.delete('/api/tmux/sessions/:name', async (c) => {
   return c.json({ ok: true, killed })
 })
 
+// Al renombrar hay que migrar también los archivos de estado que los hooks
+// escriben keyados por nombre de sesión (semáforo, statusline, transcript):
+// si quedan con el nombre viejo, transcriptForSession() no encuentra nada y
+// el scrollback cae al fallback capture-pane hasta el próximo evento de hook.
+// Best-effort: un fallo acá no debe abortar un rename que tmux ya aplicó.
+function renameStateFiles(oldName: string, newName: string) {
+  for (const suffix of ['', '.transcript', '.status.json']) {
+    try {
+      fs.renameSync(path.join(STATE_DIR, `${oldName}${suffix}`), path.join(STATE_DIR, `${newName}${suffix}`))
+    } catch {
+      /* el archivo puede no existir (sesión sin hooks) */
+    }
+  }
+}
+
 // Renombra la sesión y su shell acompañante (la convención <name>-shell debe
 // sobrevivir al rename). Los attaches vivos NO se cortan: tmux nunca desconecta
 // clientes al renombrar, así que el pty sigue andando; el frontend solo tiene
@@ -999,6 +1014,7 @@ app.patch('/api/tmux/sessions/:name', async (c) => {
   }
   const renamed: string[] = []
   await tmuxRenameSession(name, newName)
+  renameStateFiles(name, newName)
   renamed.push(newName)
   if (await tmuxHasSession(`${name}-shell`)) {
     await tmuxRenameSession(`${name}-shell`, `${newName}-shell`)
