@@ -103,14 +103,19 @@ Instala el server como **LaunchAgent** (`~/Library/LaunchAgents/com.claude-deck.
 >
 > Lo mismo aplica al **commit si firmás con GPG** (`commit.gpgsign=true`): sin
 > tty, el pinentry de terminal no puede pedirte la passphrase y el commit falla
-> con `gpg failed to sign the data`. Solución: `brew install pinentry-mac`,
-> apuntalo en `~/.gnupg/gpg-agent.conf` (`pinentry-program
-> /opt/homebrew/bin/pinentry-mac`), reiniciá el agente (`gpgconf --kill
-> gpg-agent`) y en la primera firma marcá "Save in Keychain" — de ahí en más
-> firma headless. Y si tenés más de un GnuPG instalado (p. ej. GPG Suite +
-> homebrew), fijá el binario que tiene tu clave: `git config --global
-> gpg.program <ruta>` — el PATH del LaunchAgent puede resolver al otro y dar
-> `No secret key`.
+> con `gpg failed to sign the data`. Solución: un pinentry gráfico con la
+> passphrase en Keychain — si usás GPG Suite ya lo tenés
+> (`/usr/local/MacGPG2/libexec/pinentry-mac.app/Contents/MacOS/pinentry-mac`);
+> si no, `brew install pinentry-mac`. Apuntalo en `~/.gnupg/gpg-agent.conf`
+> (`pinentry-program <ruta>`), reiniciá el agente (`gpgconf --kill gpg-agent`)
+> y en la primera firma marcá "Save in Keychain" — de ahí en más firma
+> headless. Dos trampas: (1) usá el MISMO pinentry que guardó la passphrase —
+> un binario distinto (p. ej. el de homebrew leyendo una entrada creada por el
+> de GPG Suite) dispara el prompt de macOS pidiendo tu contraseña de login en
+> cada firma, salvo que toques "Permitir siempre"; (2) si tenés más de un GnuPG
+> instalado (GPG Suite + homebrew), fijá el binario que tiene tu clave:
+> `git config --global gpg.program <ruta>` — el PATH del LaunchAgent puede
+> resolver al otro y dar `No secret key`.
 
 **Cada vez que te vas** (esto sí es el "un comando"):
 
