@@ -97,14 +97,6 @@ export function sendComposer() {
   closeComposer()
 }
 
-// inserta un \n literal en el cursor del textarea — NO KEYS.nl: \x1b\r es un
-// concepto de terminal, acá es un textarea nativo
-export function composerNewline() {
-  if (!ta) return
-  ta.setRangeText('\n', ta.selectionStart, ta.selectionEnd, 'end')
-  scheduleDraftSave() // setRangeText no dispara 'input'
-}
-
 // inserta texto (snippet) en el cursor del textarea, sin enviar (app.js:834-839)
 export function insertIntoComposer(text: string) {
   if (!ta) return
