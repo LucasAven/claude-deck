@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { html as diff2htmlHtml } from 'diff2html'
 import { useDeckStore, type GitFile } from '../../store'
-import { stageFile, fetchDiff } from '../../lib/git'
+import { stageFile, fetchDiff, commitChanges, pushChanges } from '../../lib/git'
 
 // Pestaña Cambios (index.html:136-148, app.js:1633-1785). El header + la lista
 // salen de `git` (refreshGit vive en el store); el diff es estado local (esta
@@ -36,6 +36,77 @@ function FileRow({ f, onOpen }: { f: GitFile; onOpen: (f: GitFile) => void }) {
       >
         {f.staged ? '−' : '+'}
       </button>
+    </div>
+  )
+}
+
+// Formulario de commit + push (tarea 12). Se muestra solo con archivos staged
+// (deriva de `git`, sin fetch extra). Endpoints REALES: rompe a propósito el
+// "toda escritura pasa por Claude" (ver README Seguridad). Controles con
+// onClick plano (patrón local de la vista, no useTap). El mensaje lo tipea
+// Lucas; input controlado simple (no es el composer: sin baile de foco iOS).
+function CommitForm({ stagedCount }: { stagedCount: number }) {
+  const refreshGit = useDeckStore((s) => s.refreshGit)
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const run = async (push: boolean) => {
+    const message = msg.trim()
+    if (!message || busy) return
+    setBusy(true)
+    let hash: string
+    try {
+      hash = await commitChanges(message)
+    } catch (e) {
+      if (String((e as Error).message) !== '401') window.alert(`Commit falló: ${(e as Error).message}`)
+      setBusy(false)
+      return
+    }
+    if (push) {
+      try {
+        await pushChanges()
+      } catch (e) {
+        if (String((e as Error).message) !== '401') {
+          window.alert(`Commit hecho (${hash}) pero el push falló: ${(e as Error).message}`)
+        }
+        setMsg('')
+        setBusy(false)
+        refreshGit()
+        return
+      }
+    }
+    setMsg('')
+    setBusy(false)
+    refreshGit()
+  }
+
+  return (
+    <div id="commit-form" className="commit-form">
+      <label className="commit-label" htmlFor="commit-msg">
+        Mensaje del commit · {stagedCount} staged
+      </label>
+      <input
+        id="commit-msg"
+        className="commit-input"
+        type="text"
+        value={msg}
+        placeholder="Mensaje del commit"
+        disabled={busy}
+        onChange={(e) => setMsg(e.target.value)}
+      />
+      <div className="commit-actions">
+        <button id="btn-commit" className="commit-btn" disabled={busy || !msg.trim()} onClick={() => run(false)}>
+          Commit
+        </button>
+        <button
+          id="btn-commit-push"
+          className="commit-btn primary"
+          disabled={busy || !msg.trim()}
+          onClick={() => run(true)}
+        >
+          Commit + Push ↑
+        </button>
+      </div>
     </div>
   )
 }
@@ -142,6 +213,8 @@ export function ChangesView() {
           )}
         </div>
       )}
+
+      {!diff && !!staged.length && <CommitForm stagedCount={staged.length} />}
     </>
   )
 }

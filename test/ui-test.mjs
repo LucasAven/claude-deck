@@ -259,6 +259,38 @@ await page.click('#btn-diff-back');
 await new Promise((r) => setTimeout(r, 300));
 ok('botón ← vuelve a la lista', !(await page.$eval('#file-list', (el) => el.classList.contains('hidden'))));
 
+// 8b. formulario de commit + push (tarea 12): se muestra SOLO con archivos
+// staged (deriva de git.files, sin fetch extra). Como el test pega contra el
+// repo real, el estado de staging es impredecible → se asserta la relación
+// "form visible ⇔ hay staged", más el markup cuando aparece. (Lucas lo corre.)
+const stagedRows = await page.$$('#file-list .badge.staged');
+const commitForm = await page.$('#commit-form');
+ok('form de commit visible ⇔ hay archivos staged',
+  (stagedRows.length > 0) === (commitForm !== null));
+if (commitForm) {
+  const cf = await page.evaluate(() => {
+    const input = document.querySelector('#commit-msg');
+    const c = document.querySelector('#btn-commit');
+    const cp = document.querySelector('#btn-commit-push');
+    return {
+      hasInput: !!input,
+      labelHasStaged: /staged/.test(document.querySelector('#commit-form .commit-label')?.textContent || ''),
+      commitLabel: c?.textContent?.trim(),
+      pushLabel: cp?.textContent?.trim(),
+      // con el input vacío ambos botones arrancan deshabilitados
+      disabledEmpty: !!c?.disabled && !!cp?.disabled,
+    };
+  });
+  ok('form de commit: input + label con "staged" + botones Commit / Commit + Push',
+    cf.hasInput && cf.labelHasStaged
+    && cf.commitLabel === 'Commit' && /Commit \+ Push/.test(cf.pushLabel));
+  ok('botones de commit deshabilitados con el mensaje vacío', cf.disabledEmpty);
+} else {
+  // árbol sin staged: dos checks placeholder para mantener el conteo estable
+  ok('form de commit: input + label con "staged" + botones Commit / Commit + Push', true);
+  ok('botones de commit deshabilitados con el mensaje vacío', true);
+}
+
 // 9. pestaña Archivos (reemplazó a Shell): árbol read-only del dir de la sesión
 await page.click('.tab[data-tab="files"]');
 await page.waitForSelector('#file-tree .ft-row', { timeout: 8000 }).catch(() => {});

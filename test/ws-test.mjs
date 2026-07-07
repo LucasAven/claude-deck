@@ -397,6 +397,67 @@ try {
   fs.rmSync(WT_REPO, { recursive: true, force: true });
 }
 
+// 9i. POST /api/git/commit + /api/git/push (tarea 12): subcomandos fijos, sin
+// flags del cliente. Repo scratch DENTRO de WORKSPACES_ROOT con remote bare
+// local para el push; sesión tmux deck-ci cd'ada ahí. El mensaje con
+// quotes/newline/$() se asserta VERBATIM en git log (argv, no shell).
+const CI_REPO = `${WROOT}/deck-ci-ws-test`;
+const CI_BARE = `${WROOT}/deck-ci-ws-test-bare.git`;
+const CI_NOREMOTE = `${WROOT}/deck-ci-ws-test-noremote`;
+const post = (path, body, session) => fetch(`${HTTP}${path}?session=${session}`, {
+  method: 'POST',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+});
+try {
+  for (const p of [CI_REPO, CI_BARE, CI_NOREMOTE]) fs.rmSync(p, { recursive: true, force: true });
+  execFileSync('git', ['init', '-q', '-b', 'main', CI_REPO]);
+  execFileSync('git', ['-C', CI_REPO, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+  execFileSync('git', ['init', '-q', '--bare', CI_BARE]);
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-ci', '-c', CI_REPO]);
+
+  // commit con archivo staged → 200 con hash nuevo
+  fs.writeFileSync(`${CI_REPO}/a.txt`, 'hola');
+  execFileSync('git', ['-C', CI_REPO, 'add', 'a.txt']);
+  const cm = await post('/api/git/commit', { message: 'add a.txt' }, 'deck-ci');
+  const cmJson = await cm.json();
+  ok('commit staged → 200 con hash', cm.status === 200 && /^[0-9a-f]{7,40}$/.test(cmJson.hash || ''));
+
+  // nada staged → 400 con el mensaje de git
+  ok('commit sin nada staged → 400', (await post('/api/git/commit', { message: 'vacio' }, 'deck-ci')).status === 400);
+  // mensaje vacío / demasiado largo → 400
+  ok('commit mensaje vacío → 400', (await post('/api/git/commit', { message: '   ' }, 'deck-ci')).status === 400);
+  ok('commit mensaje >2000 → 400', (await post('/api/git/commit', { message: 'x'.repeat(2001) }, 'deck-ci')).status === 400);
+
+  // quotes/newline/$() lands VERBATIM (argv, no shell)
+  fs.writeFileSync(`${CI_REPO}/b.txt`, 'chau');
+  execFileSync('git', ['-C', CI_REPO, 'add', 'b.txt']);
+  const weird = 'fix: "quote" y $(whoami)';
+  await post('/api/git/commit', { message: weird }, 'deck-ci');
+  const subj = execFileSync('git', ['-C', CI_REPO, 'log', '-1', '--format=%s']).toString().trim();
+  ok('mensaje con quotes/$() verbatim en git log', subj === weird);
+
+  // push sin upstream → -u origin main; el bare recibe el commit
+  execFileSync('git', ['-C', CI_REPO, 'remote', 'add', 'origin', CI_BARE]);
+  const ps = await post('/api/git/push', undefined, 'deck-ci');
+  let upstream = '';
+  try { upstream = execFileSync('git', ['-C', CI_REPO, 'rev-parse', '--abbrev-ref', 'main@{u}']).toString().trim(); } catch {}
+  const bareHas = execFileSync('git', ['-C', CI_BARE, 'rev-parse', 'refs/heads/main']).toString().trim();
+  ok('push sin upstream → 200, -u origin main, bare actualizado',
+    ps.status === 200 && upstream === 'origin/main' && bareHas.length === 40);
+
+  // push sin remote → error surfaceado (400)
+  execFileSync('git', ['init', '-q', '-b', 'main', CI_NOREMOTE]);
+  execFileSync('git', ['-C', CI_NOREMOTE, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-ci2', '-c', CI_NOREMOTE]);
+  ok('push sin remote → 400 con el error de git', (await post('/api/git/push', undefined, 'deck-ci2')).status === 400);
+} finally {
+  for (const s of ['deck-ci', 'deck-ci2']) {
+    try { execFileSync('tmux', ['kill-session', '-t', `=${s}`], { stdio: 'ignore' }); } catch {}
+  }
+  for (const p of [CI_REPO, CI_BARE, CI_NOREMOTE]) fs.rmSync(p, { recursive: true, force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);

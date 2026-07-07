@@ -486,6 +486,46 @@ async function gitStage(dir: string, rel: string, action: 'stage' | 'unstage'): 
   }
 }
 
+// Commit + push desde Cambios (tarea 12): subcomandos FIJOS, sin flags del
+// cliente jamás. El mensaje viaja como UN solo argv (sin shell, sin
+// interpolación); nunca --amend, -a ni nada más. Identidad = la del repo tal
+// cual (no seteamos user/email/trailer: los commits parecen de Lucas).
+async function gitCommit(dir: string, message: string): Promise<string> {
+  try {
+    await execFileP('git', ['-C', dir, 'commit', '-m', message])
+  } catch (e: any) {
+    const msg = String(e?.stderr || e?.stdout || e?.message || e).split('\n').filter(Boolean)[0] || 'git commit falló'
+    throw new HttpError(400, msg)
+  }
+  const { stdout } = await execFileP('git', ['-C', dir, 'rev-parse', '--short', 'HEAD'])
+  return stdout.trim()
+}
+
+// Push sin flags del cliente; --force/-f NO existen acá. Si la rama no tiene
+// upstream configurado, degrada a `git push -u origin <rama>` (decisión de
+// Lucas: -u es el ÚNICO flag extra permitido). Timeout holgado: es red.
+async function gitPush(dir: string): Promise<void> {
+  let hasUpstream = true
+  try {
+    await execFileP('git', ['-C', dir, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
+  } catch {
+    hasUpstream = false
+  }
+  let args = ['-C', dir, 'push']
+  if (!hasUpstream) {
+    const branch = (await execFileP('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
+    // detached / sin commits → push a secas: git tira el error correcto y sube al cliente
+    if (branch && branch !== 'HEAD') args = ['-C', dir, 'push', '-u', 'origin', branch]
+  }
+  try {
+    await execFileP('git', args, { timeout: 60000 })
+  } catch (e: any) {
+    // errores de auth son verbosos: hasta ~500 chars, multilínea OK
+    const raw = String(e?.stderr || e?.stdout || e?.message || e).trim()
+    throw new HttpError(400, raw.slice(0, 500) || 'git push falló')
+  }
+}
+
 async function gitLog(dir: string, n: number) {
   try {
     const { stdout } = await execFileP('git', ['-C', dir, 'log', '--no-color', '--oneline', '-n', String(n)])
@@ -837,6 +877,30 @@ app.post('/api/git/stage', async (c) => {
     throw new HttpError(400, "action debe ser 'stage' o 'unstage'")
   }
   await gitStage(dir, rel, action)
+  return c.json({ ok: true })
+})
+
+// Commit (tarea 12). Body JSON: { message }. Subcomando fijo, mensaje como
+// argv único; devuelve el hash corto nuevo para que la UI confirme.
+app.post('/api/git/commit', async (c) => {
+  const dir = await resolveGitDir(c.req.query('session'))
+  let body: { message?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const message = typeof body.message === 'string' ? body.message.trim() : ''
+  if (!message) throw new HttpError(400, 'el mensaje del commit no puede estar vacío')
+  if (message.length > 2000) throw new HttpError(400, 'el mensaje del commit es demasiado largo (máx 2000)')
+  const hash = await gitCommit(dir, message)
+  return c.json({ hash })
+})
+
+// Push (tarea 12). Sin body, sin flags del cliente. --force nunca existe.
+app.post('/api/git/push', async (c) => {
+  const dir = await resolveGitDir(c.req.query('session'))
+  await gitPush(dir)
   return c.json({ ok: true })
 })
 

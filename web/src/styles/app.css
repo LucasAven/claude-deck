@@ -1075,6 +1075,54 @@ body.composer-open .tabbar { display: none; }
   color: var(--muted);
 }
 
+/* ---------- commit + push (tarea 12) ---------- */
+.commit-form {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+.commit-label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.commit-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  caret-color: var(--accent);
+}
+.commit-input:focus { outline: none; border-color: var(--accent); }
+.commit-input:disabled { opacity: 0.5; }
+.commit-actions { display: flex; gap: 10px; }
+.commit-btn {
+  flex: 1;
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  cursor: pointer;
+}
+.commit-btn:active { background: var(--panel-2); }
+.commit-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+.commit-btn:disabled { opacity: 0.4; }
+
 /* ---------- pestaña Archivos (árbol + vista de archivo) ---------- */
 #files-title {
   color: var(--accent);

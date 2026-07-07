@@ -26,6 +26,32 @@ export async function stageFile(f: GitFile): Promise<void> {
   useDeckStore.getState().refreshGit()
 }
 
+// Commit + push (tarea 12): endpoints reales de escritura sobre el repo. El
+// mensaje lo tipea Lucas (la app es un caño tonto: no genera mensajes). Ambos
+// tiran con el mensaje del server para que el caller reporte qué paso falló.
+export async function commitChanges(message: string): Promise<string> {
+  const q = sessionQuery(useDeckStore.getState().session)
+  const res = await api(`/api/git/commit?${q}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => null)
+    throw new Error(err?.error || `HTTP ${res.status}`)
+  }
+  return ((await res.json()) as { hash: string }).hash
+}
+
+export async function pushChanges(): Promise<void> {
+  const q = sessionQuery(useDeckStore.getState().session)
+  const res = await api(`/api/git/push?${q}`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => null)
+    throw new Error(err?.error || `HTTP ${res.status}`)
+  }
+}
+
 export async function fetchDiff(file: GitFile): Promise<string> {
   const q = `path=${encodeURIComponent(file.path)}&staged=${file.staged ? 1 : 0}&${sessionQuery(useDeckStore.getState().session)}`
   const res = await api(`/api/git/diff?${q}`)
