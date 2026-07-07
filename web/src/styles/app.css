@@ -583,6 +583,49 @@ body.composer-open .tabbar { display: none; }
 .wt-submit:active { background: var(--accent-dim); }
 .wt-submit:disabled { opacity: 0.6; }
 
+/* ---------- despachar agente (tarea 6) ---------- */
+/* reusa host-sheet + wt-label/wt-select/wt-error/wt-submit; acá el textarea,
+   las pills de modo y el estado de confirmación de Autorun. */
+.dp-textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+}
+.dp-textarea:focus { outline: none; border-color: var(--accent); }
+.dp-modes {
+  display: flex;
+  gap: 8px;
+}
+.dp-pill {
+  flex: 1;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.dp-pill.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* Autorun armado: el botón grita que corre sin permisos */
+.wt-submit.dp-confirm {
+  background: var(--accent-dim);
+  font-size: 13px;
+}
+
 /* ---------- paleta de snippets (tarea 10) ---------- */
 /* clases sin scope a .switch-menu: la misma paleta se pinta en el popover y
    en el panel del composer (#composer-snips) */

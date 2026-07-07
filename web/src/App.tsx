@@ -10,6 +10,7 @@ import { ChangesView } from './components/changes/ChangesView'
 import { FilesView } from './components/files/FilesView'
 import { HostSheet } from './components/claude/HostSheet'
 import { WorktreeSheet } from './components/claude/WorktreeSheet'
+import { DispatchSheet } from './components/claude/DispatchSheet'
 import { closeSwitchMenu } from './lib/switch'
 import { closeCreateMenu } from './lib/worktree'
 import { refreshHost } from './lib/host'
@@ -102,6 +103,7 @@ export function App() {
         {/* overlays globales siempre montados: host-sheet (Fase 4), worktree-sheet (tarea 5), snip-tip */}
         <HostSheet />
         <WorktreeSheet />
+        <DispatchSheet />
         <SnipTip />
 
         <TabBar />

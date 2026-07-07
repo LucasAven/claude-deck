@@ -1072,6 +1072,101 @@ await page.waitForSelector('#term-claude .xterm', { timeout: 10000 });
 await new Promise((r) => setTimeout(r, 2000));
 ok('pinch: sin clave → default 14 al boot', (await page.evaluate(() => window.claudeConn?.term?.options?.fontSize)) === 14);
 
+// 20. despachar con prompt (tarea 6): tercera entrada del menú CREAR abre el
+// sheet "Despachar agente". /api/workspaces mockeado; el POST a /api/dispatch se
+// intercepta (nunca se despacha un claude real) y se aserta su body. Se cubre la
+// confirmación extra de Autorun (bypassPermissions): el primer tap arma, no postea.
+const dispRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const posted = [];
+  window.fetch = (url, opts) => {
+    const u = String(url);
+    if (u.includes('/api/workspaces')) {
+      return Promise.resolve(new Response(JSON.stringify({
+        root: '/w', dirs: ['claude-deck', 'otro-proyecto'],
+      }), { status: 200 }));
+    }
+    if (u.includes('/api/dispatch')) {
+      posted.push(JSON.parse(opts.body));
+      return Promise.resolve(new Response(JSON.stringify({ session: 'claude-deck', dir: '/w/claude-deck', mode: 'plan' }), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const menu = document.querySelector('#create-menu');
+  const sheet = document.querySelector('#dispatch-sheet');
+  const btn = document.querySelector('#btn-new-session');
+  const out = {};
+
+  out.hiddenByDefault = sheet.classList.contains('hidden');
+
+  // long-press abre el menú (sin crear sesión: no tapeamos corto)
+  const r = btn.getBoundingClientRect();
+  const xy = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+  btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, ...xy }));
+  await sleep(620);
+  btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, ...xy }));
+  await frame();
+  out.items = [...menu.querySelectorAll('.mi span')].map((e) => e.textContent);
+
+  // "Despachar con prompt…" abre el sheet
+  const dBtn = [...menu.querySelectorAll('.mi')].find((e) => e.textContent.includes('Despachar'));
+  dBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  dBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  await sleep(150);
+  await frame();
+  out.sheetOpen = !sheet.classList.contains('hidden');
+  out.dirOptions = [...document.querySelectorAll('#dp-dir option')].map((o) => o.value);
+  out.modePills = [...document.querySelectorAll('#dp-modes .dp-pill')].map((e) => e.textContent);
+  out.planActiveByDefault = document.querySelector('#dp-modes .dp-pill.active')?.textContent === 'Plan';
+
+  // tipear un prompt (textarea controlado de React: setter nativo + input)
+  const ta = document.querySelector('#dp-prompt');
+  const setVal = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+  setVal.call(ta, 'arreglá los tests');
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  await frame();
+
+  // pills togglean el activo
+  const pill = (label) => [...document.querySelectorAll('#dp-modes .dp-pill')].find((e) => e.textContent === label);
+  pill('Auto-edits').click();
+  await frame();
+  out.autoEditsActive = document.querySelector('#dp-modes .dp-pill.active').textContent === 'Auto-edits';
+
+  // Autorun: primer tap arma la confirmación SIN postear
+  pill('Autorun').click();
+  await frame();
+  document.querySelector('#dp-submit').click();
+  await frame();
+  out.armedLabel = document.querySelector('#dp-submit').textContent.includes('sin pedir permisos');
+  out.noPostOnArm = posted.length === 0;
+
+  // segundo tap confirma y postea con el body correcto (mode bypassPermissions)
+  document.querySelector('#dp-submit').click();
+  await sleep(120);
+  await frame();
+  out.postedBody = posted[0];
+  out.sheetClosedAfterPost = sheet.classList.contains('hidden');
+
+  window.fetch = realFetch;
+  return out;
+});
+ok('dispatch: sheet montado oculto por default', dispRun.hiddenByDefault);
+ok('dispatch: menú CREAR con la tercera entrada "Despachar con prompt…"',
+  dispRun.items.includes('Despachar con prompt…'));
+ok('dispatch: la entrada abre el sheet con el dropdown de directorios',
+  dispRun.sheetOpen && JSON.stringify(dispRun.dirOptions) === JSON.stringify(['claude-deck', 'otro-proyecto']));
+ok('dispatch: pills Plan/Auto-edits/Autorun, Plan activo por default',
+  JSON.stringify(dispRun.modePills) === JSON.stringify(['Plan', 'Auto-edits', 'Autorun']) && dispRun.planActiveByDefault);
+ok('dispatch: las pills togglean el modo activo', dispRun.autoEditsActive);
+ok('dispatch: Autorun arma confirmación "corre sin pedir permisos" sin postear',
+  dispRun.armedLabel && dispRun.noPostOnArm);
+ok('dispatch: el segundo tap confirma y postea el body correcto',
+  dispRun.postedBody && dispRun.postedBody.dir === 'claude-deck'
+  && dispRun.postedBody.prompt === 'arreglá los tests'
+  && dispRun.postedBody.mode === 'bypassPermissions' && dispRun.sheetClosedAfterPost);
+
 await browser.close();
 console.log(results.join('\n'));
 process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);

@@ -397,6 +397,51 @@ try {
   fs.rmSync(WT_REPO, { recursive: true, force: true });
 }
 
+// 9i. GET /api/workspaces + POST /api/dispatch (tarea 6): despachar un agente en
+// un dir de WORKSPACES_ROOT con prompt inicial + permission-mode. SOLO los checks
+// deterministas que NO lanzan claude (contrato + rechazos + 409): la integridad
+// del quoting/argv del prompt la aserta el script scratch del agente con un stub
+// (DECK_CLAUDE_BIN), para no arrancar un claude real en la corrida de Lucas.
+// Dir scratch de PRIMER nivel bajo la raíz + un archivo scratch (para verificar
+// que /api/workspaces lista solo dirs). Todo se limpia en el finally.
+const DISP_DIR = `${WROOT}/deck-dispatch-ws-test`;
+const DISP_NAME = 'deck-dispatch-ws-test';
+const DISP_FILE = `${WROOT}/deck-dispatch-ws-test.txt`;
+const dispPost = (body) => fetch(`${HTTP}/api/dispatch`, {
+  method: 'POST',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+try {
+  fs.rmSync(DISP_DIR, { recursive: true, force: true });
+  fs.mkdirSync(DISP_DIR, { recursive: true });
+  fs.writeFileSync(DISP_FILE, 'x');
+
+  const wsr = await fetch(`${HTTP}/api/workspaces`, { headers: { 'x-deck-token': TOKEN } });
+  const wsj = await wsr.json();
+  ok('workspaces → 200, lista el dir scratch y NO el archivo scratch', wsr.status === 200
+    && Array.isArray(wsj.dirs) && wsj.dirs.includes(DISP_NAME) && !wsj.dirs.includes('deck-dispatch-ws-test.txt'));
+
+  ok('dispatch modo inválido → 400', (await dispPost({ dir: DISP_NAME, prompt: 'x', mode: 'yolo' })).status === 400);
+  ok('dispatch prompt vacío → 400', (await dispPost({ dir: DISP_NAME, prompt: '   ', mode: 'plan' })).status === 400);
+  ok('dispatch dir con "/" → 400', (await dispPost({ dir: 'a/b', prompt: 'x', mode: 'plan' })).status === 400);
+  ok('dispatch dir ".." → 400', (await dispPost({ dir: '..', prompt: 'x', mode: 'plan' })).status === 400);
+  ok('dispatch dir inexistente → 404', (await dispPost({ dir: 'no-existe-zzz', prompt: 'x', mode: 'plan' })).status === 404);
+
+  // 409: decisión de Lucas (a) — un dir que ya tiene sesión no crea <nombre>-2.
+  // Pre-creamos la sesión (nombre = basename sanitizado) y NO lanzamos claude:
+  // el 409 salta antes de spawnear/enviar nada.
+  execFileSync('tmux', ['new-session', '-d', '-s', DISP_NAME, '-c', DISP_DIR]);
+  const dup = await dispPost({ dir: DISP_NAME, prompt: 'x', mode: 'plan' });
+  const dupj = await dup.json();
+  ok('dispatch sobre dir con sesión viva → 409 "ya hay una sesión ahí"',
+    dup.status === 409 && /ya hay una sesión/.test(dupj.error || ''));
+} finally {
+  try { execFileSync('tmux', ['kill-session', '-t', `=${DISP_NAME}`], { stdio: 'ignore' }); } catch {}
+  fs.rmSync(DISP_DIR, { recursive: true, force: true });
+  fs.rmSync(DISP_FILE, { force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);
