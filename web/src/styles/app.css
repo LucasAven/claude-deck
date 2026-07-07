@@ -153,6 +153,17 @@ body {
   color: var(--accent);
 }
 
+/* botón de opt-in de Web Push (tarea 23): campana pineada como el chip de host;
+   .active (suscripto) en ámbar como el resto de los estados activos; .denied
+   atenuado (informa, no puede re-pedir permiso) */
+.push-chip { padding: 4px 9px; }
+.push-chip svg { display: block; }
+.push-chip.active {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+.push-chip.denied { opacity: 0.5; }
+
 /* ---------- barra de teclas rápidas ---------- */
 .quickkeys {
   display: flex;

@@ -1,6 +1,7 @@
 import { useDeckStore } from '../../store'
 import { battLow, openHostSheet } from '../../lib/host'
 import { openCreateMenu } from '../../lib/worktree'
+import { togglePush } from '../../lib/push'
 import { useTap } from '../../hooks/useTap'
 import { useChipDrag } from '../../hooks/useChipDrag'
 
@@ -86,6 +87,17 @@ export function SessionRow() {
   const stateByName: Record<string, string | undefined> = {}
   for (const s of sessions) stateByName[s.name] = s.state
 
+  // botón de opt-in de Web Push (tarea 23): oculto si el browser no soporta
+  // (degradación silenciosa a ntfy). Ámbar cuando estás suscripto; el tap
+  // alterna suscribir/desuscribir (o informa el permiso denegado).
+  const pushState = useDeckStore((s) => s.pushState)
+  const pushTitle =
+    pushState === 'on'
+      ? 'Notificaciones activas · tocá para desactivar'
+      : pushState === 'denied'
+        ? 'Permiso de notificaciones denegado (activalo en Ajustes)'
+        : 'Activar notificaciones en esta app'
+
   return (
     <div className="session-row">
       <div id="session-chips" className="chips" ref={chipsRef} {...dragHandlers}>
@@ -109,6 +121,24 @@ export function SessionRow() {
           <rect id="host-batt-fill" x="4.2" y="9.7" width={fillW} height="4.6" rx="1" fill="currentColor" stroke="none" />
         </svg>
         <span id="host-chip-pct">{batt ? `${batt.pct}%` : ''}</span>
+      </button>
+      {/* opt-in de Web Push (tarea 23): campana, oculta si no hay soporte */}
+      <button
+        id="btn-push"
+        className={
+          'chip push-chip' +
+          (pushState === 'unsupported' ? ' hidden' : '') +
+          (pushState === 'on' ? ' active' : '') +
+          (pushState === 'denied' ? ' denied' : '')
+        }
+        title={pushTitle}
+        onClick={() => togglePush()}
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z" />
+          <path d="M10.5 19a1.8 1.8 0 0 0 3 0" />
+          {pushState === 'on' && <circle cx="18" cy="6" r="3" fill="currentColor" stroke="none" />}
+        </svg>
       </button>
       <span className={'conn' + (connected ? ' on' : '')} id="conn-claude">
         <span className="dot" />

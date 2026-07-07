@@ -131,6 +131,32 @@ if mac_present || phone_present; then
   exit 0
 fi
 
+# Web Push nativo de la PWA (tarea 23): SOLO para las pushes planas (Stop /
+# "Claude te necesita"). Las de permiso llevan botones Permitir/Denegar y el
+# Web Push de iOS no soporta action buttons custom → esas SIEMPRE por ntfy.
+# Si hay una PWA suscripta y el envío entrega ≥1, NO mandamos ntfy (evitamos la
+# doble notificación). Sin suscripción, sin server o si falla → degradación
+# silenciosa a ntfy, como siempre. El AUTH_TOKEN viaja SOLO a 127.0.0.1.
+if [ "$IS_PERMISSION" = 0 ]; then
+  WP_TOKEN="$(env_get AUTH_TOKEN)"
+  WP_PORT="${DECK_PORT:-$(env_get DECK_PORT)}"; WP_PORT="${WP_PORT:-7433}"
+  WP_URL=''
+  if [ -n "${DECK_URL:-}" ] && printf '%s' "$SESSION" | grep -qE '^[A-Za-z0-9_-]{1,32}$'; then
+    WP_URL="${DECK_URL%/}/?session=$SESSION"
+  fi
+  if [ -n "$WP_TOKEN" ] && command -v jq >/dev/null 2>&1; then
+    WP_PAYLOAD="$(jq -nc --arg t "$TITLE" --arg b "$BODY" --arg u "$WP_URL" --arg g "$SESSION" \
+      '{title:$t, body:$b, url:$u, tag:$g}' 2>/dev/null || true)"
+    if [ -n "$WP_PAYLOAD" ]; then
+      SENT="$(curl -s -m 3 -H "x-deck-token: $WP_TOKEN" -H 'Content-Type: application/json' \
+        -d "$WP_PAYLOAD" "http://127.0.0.1:${WP_PORT}/api/push/send" 2>/dev/null \
+        | jq -r '.sent // 0' 2>/dev/null || echo 0)"
+      case "$SENT" in ''|*[!0-9]*) SENT=0 ;; esac
+      [ "$SENT" -ge 1 ] && exit 0 # entregada a la PWA: ntfy sobra
+    fi
+  fi
+fi
+
 # Click → PWA con la sesión ya seleccionada (init lee ?session=). Solo con
 # nombres que el server acepta (mismo SESSION_RE) — así no hace falta encodear.
 ARGS=(-s -m 5 -H "Title: $TITLE" -H "Tags: robot" -d "$BODY")

@@ -22,4 +22,10 @@ interface Window {
   refreshSessions?: () => Promise<void>
   refreshHost?: () => Promise<void>
   refreshClaudeStatus?: () => Promise<void>
+  // puente para ui-test.mjs (tarea 23): setear el estado del opt-in de Web Push
+  // y disparar el toggle sin depender de las APIs reales (SW/PushManager)
+  __deckPush?: {
+    setState: (v: 'unsupported' | 'off' | 'on' | 'denied') => void
+    toggle: () => void
+  }
 }

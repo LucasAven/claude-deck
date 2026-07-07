@@ -6,6 +6,7 @@ import { serve } from '@hono/node-server'
 import { getCookie, setCookie } from 'hono/cookie'
 import { WebSocketServer, WebSocket, type RawData } from 'ws'
 import * as pty from 'node-pty'
+import webpush from 'web-push'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import crypto from 'node:crypto'
@@ -1493,6 +1494,149 @@ app.put('/api/snippets', async (c) => {
   fs.writeFileSync(tmp, JSON.stringify(list, null, 2) + '\n')
   fs.renameSync(tmp, SNIPPETS_FILE)
   return c.json({ ok: true })
+})
+
+// ---------------------------------------------------------------------------
+// Web Push (tarea 23): notificaciones nativas de la PWA instalada. El tap en
+// una push de ntfy abre Safari (pestaña nueva) en vez de la app; una Web Push
+// nativa, en cambio, la maneja el service worker (handler notificationclick →
+// clients.focus()/openWindow) y CAE en la PWA instalada.
+//
+// Arquitectura DUAL (decisión de Lucas 2026-07-07): Web Push cubre SOLO las
+// pushes planas (Stop, "Claude te necesita"); las de permiso con botones
+// Permitir/Denegar (tarea 2) siguen por ntfy Actions, porque el Web Push de
+// iOS NO soporta action buttons custom. `scripts/notify.sh` intenta la Web
+// Push para las planas y, si entrega, se saltea ntfy; sin suscripción o si
+// falla, degrada a ntfy como siempre.
+//
+// VAPID con la dep `web-push` (sí a la dep — decisión de Lucas, nada de JWT a
+// mano). El par de claves se genera una vez y se persiste en ~/.claude-deck;
+// las subscriptions (endpoint del push service + claves p256dh/auth del
+// browser) también, como app-data (mismo patrón que snippets.json). El
+// AUTH_TOKEN jamás toca al push service: la firma es VAPID, y notify.sh llama a
+// /api/push/send SOLO contra 127.0.0.1 con el x-deck-token.
+// ---------------------------------------------------------------------------
+const VAPID_FILE = path.join(os.homedir(), '.claude-deck', 'vapid.json')
+const PUSH_SUBS_FILE = path.join(os.homedir(), '.claude-deck', 'push-subscriptions.json')
+// asunto VAPID: los push services piden un mailto/URL de contacto; local, no se
+// expone (bind 127.0.0.1). Override por si Lucas quiere el suyo.
+const VAPID_SUBJECT = process.env.DECK_VAPID_SUBJECT || 'mailto:claude-deck@localhost'
+
+type PushSub = { endpoint: string; keys: { p256dh: string; auth: string } }
+
+// Par VAPID persistente: se genera la primera vez y se reusa siempre (rotarlo
+// invalidaría todas las subscriptions existentes). Si el archivo está roto se
+// regenera — las subs viejas dejan de andar, pero es mejor que frenar el boot.
+function loadVapid(): { publicKey: string; privateKey: string } {
+  try {
+    const raw = JSON.parse(fs.readFileSync(VAPID_FILE, 'utf8'))
+    if (typeof raw?.publicKey === 'string' && typeof raw?.privateKey === 'string') return raw
+  } catch { /* sin archivo o roto: generar abajo */ }
+  const keys = webpush.generateVAPIDKeys()
+  fs.mkdirSync(path.dirname(VAPID_FILE), { recursive: true })
+  const tmp = `${VAPID_FILE}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(keys, null, 2) + '\n')
+  fs.renameSync(tmp, VAPID_FILE)
+  return keys
+}
+
+const VAPID_KEYS = loadVapid()
+webpush.setVapidDetails(VAPID_SUBJECT, VAPID_KEYS.publicKey, VAPID_KEYS.privateKey)
+
+function isPushSub(v: unknown): v is PushSub {
+  if (!v || typeof v !== 'object') return false
+  const s = v as Record<string, unknown>
+  const k = s.keys as Record<string, unknown> | undefined
+  return typeof s.endpoint === 'string' && /^https:\/\//.test(s.endpoint)
+    && !!k && typeof k.p256dh === 'string' && typeof k.auth === 'string'
+}
+
+function readSubs(): PushSub[] {
+  try {
+    const raw = JSON.parse(fs.readFileSync(PUSH_SUBS_FILE, 'utf8'))
+    if (Array.isArray(raw)) return raw.filter(isPushSub)
+  } catch { /* sin archivo todavía o roto: lista vacía */ }
+  return []
+}
+
+function writeSubs(subs: PushSub[]): void {
+  fs.mkdirSync(path.dirname(PUSH_SUBS_FILE), { recursive: true })
+  const tmp = `${PUSH_SUBS_FILE}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(subs, null, 2) + '\n')
+  fs.renameSync(tmp, PUSH_SUBS_FILE)
+}
+
+// clave pública VAPID para que el frontend se suscriba (applicationServerKey).
+app.get('/api/push/vapid', (c) => c.json({ publicKey: VAPID_KEYS.publicKey }))
+
+// guarda (o refresca) una subscription del browser; dedupe por endpoint.
+app.post('/api/push/subscribe', async (c) => {
+  let body: { subscription?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const sub = body.subscription
+  if (!isPushSub(sub)) throw new HttpError(400, 'subscription inválida (endpoint https + keys.p256dh/auth)')
+  const subs = readSubs().filter((s) => s.endpoint !== sub.endpoint)
+  subs.push({ endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } })
+  writeSubs(subs)
+  return c.json({ ok: true })
+})
+
+// baja una subscription (el usuario apagó el opt-in o el browser la rotó).
+app.post('/api/push/unsubscribe', async (c) => {
+  let body: { endpoint?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  if (typeof body.endpoint !== 'string') throw new HttpError(400, 'endpoint requerido')
+  const subs = readSubs()
+  const left = subs.filter((s) => s.endpoint !== body.endpoint)
+  if (left.length !== subs.length) writeSubs(left)
+  return c.json({ ok: true, removed: subs.length - left.length })
+})
+
+// envía una Web Push a TODAS las subscriptions; poda las expiradas (404/410).
+// Lo llama notify.sh para las pushes planas: si `sent` ≥ 1 se saltea ntfy.
+async function sendWebPush(payload: { title: string; body: string; url?: string; tag?: string }): Promise<number> {
+  const subs = readSubs()
+  if (!subs.length) return 0
+  const data = JSON.stringify(payload)
+  const survivors: PushSub[] = []
+  let sent = 0
+  for (const s of subs) {
+    try {
+      await webpush.sendNotification(s, data, { TTL: 300 })
+      sent++
+      survivors.push(s)
+    } catch (e) {
+      // 404/410 = subscription muerta (browser desinstaló / rotó) → podar; el
+      // resto de los errores (red, 5xx del push service) se conservan.
+      const code = (e as { statusCode?: number }).statusCode
+      if (code !== 404 && code !== 410) survivors.push(s)
+    }
+  }
+  if (survivors.length !== subs.length) writeSubs(survivors)
+  return sent
+}
+
+app.post('/api/push/send', async (c) => {
+  let body: { title?: unknown; body?: unknown; url?: unknown; tag?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const title = typeof body.title === 'string' && body.title ? body.title.slice(0, 100) : 'claude-deck'
+  const text = typeof body.body === 'string' ? body.body.slice(0, 500) : ''
+  const url = typeof body.url === 'string' ? body.url.slice(0, 500) : undefined
+  const tag = typeof body.tag === 'string' ? body.tag.slice(0, 100) : undefined
+  const sent = await sendWebPush({ title, body: text, url, tag })
+  return c.json({ sent })
 })
 
 // ---------------------------------------------------------------------------

@@ -731,6 +731,62 @@ try {
   fs.rmSync(STATUS_FILE, { force: true });
 }
 
+// 9p. Web Push (tarea 23): /api/push/vapid + subscribe/unsubscribe/send. La
+// subscription es data real del usuario (~/.claude-deck/push-subscriptions.json)
+// → backup/restore. No hay push service real: se usa una subscription sintética
+// (endpoint https válido pero inexistente); /send la intenta y devuelve sent:0
+// (la entrega falla, pero NO es 404/410 así que la sub NO se poda — se verifica
+// que el contrato responde {sent:N} sin tirar). vapid.json se deja: es config
+// persistente (generar-una-vez); no es data que el test deba restaurar.
+const SUBS_FILE = `${os.homedir()}/.claude-deck/push-subscriptions.json`;
+const subsBackup = fs.existsSync(SUBS_FILE) ? fs.readFileSync(SUBS_FILE) : null;
+const pushPost = (path, body) => fetch(`${HTTP}/api/push/${path}`, {
+  method: 'POST',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+const FAKE_SUB = { endpoint: 'https://fcm.googleapis.com/deck-ws-test/xyz', keys: { p256dh: 'BKtest', auth: 'authtest' } };
+try {
+  fs.rmSync(SUBS_FILE, { force: true });
+
+  const vp = await fetch(`${HTTP}/api/push/vapid`, { headers: { 'x-deck-token': TOKEN } });
+  const vpJson = await vp.json();
+  ok('push/vapid → 200 con publicKey base64url', vp.status === 200
+    && typeof vpJson.publicKey === 'string' && /^[A-Za-z0-9_-]{80,}$/.test(vpJson.publicKey));
+  ok('push/vapid sin token → 401', (await fetch(`${HTTP}/api/push/vapid`)).status === 401);
+
+  ok('push/subscribe subscription inválida → 400', (await pushPost('subscribe', { subscription: { endpoint: 'nope' } })).status === 400);
+  ok('push/subscribe sin body → 400', (await fetch(`${HTTP}/api/push/subscribe`, {
+    method: 'POST', headers: { 'x-deck-token': TOKEN },
+  })).status === 400);
+
+  const sub1 = await pushPost('subscribe', { subscription: FAKE_SUB });
+  ok('push/subscribe válida → {ok:true} y persiste', sub1.status === 200
+    && (await sub1.json()).ok === true
+    && JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')).length === 1);
+
+  // dedupe por endpoint: re-suscribir el mismo endpoint no agrega otra fila
+  await pushPost('subscribe', { subscription: { ...FAKE_SUB, keys: { p256dh: 'BK2', auth: 'auth2' } } });
+  ok('push/subscribe dedupe por endpoint (1 fila, keys refrescadas)',
+    JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')).length === 1
+    && JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8'))[0].keys.p256dh === 'BK2');
+
+  const send = await pushPost('send', { title: 'T', body: 'hola', url: 'https://x/?session=deck' });
+  ok('push/send → 200 {sent:N} (entrega falla → sent:0, sin tirar)', send.status === 200
+    && (await send.json()).sent === 0);
+
+  const uns = await pushPost('unsubscribe', { endpoint: FAKE_SUB.endpoint });
+  ok('push/unsubscribe → {removed:1} y la lista queda vacía', uns.status === 200
+    && (await uns.json()).removed === 1
+    && JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')).length === 0);
+
+  // sin subscripciones, send entrega a nadie
+  ok('push/send sin subs → sent:0', (await (await pushPost('send', { title: 'T', body: 'x' })).json()).sent === 0);
+} finally {
+  if (subsBackup !== null) fs.writeFileSync(SUBS_FILE, subsBackup);
+  else fs.rmSync(SUBS_FILE, { force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);
