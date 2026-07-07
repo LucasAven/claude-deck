@@ -1798,11 +1798,13 @@ setInterval(async () => {
     if (!discharging || battery.pct >= alert.threshold + BATT_REARM_MARGIN) battAlertFired = false
     if (alert.enabled && discharging && battery.pct < alert.threshold && !battAlertFired) {
       battAlertFired = true // antes del push: un error de red no debe spamear
-      console.log(`[deck] ${new Date().toISOString()} batería ${battery.pct}% < ${alert.threshold}% descargando → push ntfy`)
-      await ntfyPush(
-        await hostName(),
-        `🔋 Batería al ${battery.pct}% y descargando. Si se agota perdés el acceso al tailnet — enchufá la Mac o cerrá lo que no uses.`,
-      )
+      const title = await hostName()
+      const body = `🔋 Batería al ${battery.pct}% y descargando. Si se agota perdés el acceso al tailnet — enchufá la Mac o cerrá lo que no uses.`
+      // web push primero (tocar la notificación abre la PWA); ntfy queda solo
+      // como fallback sin suscripción/entrega, hasta retirarlo (tarea 26)
+      const sent = await sendWebPush({ title, body, url: '/', tag: 'battery' })
+      console.log(`[deck] ${new Date().toISOString()} batería ${battery.pct}% < ${alert.threshold}% descargando → ${sent >= 1 ? `web push (${sent})` : 'push ntfy (web push sin entrega)'}`)
+      if (sent < 1) await ntfyPush(title, body)
     }
   } catch { /* el watcher jamás tira el server */ }
 }, BATT_WATCH_MS)
