@@ -1384,6 +1384,92 @@ ok('dispatch: el segundo tap confirma y postea el body correcto (mode auto + mod
   && dispRun.postedBody.mode === 'auto' && dispRun.postedBody.model === 'opus'
   && dispRun.postedBody.effort === 'high' && dispRun.sheetClosedAfterPost);
 
+// 21. opt-in de Web Push (tarea 23): botón campana #btn-push en la fila de
+// sesiones. Su estado sale del store (pushState), que en el celu lo alimentan
+// las APIs reales (SW/PushManager/Notification) — headless no las tiene, así
+// que se driven vía window.__deckPush.setState. La suscripción real (permiso,
+// push, tap que abre la app) es E2E del celu de Lucas.
+const pushRun = await page.evaluate(async () => {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+  const btn = document.querySelector('#btn-push');
+  const out = { present: !!btn };
+
+  // unsupported → oculto (degradación silenciosa a ntfy)
+  window.__deckPush.setState('unsupported'); await frame();
+  out.unsupportedHidden = btn.classList.contains('hidden');
+
+  // off → visible, sin active ni denied
+  window.__deckPush.setState('off'); await frame();
+  out.offVisible = !btn.classList.contains('hidden')
+    && !btn.classList.contains('active') && !btn.classList.contains('denied');
+
+  // on → visible con .active (ámbar)
+  window.__deckPush.setState('on'); await frame();
+  out.onActive = !btn.classList.contains('hidden') && btn.classList.contains('active');
+
+  // denied → visible con .denied (informa, no re-pide permiso)
+  window.__deckPush.setState('denied'); await frame();
+  out.deniedClass = !btn.classList.contains('hidden') && btn.classList.contains('denied');
+
+  // tap con estado off dispara el flujo de suscripción: se mockean las APIs de
+  // Web Push (no existen headless) + el fetch a /api/push/* para verificar que
+  // el opt-in POSTea la subscription y termina en 'on'
+  const posts = [];
+  const realFetch = window.fetch;
+  window.fetch = (url, opts) => {
+    const u = String(url);
+    if (u.includes('/api/push/vapid')) {
+      return Promise.resolve(new Response(JSON.stringify({ publicKey: 'BFakePublicKey' }), { status: 200 }));
+    }
+    if (u.includes('/api/push/subscribe') || u.includes('/api/push/unsubscribe')) {
+      posts.push({ url: u, body: JSON.parse(opts.body) });
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, removed: 1 }), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  const fakeSub = {
+    endpoint: 'https://fcm.googleapis.com/ui-test/zzz',
+    toJSON: () => ({ endpoint: 'https://fcm.googleapis.com/ui-test/zzz', keys: { p256dh: 'p', auth: 'a' } }),
+    unsubscribe: () => Promise.resolve(true),
+  };
+  const realNotif = window.Notification;
+  const realSW = navigator.serviceWorker;
+  // Notification.requestPermission → granted; permission getter → granted
+  window.Notification = function () {};
+  window.Notification.permission = 'granted';
+  window.Notification.requestPermission = () => Promise.resolve('granted');
+  Object.defineProperty(navigator, 'serviceWorker', {
+    configurable: true,
+    value: {
+      ready: Promise.resolve({
+        pushManager: {
+          getSubscription: () => Promise.resolve(null),
+          subscribe: () => Promise.resolve(fakeSub),
+        },
+      }),
+    },
+  });
+
+  window.__deckPush.setState('off'); await frame();
+  window.__deckPush.toggle(); // off → subscribe
+  await new Promise((r) => setTimeout(r, 200));
+  out.subscribed = posts.some((p) => p.url.includes('/api/push/subscribe') && p.body.subscription?.endpoint === fakeSub.endpoint);
+  out.stateOnAfterSubscribe = document.querySelector('#btn-push').classList.contains('active');
+
+  window.fetch = realFetch;
+  window.Notification = realNotif;
+  Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: realSW });
+  window.__deckPush.setState('off'); await frame(); // dejar limpio
+  return out;
+});
+ok('push: botón #btn-push presente', pushRun.present);
+ok('push: unsupported oculta el botón (degrada a ntfy)', pushRun.unsupportedHidden);
+ok('push: off → visible sin active/denied', pushRun.offVisible);
+ok('push: on → visible con .active', pushRun.onActive);
+ok('push: denied → visible con .denied', pushRun.deniedClass);
+ok('push: tap en off suscribe (POST /api/push/subscribe con la subscription) y queda active',
+  pushRun.subscribed && pushRun.stateOnAfterSubscribe);
+
 await browser.close();
 console.log(results.join('\n'));
 process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);

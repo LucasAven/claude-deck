@@ -141,9 +141,15 @@ interface DeckStore {
   switchState: SwitchState
   imgChip: ImgChip | null
   snipTip: SnipTipState | null
+  // Web Push (tarea 23): estado del opt-in de notificaciones nativas de la PWA.
+  // 'unsupported' → el browser no tiene SW/PushManager (oculta el botón);
+  // 'off' → soportado, no suscripto; 'on' → suscripto; 'denied' → permiso
+  // rechazado por el usuario (no se puede re-pedir sin ir a ajustes).
+  pushState: 'unsupported' | 'off' | 'on' | 'denied'
 
   // --- acciones ---
   setActiveTab: (tab: Tab) => void
+  setPushState: (v: 'unsupported' | 'off' | 'on' | 'denied') => void
   setAuthError: (v: boolean) => void
   setSession: (name: string, persist?: boolean) => void
   setSwitchState: (sw: SwitchState) => void
@@ -230,6 +236,9 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   switchState: {},
   imgChip: null,
   snipTip: null,
+  pushState: 'unsupported',
+
+  setPushState: (v) => set({ pushState: v }),
 
   setActiveTab: (tab) => {
     set({ activeTab: tab })

@@ -14,6 +14,7 @@ import { DispatchSheet } from './components/claude/DispatchSheet'
 import { closeSwitchMenu } from './lib/switch'
 import { closeCreateMenu } from './lib/worktree'
 import { refreshHost } from './lib/host'
+import { initPushState } from './lib/push'
 import { hideComposerSnips } from './lib/composer'
 import { attachImage, pasteTextToPrompt } from './lib/image'
 
@@ -37,6 +38,7 @@ export function App() {
       s.refreshGit() // primer badge de Cambios sin esperar el poll
     })
     refreshHost() // primer estado del host (chip de batería) sin esperar el poll
+    initPushState() // estado del opt-in de Web Push (tarea 23) para el botón 🔔
   }, [])
 
   useViewportGeometry()
