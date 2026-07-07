@@ -9,19 +9,30 @@ import { api } from './api'
 // cambiar de sesión. Contrato blando: ausente → claudeStatus null (línea oculta).
 
 // Umbral de alerta: el contexto se acerca al límite. Se pinta ámbar/rojo cuando
-// el % USADO cruza estos umbrales (o si el server marca exceeds200k).
-export const CTX_WARN_PCT = 75
-export const CTX_ALERT_PCT = 90
+// el % RESTANTE cae bajo estos umbrales (o si el server marca exceeds200k).
+// Nota: el endpoint expone ctxPct = context_window.used_percentage (verdad
+// server-side, contrato ya testeado). El "restante" es exactamente 100 - usado
+// (verificado en el probe: usado 15 ⇄ restante 85), así que se invierte SOLO en
+// el display — no se toca el campo del endpoint. Los cortes de restante 25/10
+// son equivalentes a los de usado 75/90 de antes (100 - usado).
+export const CTX_WARN_REMAINING = 25
+export const CTX_ALERT_REMAINING = 10
 
 export type CtxLevel = 'ok' | 'warn' | 'alert'
+
+// Contexto restante (%) para el display; null si el hook aún no lo reporta.
+export function ctxRemaining(s: ClaudeStatus | null): number | null {
+  if (!s || s.ctxPct == null) return null
+  return 100 - s.ctxPct
+}
 
 export function ctxLevel(s: ClaudeStatus | null): CtxLevel {
   if (!s) return 'ok'
   if (s.exceeds200k) return 'alert'
-  const p = s.ctxPct
-  if (p == null) return 'ok'
-  if (p >= CTX_ALERT_PCT) return 'alert'
-  if (p >= CTX_WARN_PCT) return 'warn'
+  const rem = ctxRemaining(s)
+  if (rem == null) return 'ok'
+  if (rem <= CTX_ALERT_REMAINING) return 'alert'
+  if (rem <= CTX_WARN_REMAINING) return 'warn'
   return 'ok'
 }
 
