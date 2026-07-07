@@ -446,6 +446,7 @@ Matices de comportamiento (el "por qué" está comentado en app.js — migrar co
 
 ## 6. Checklist de paridad final (Fase 6, en el teléfono)
 
+
 - [x] Auth: `?token=` → cookie → recarga sin token; 401 muestra `#auth-error`.
 - [x] Terminal en vivo bidireccional con VS Code; teclado/rotación/background-resume.
 - [x] Quickkeys, mode switcher, modelo/esfuerzo por sesión.
