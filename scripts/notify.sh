@@ -140,9 +140,14 @@ fi
 if [ "$IS_PERMISSION" = 0 ]; then
   WP_TOKEN="$(env_get AUTH_TOKEN)"
   WP_PORT="${DECK_PORT:-$(env_get DECK_PORT)}"; WP_PORT="${WP_PORT:-7433}"
+  # URL del click RELATIVA (path only): el service worker la resuelve contra su
+  # propio scope (self.registration.scope), así el tap cae en el origen desde el
+  # que se instaló la PWA — que puede NO ser el de DECK_URL (rama en otro puerto
+  # vía tailscale serve). Mandar el DECK_URL absoluto acá rompía el enrutado a la
+  # app en iOS. No depende de DECK_URL: la web push es local al deck instalado.
   WP_URL=''
-  if [ -n "${DECK_URL:-}" ] && printf '%s' "$SESSION" | grep -qE '^[A-Za-z0-9_-]{1,32}$'; then
-    WP_URL="${DECK_URL%/}/?session=$SESSION"
+  if printf '%s' "$SESSION" | grep -qE '^[A-Za-z0-9_-]{1,32}$'; then
+    WP_URL="/?session=$SESSION"
   fi
   if [ -n "$WP_TOKEN" ] && command -v jq >/dev/null 2>&1; then
     WP_PAYLOAD="$(jq -nc --arg t "$TITLE" --arg b "$BODY" --arg u "$WP_URL" --arg g "$SESSION" \
