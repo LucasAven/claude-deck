@@ -2,6 +2,7 @@ import { SessionRow } from './SessionRow'
 import { CreateMenu } from './CreateMenu'
 import { Hint } from './Hint'
 import { HostBanner } from './HostBanner'
+import { PushBanner } from './PushBanner'
 import { Terminal } from './Terminal'
 import { Composer } from './Composer'
 import { Scrollback } from './Scrollback'
@@ -12,8 +13,8 @@ import { ControlBar } from './ControlBar'
 // terminal no puede desmontarse jamás. Fase 2: sesiones + hint + terminal +
 // quickkeys. Fase 3: composer + pills/adjuntar/snippets en ControlBar.
 // Fase 4: HostBanner (roba filas a la terminal) + Scrollback. El orden del DOM
-// sigue a index.html: session-row → hint → host-banner → term → composer →
-// scrollback → controlbar.
+// sigue a index.html: session-row → hint → host-banner → push-banner → term →
+// composer → scrollback → controlbar (PushBanner es post-port, tarea 26).
 export function ClaudeView() {
   return (
     <>
@@ -21,6 +22,7 @@ export function ClaudeView() {
       <CreateMenu />
       <Hint />
       <HostBanner />
+      <PushBanner />
       <Terminal />
       <Composer />
       <Scrollback />

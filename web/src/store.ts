@@ -58,6 +58,10 @@ export interface HostStatus {
   sleepDisabled: boolean | null
   uptime: number
   alert: HostAlert
+  // pushes sin entrega desde el server (tarea 26): web push es la única vía de
+  // notificación, así que si la suscripción se cae (Apple la rota, PWA
+  // reinstalada) el panel tiene que avisar. null → nada perdido.
+  pushMissed?: { count: number; last: number } | null
 }
 
 // Statusline del panel (tarea 22): lo escribe el hook statusLine de Claude Code
@@ -136,6 +140,9 @@ interface DeckStore {
   gitChecks: PrChecks | null // chip de CI/PR (tarea 15); null → sin chip
   hostStatus: HostStatus | null
   hostBannerDismissed: boolean
+  // ✕ del banner de pushes perdidas: guarda el count descartado — el banner
+  // vuelve solo si el server acumula MÁS perdidas después del descarte
+  pushBannerDismissedCount: number
   claudeStatus: ClaudeStatus | null // statusline del panel (tarea 22)
   snippets: string[] | null
   snippetsEditing: boolean
@@ -224,6 +231,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   gitChecks: null,
   hostStatus: null,
   hostBannerDismissed: false,
+  pushBannerDismissedCount: 0,
   claudeStatus: null,
   snippets: null,
   snippetsEditing: false,

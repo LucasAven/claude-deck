@@ -81,13 +81,9 @@ alias deck='<ruta-al-repo>/scripts/deck'
 
 ## 7. Notificaciones push (opcional)
 
-Para recibir un push en el teléfono cuando Claude pide un permiso o termina una tarea:
+Para recibir un push en el teléfono cuando Claude pide un permiso o termina una tarea. Son **Web Push nativas de la PWA** (el server local firma con VAPID y se las manda al push service de Apple/Google; sin servicios de terceros — ntfy se retiró): tocarlas abre la app instalada con esa sesión seleccionada.
 
-1. Generar un topic secreto y agregarlo al `.env`:
-
-   ```bash
-   echo "NTFY_TOPIC=$(openssl rand -hex 16)" >> .env
-   ```
+1. Suscribirse desde el teléfono: con la PWA instalada (*Add to Home Screen*, requisito de iOS 16.4+), tocar la **campanita 🔔** en la fila de sesiones y aceptar el permiso. Campanita ámbar = suscripto. Sin suscripción **no hay push**: si el server tuvo avisos sin entregar, el panel muestra un banner (y queda en `deck log`).
 
 2. Activar los hooks de Claude Code para este repo:
 
@@ -101,11 +97,9 @@ Para recibir un push en el teléfono cuando Claude pide un permiso o termina una
 
    Y registra `scripts/statusline.sh` como el `statusLine` del perfil: alimenta la **statusline del panel** (% de contexto, tokens, modelo, costo). A diferencia de los hooks, `statusLine` es **un único objeto** por `settings.json` (no una lista), así que si ya tenés una statusline propia hay que encadenarla, no duplicar el campo: `statusline.sh` le pasa el mismo stdin a la statusline previa (`DECK_STATUSLINE_CHAIN`, default `~/.claude/statusline-command.sh`) y muestra su salida, agregando solo la escritura del `.status.json` que consume el panel. Para el global va igual: `{ "statusLine": { "type": "command", "command": "bash /ruta/abs/scripts/statusline.sh" } }` (registralo con `jq` + backup si ya tenías un `statusLine`). Sin este hook, la statusline del panel simplemente no aparece.
 
-3. Suscribirse al topic en el teléfono: con la app [ntfy](https://ntfy.sh), o sin instalar nada abriendo `https://ntfy.sh/<topic>` en el navegador y tocando **Subscribe** (en iPhone hace falta *Add to Home Screen* primero — iOS solo entrega web push a PWAs instaladas).
+Probar con `TMUX=1 scripts/notify.sh 'prueba'` (con el teléfono bloqueado o la Mac idle — el push se suprime si ya estás mirando): la notificación debe llegar al teléfono. Nota: `notify.sh` solo notifica sesiones que corren dentro de tmux (las controlables remoto) y necesita `jq`; un `claude` en una terminal común no manda push.
 
-Probar con `TMUX=1 scripts/notify.sh 'prueba'`: la notificación debe llegar al teléfono. Nota: `notify.sh` solo notifica sesiones que corren dentro de tmux (las controlables remoto); un `claude` en una terminal común no manda push.
-
-El push lleva la sesión tmux como título y, si `DECK_URL` está en el `.env` (la escriben solos `deck install`/`deck url`), un deep-link que abre el panel con esa sesión seleccionada. Ojo en iOS (confirmado): con ntfy por web push, "Abrir enlace" cae en un navegador interno de la PWA de ntfy con cookies propias → 401 siempre. Para que el deep-link funcione hace falta la app nativa de ntfy (el tap abre Safari) y haber abierto la URL de `deck url` una vez en Safari.
+El push lleva la sesión tmux como título y un deep-link relativo que el service worker resuelve contra su propio scope: el tap abre la PWA con esa sesión seleccionada, sin depender de `DECK_URL` (que sí usa el server como contacto VAPID — Apple valida ese subject).
 
 ## 8. Seguridad
 

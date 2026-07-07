@@ -1545,7 +1545,7 @@ const pushRun = await page.evaluate(async () => {
   const btn = document.querySelector('#btn-push');
   const out = { present: !!btn };
 
-  // unsupported → oculto (degradación silenciosa a ntfy)
+  // unsupported → oculto (sin soporte no hay pushes, el botón no promete nada)
   window.__deckPush.setState('unsupported'); await frame();
   out.unsupportedHidden = btn.classList.contains('hidden');
 
@@ -1614,12 +1614,77 @@ const pushRun = await page.evaluate(async () => {
   return out;
 });
 ok('push: botón #btn-push presente', pushRun.present);
-ok('push: unsupported oculta el botón (degrada a ntfy)', pushRun.unsupportedHidden);
+ok('push: unsupported oculta el botón', pushRun.unsupportedHidden);
 ok('push: off → visible sin active/denied', pushRun.offVisible);
 ok('push: on → visible con .active', pushRun.onActive);
 ok('push: denied → visible con .denied', pushRun.deniedClass);
 ok('push: tap en off suscribe (POST /api/push/subscribe con la subscription) y queda active',
   pushRun.subscribed && pushRun.stateOnAfterSubscribe);
+
+// 23. banner de pushes perdidas (tarea 26): web push es la ÚNICA vía de
+// notificación desde el retiro de ntfy — si el server contó envíos sin entrega
+// (pushMissed en /api/host/status) y este dispositivo no está suscripto, el
+// panel lo avisa con #push-banner. /api/host/status mockeado (mismo patrón que
+// la sección 17); pushState vía __deckPush.
+const pushBannerRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  let mockStatus = {
+    name: 'MacBook Pro de Lucas',
+    battery: null,
+    ac: true,
+    sleepDisabled: false,
+    uptime: 3600,
+    alert: { enabled: true, threshold: 30 },
+    pushMissed: null,
+  };
+  window.fetch = (url, opts) => {
+    const u = String(url);
+    if (u.includes('/api/host/status')) {
+      return Promise.resolve(new Response(JSON.stringify(mockStatus), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+  const banner = document.querySelector('#push-banner');
+  const out = { present: !!banner };
+
+  // sin perdidas → oculto
+  window.__deckPush.setState('off'); await frame();
+  await refreshHost(); await frame();
+  out.hiddenWhenNull = banner.classList.contains('hidden');
+
+  // perdidas + no suscripto → visible con el count
+  mockStatus = { ...mockStatus, pushMissed: { count: 3, last: 1234567890 } };
+  await refreshHost(); await frame();
+  out.visibleWhenMissed = !banner.classList.contains('hidden')
+    && banner.textContent.includes('3 avisos sin entregar');
+
+  // suscripto en ESTE dispositivo → se oculta aunque el status viejo tenga count
+  window.__deckPush.setState('on'); await frame();
+  out.hiddenWhenSubscribed = banner.classList.contains('hidden');
+  window.__deckPush.setState('off'); await frame();
+
+  // el ✕ descarta el count actual…
+  document.querySelector('#push-banner-close').click();
+  await frame();
+  out.dismissed = banner.classList.contains('hidden');
+
+  // …pero más perdidas después del descarte lo re-muestran
+  mockStatus = { ...mockStatus, pushMissed: { count: 5, last: 1234567999 } };
+  await refreshHost(); await frame();
+  out.reshownOnNewMisses = !banner.classList.contains('hidden')
+    && banner.textContent.includes('5 avisos sin entregar');
+  document.querySelector('#push-banner-close').click();
+
+  window.fetch = realFetch;
+  await refreshHost(); // repintar con el estado real de la Mac
+  return out;
+});
+ok('push-banner: presente y oculto sin pushes perdidas', pushBannerRun.present && pushBannerRun.hiddenWhenNull);
+ok('push-banner: pushMissed sin suscripción → visible con el count', pushBannerRun.visibleWhenMissed);
+ok('push-banner: suscripto en este dispositivo → oculto', pushBannerRun.hiddenWhenSubscribed);
+ok('push-banner: ✕ descarta el count actual', pushBannerRun.dismissed);
+ok('push-banner: más perdidas tras el descarte → reaparece', pushBannerRun.reshownOnNewMisses);
 
 await browser.close();
 console.log(results.join('\n'));

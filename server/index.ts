@@ -128,26 +128,6 @@ async function tmuxSendKeys(session: string, ...keys: string[]): Promise<void> {
   await execFileP('tmux', ['send-keys', '-t', `=${session}:`, ...keys])
 }
 
-// Guard anti-menú-viejo (tarea 2): para cuando se toca "Permitir/Denegar" en la
-// notificación, el menú de permiso puede haberse cerrado ya (respondido en VS
-// Code, o Claude siguió) y las teclas caerían en lo que tenga foco. Marker
-// verificado contra un claude real (Haiku, Darwin 25) en prompts de Bash Y de
-// Write: la opción resaltada "1. Yes" + el footer "Esc to cancel" aparecen en
-// los dos; la línea del prompt normal (`❯ `) no los tiene, así que el falso
-// positivo es improbable.
-async function paneLooksLikePermissionPrompt(session: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFileP(
-      'tmux',
-      ['capture-pane', '-p', '-t', `=${session}:`],
-      { maxBuffer: 2 * 1024 * 1024 },
-    )
-    return /(^|\n)\s*(?:❯\s*)?1\.\s+Yes\b/.test(stdout) && /Esc to cancel/.test(stdout)
-  } catch {
-    return false
-  }
-}
-
 async function tmuxRefreshClients(name: string): Promise<void> {
   // Redibujo completo de todos los clientes attacheados a la sesión (los ptys
   // de este server). El frontend lo pide al volver de background: iOS puede
@@ -802,12 +782,6 @@ const app = new Hono()
 // Todo (estáticos incluidos) exige cookie `deck_token` o header `x-deck-token`.
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url)
-  // Exención (tarea 2): POST /api/approve va SIN cookie/token — la app de ntfy
-  // del celu dispara la acción HTTP sin `deck_token`. El nonce ES la credencial
-  // (imposible de adivinar, expira, se consume atómico). Sigue detrás del rate
-  // limiter (`app.use('/api/*')`, registrado abajo, corre igual). Exención
-  // acotada a ese path exacto + método, para no aflojar nada más.
-  if (c.req.method === 'POST' && url.pathname === '/api/approve') return next()
   const qtoken = url.searchParams.get('token')
   if (qtoken !== null) {
     if (isTokenValid(qtoken)) {
@@ -863,59 +837,11 @@ app.get('/api/presence', (c) => {
   return c.json({ visible: sessions.length > 0, sessions })
 })
 
-// Permitir/Denegar desde la notificación ntfy (tarea 2). notify.sh pide un
-// nonce a 127.0.0.1 (auth normal, x-deck-token del .env) y arma dos acciones
-// HTTP en el push; el celu las dispara SIN token contra POST /api/approve
-// (exento del auth arriba) — el nonce es la credencial: single-use, TTL corto,
-// atado a la sesión. El AUTH_TOKEN JAMÁS viaja a ntfy. Un restart del server
-// invalida los nonces pendientes (Map en memoria) — aceptable: el botón falla.
-const APPROVE_NONCE_TTL_MS = Number(process.env.DECK_APPROVE_NONCE_TTL_MS) || 2 * 60_000
-const approveNonces = new Map<string, { session: string; expires: number }>()
-function sweepApproveNonces() {
-  const now = Date.now()
-  for (const [n, v] of approveNonces) if (now > v.expires) approveNonces.delete(n)
-}
-setInterval(sweepApproveNonces, 60_000).unref()
-
-app.post('/api/approve-nonce', async (c) => {
-  const body = await c.req.json().catch(() => ({}))
-  const session = typeof body?.session === 'string' ? body.session : ''
-  if (!SESSION_RE.test(session)) throw new HttpError(400, 'nombre de sesión inválido')
-  if (!(await tmuxHasSession(session))) throw new HttpError(404, `sesión tmux no encontrada: ${session}`)
-  sweepApproveNonces()
-  const nonce = crypto.randomBytes(16).toString('hex')
-  approveNonces.set(nonce, { session, expires: Date.now() + APPROVE_NONCE_TTL_MS })
-  return c.json({ nonce })
-})
-
-// EXENTO del middleware de auth (ver app.use('*')): el nonce es la credencial.
-app.post('/api/approve', async (c) => {
-  const nonce = c.req.query('nonce') || ''
-  const answer = c.req.query('answer') || ''
-  if (answer !== 'allow' && answer !== 'deny') throw new HttpError(400, 'answer inválido')
-  // consumo atómico: sacar del Map ANTES de actuar — un replay ya no lo encuentra
-  const entry = approveNonces.get(nonce)
-  if (entry) approveNonces.delete(nonce)
-  if (!entry || Date.now() > entry.expires) throw new HttpError(401, 'nonce inválido o expirado')
-  const { session } = entry
-  if (!(await tmuxHasSession(session))) throw new HttpError(404, 'sesión tmux no encontrada')
-  // guard anti-menú-viejo: si el pane ya no muestra un prompt de permiso, las
-  // teclas caerían en lo que tenga foco → 409, y el fallback del push es abrir la app
-  if (!(await paneLooksLikePermissionPrompt(session))) {
-    throw new HttpError(409, 'el menú de permiso ya no está abierto')
-  }
-  // Teclas verificadas contra un claude real (probe de la tarea 2): el menú es
-  // de selección inmediata (el dígito confirma, sin Enter). Opción 1 = "Yes" en
-  // TODO menú (Bash, Write). Para denegar, la numeración del "No" se corre según
-  // la fila "always allow" (2 o 3) → Escape cancela el prompt siempre, sin
-  // depender del número (verificado que rechaza la tool y no crea el archivo).
-  if (answer === 'allow') {
-    await tmuxSendKeys(session, '-l', '1')
-  } else {
-    await tmuxSendKeys(session, 'Escape')
-  }
-  return c.json({ ok: true, answer })
-})
+// Los endpoints /api/approve-nonce + /api/approve de la tarea 2 (Permitir/
+// Denegar desde los botones del push de ntfy) se RETIRARON con ntfy (tarea 26):
+// Lucas no usaba los botones, el Web Push de iOS no soporta actions custom, y
+// /api/approve era la única ruta exenta de auth — sacarlos reduce superficie.
+// El push de permiso ahora es plano: el tap abre la PWA y se contesta adentro.
 
 // Scrollback legible (tarea 9): texto plano del pane para el overlay de
 // lectura del frontend — sobre HTML plano el browser da selección, copy y
@@ -1497,17 +1423,15 @@ app.put('/api/snippets', async (c) => {
 })
 
 // ---------------------------------------------------------------------------
-// Web Push (tarea 23): notificaciones nativas de la PWA instalada. El tap en
-// una push de ntfy abre Safari (pestaña nueva) en vez de la app; una Web Push
-// nativa, en cambio, la maneja el service worker (handler notificationclick →
-// clients.focus()/openWindow) y CAE en la PWA instalada.
-//
-// Arquitectura DUAL (decisión de Lucas 2026-07-07): Web Push cubre SOLO las
-// pushes planas (Stop, "Claude te necesita"); las de permiso con botones
-// Permitir/Denegar (tarea 2) siguen por ntfy Actions, porque el Web Push de
-// iOS NO soporta action buttons custom. `scripts/notify.sh` intenta la Web
-// Push para las planas y, si entrega, se saltea ntfy; sin suscripción o si
-// falla, degrada a ntfy como siempre.
+// Web Push (tarea 23): notificaciones nativas de la PWA instalada — las maneja
+// el service worker (handler notificationclick → clients.focus()/openWindow) y
+// el tap CAE en la PWA. Desde la tarea 26 es la ÚNICA vía de notificación:
+// ntfy se retiró por completo (Lucas no usaba los botones Permitir/Denegar,
+// el único motivo del dual). Las pushes de permiso son planas: el tap abre la
+// app con la sesión seleccionada y se contesta adentro. Sin suscripción NO hay
+// push — por eso cada envío sin entrega se cuenta (pushMissed) y el panel lo
+// muestra: la red de seguridad si Apple rota la suscripción o se reinstala la
+// PWA es ese aviso + el log.
 //
 // VAPID con la dep `web-push` (sí a la dep — decisión de Lucas, nada de JWT a
 // mano). El par de claves se genera una vez y se persiste en ~/.claude-deck;
@@ -1570,6 +1494,12 @@ function writeSubs(subs: PushSub[]): void {
   fs.renameSync(tmp, PUSH_SUBS_FILE)
 }
 
+// Pushes sin entrega (tarea 26): sin ntfy no hay red de seguridad si la
+// suscripción se cae (Apple la rota, PWA reinstalada) — se cuenta cada envío
+// que no entregó a nadie y /api/host/status lo expone para que el panel avise.
+// En memoria a propósito: un restart resetea, pero el aviso es best-effort.
+let pushMissed = { count: 0, last: 0 }
+
 // clave pública VAPID para que el frontend se suscriba (applicationServerKey).
 app.get('/api/push/vapid', (c) => c.json({ publicKey: VAPID_KEYS.publicKey }))
 
@@ -1586,6 +1516,7 @@ app.post('/api/push/subscribe', async (c) => {
   const subs = readSubs().filter((s) => s.endpoint !== sub.endpoint)
   subs.push({ endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } })
   writeSubs(subs)
+  pushMissed = { count: 0, last: 0 } // hay quién escuche de nuevo: aviso saldado
   return c.json({ ok: true })
 })
 
@@ -1605,10 +1536,10 @@ app.post('/api/push/unsubscribe', async (c) => {
 })
 
 // envía una Web Push a TODAS las subscriptions; poda las expiradas (404/410).
-// Lo llama notify.sh para las pushes planas: si `sent` ≥ 1 se saltea ntfy.
+// Lo llama notify.sh para todos los eventos (permiso/Stop/idle) — es la única
+// vía de notificación (tarea 26): un envío sin entrega alimenta pushMissed.
 async function sendWebPush(payload: { title: string; body: string; url?: string; tag?: string }): Promise<number> {
   const subs = readSubs()
-  if (!subs.length) return 0
   const data = JSON.stringify(payload)
   const survivors: PushSub[] = []
   let sent = 0
@@ -1620,8 +1551,8 @@ async function sendWebPush(payload: { title: string; body: string; url?: string;
     } catch (e) {
       // 404/410 = subscription muerta (browser desinstaló / rotó) → podar; el
       // resto de los errores (red, 5xx del push service) se conservan. Loguear
-      // siempre: un rechazo silencioso acá degrada a ntfy y nadie se entera
-      // (así se escondió el 403 BadJwtToken del subject inválido).
+      // siempre: un rechazo silencioso acá pierde la notificación y nadie se
+      // entera (así se escondió el 403 BadJwtToken del subject inválido).
       const code = (e as { statusCode?: number }).statusCode
       const detail = String((e as { body?: unknown }).body ?? (e as Error).message ?? '').slice(0, 200)
       console.log(`[deck] ${new Date().toISOString()} web push falló endpoint=…${s.endpoint.slice(-10)} status=${code ?? '?'} ${detail}`)
@@ -1629,6 +1560,10 @@ async function sendWebPush(payload: { title: string; body: string; url?: string;
     }
   }
   if (survivors.length !== subs.length) writeSubs(survivors)
+  if (sent === 0) {
+    pushMissed = { count: pushMissed.count + 1, last: Date.now() }
+    console.log(`[deck] ${new Date().toISOString()} web push sin entrega (${subs.length} subscriptions): "${payload.title}" — ${pushMissed.count} perdidas`)
+  }
   return sent
 }
 
@@ -1652,7 +1587,7 @@ app.post('/api/push/send', async (c) => {
 // La matemática del modo remoto: `deck away` mantiene la Mac despierta a
 // batería → si se agota, se cae el tailnet y quedás afuera hasta volver
 // físicamente. El panel muestra el estado y un watcher server-side avisa por
-// ntfy ANTES de que pase (el push tiene que salir sin ningún cliente mirando).
+// web push ANTES de que pase (el push tiene que salir sin ningún cliente mirando).
 // Parsing defensivo: el formato de pmset es estable pero no documentado —
 // cualquier miss devuelve null y la UI degrada (Mac de escritorio sin batería
 // → battery: null y el chip no se renderiza).
@@ -1736,7 +1671,12 @@ app.get('/api/host/status', async (c) => {
     readHostBattery(),
     readSleepDisabled(),
   ])
-  return c.json({ name, battery, ac, sleepDisabled, uptime: Math.round(os.uptime()), alert: readHostAlert() })
+  // pushMissed viaja acá (y no en un endpoint propio) porque este status ya se
+  // pollea cada 8 s + visibilitychange: el aviso de suscripción caída sale gratis
+  return c.json({
+    name, battery, ac, sleepDisabled, uptime: Math.round(os.uptime()), alert: readHostAlert(),
+    pushMissed: pushMissed.count > 0 ? pushMissed : null,
+  })
 })
 
 app.post('/api/host/alert', async (c) => {
@@ -1766,21 +1706,6 @@ app.post('/api/host/alert', async (c) => {
   return c.json({ ok: true, alert: next })
 })
 
-// push directo a ntfy, mismo formato que scripts/notify.sh (Title/Tags/body);
-// NTFY_TOPIC sale del .env ya cargado — sin topic, silencio (mejor esfuerzo)
-async function ntfyPush(title: string, body: string): Promise<void> {
-  const topic = process.env.NTFY_TOPIC
-  if (!topic) return
-  try {
-    await fetch(`https://ntfy.sh/${topic}`, {
-      method: 'POST',
-      headers: { Title: title, Tags: 'battery' },
-      body,
-      signal: AbortSignal.timeout(5000),
-    })
-  } catch { /* mejor esfuerzo: el próximo cruce re-armado reintenta */ }
-}
-
 // Watcher de batería: UNA notificación por episodio de descarga, con
 // histéresis — se re-arma recién al volver a corriente o al subir por encima
 // de umbral + margen (cargas parciales cortas no re-disparan a cada rato).
@@ -1800,11 +1725,9 @@ setInterval(async () => {
       battAlertFired = true // antes del push: un error de red no debe spamear
       const title = await hostName()
       const body = `🔋 Batería al ${battery.pct}% y descargando. Si se agota perdés el acceso al tailnet — enchufá la Mac o cerrá lo que no uses.`
-      // web push primero (tocar la notificación abre la PWA); ntfy queda solo
-      // como fallback sin suscripción/entrega, hasta retirarlo (tarea 26)
+      // web push, única vía (tarea 26); sin entrega queda el log + pushMissed
       const sent = await sendWebPush({ title, body, url: '/', tag: 'battery' })
-      console.log(`[deck] ${new Date().toISOString()} batería ${battery.pct}% < ${alert.threshold}% descargando → ${sent >= 1 ? `web push (${sent})` : 'push ntfy (web push sin entrega)'}`)
-      if (sent < 1) await ntfyPush(title, body)
+      console.log(`[deck] ${new Date().toISOString()} batería ${battery.pct}% < ${alert.threshold}% descargando → web push (${sent})`)
     }
   } catch { /* el watcher jamás tira el server */ }
 }, BATT_WATCH_MS)

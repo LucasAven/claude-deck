@@ -1,10 +1,11 @@
 // Web Push nativo de la PWA (tarea 23): opt-in de notificaciones que, al
 // tocarlas, abren la app instalada (el service worker las maneja) en vez de una
 // pestaña nueva de Safari. Todo el flujo del browser vive acá; el server guarda
-// la subscription (lib/api → /api/push/*) y notify.sh la usa para las pushes
-// planas. En iOS esto SOLO funciona dentro de la PWA instalada (Add to Home
+// la subscription (lib/api → /api/push/*) y notify.sh la usa para TODOS los
+// eventos — es la única vía de notificación desde que ntfy se retiró (tarea
+// 26). En iOS esto SOLO funciona dentro de la PWA instalada (Add to Home
 // Screen) y con permiso otorgado desde ahí — el botón se oculta si no hay
-// soporte, así la degradación a ntfy es silenciosa.
+// soporte (ahí simplemente no hay pushes).
 import { api } from './api'
 import { useDeckStore } from '../store'
 
@@ -74,8 +75,8 @@ export async function subscribePush(): Promise<void> {
     })
     set('on')
   } catch (e) {
-    // 401 lo maneja api(); cualquier otro fallo deja el estado en off (ntfy
-    // sigue cubriendo, así que no es un error visible para el usuario)
+    // 401 lo maneja api(); cualquier otro fallo deja el estado en off — el
+    // botón queda apagado y se puede reintentar con otro tap
     if (String((e as Error).message) !== '401') set('off')
   }
 }

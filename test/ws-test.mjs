@@ -619,81 +619,22 @@ try {
   fs.rmSync(CK_REPO, { recursive: true, force: true });
 }
 
-// 9n. POST /api/approve-nonce + POST /api/approve (tarea 2): Permitir/Denegar
-// desde la notificación ntfy. Sesión scratch deck-appr con un menú de permiso
-// SIMULADO en el pane (printf del marker "1. Yes" + "Esc to cancel", y un `cat`
-// que capta las teclas enviadas por send-keys). No arranca un claude real: la
-// numeración/teclas ya están verificadas contra un claude vivo (probe de la
-// tarea 2, allow=`1` / deny=Escape); acá se prueba el ciclo de vida del nonce,
-// la exención de auth acotada y el guard anti-menú-viejo.
-const NONCE_TTL = Number(process.env.DECK_APPROVE_NONCE_TTL_MS) || 0;
-const nonceFor = async (session = 'deck-appr') => (await (await fetch(`${HTTP}/api/approve-nonce`, {
-  method: 'POST', headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
-  body: JSON.stringify({ session }),
-})).json()).nonce;
-const approve = (nonce, answer) => fetch(`${HTTP}/api/approve?nonce=${nonce}&answer=${answer}`, { method: 'POST' });
-try {
-  try { execFileSync('tmux', ['kill-session', '-t', '=deck-appr'], { stdio: 'ignore' }); } catch {}
-  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-appr', '-x', '100', '-y', '30']);
-  const MENU = 'printf "\\342\\235\\257 1. Yes\\n   2. Yes, and always allow\\n   3. No\\nEsc to cancel\\n"; cat';
-  execFileSync('tmux', ['send-keys', '-t', '=deck-appr:', '-l', MENU]);
-  execFileSync('tmux', ['send-keys', '-t', '=deck-appr:', 'Enter']);
-  await new Promise((r) => setTimeout(r, 700));
-
-  const n1 = await nonceFor();
-  ok('approve-nonce → nonce de 32 hex', /^[0-9a-f]{32}$/.test(n1 || ''));
-
-  const noAuthIssue = await fetch(`${HTTP}/api/approve-nonce`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: 'deck-appr' }),
-  });
-  ok('approve-nonce cookie-less → 401', noAuthIssue.status === 401);
-
-  const badSess = await fetch(`${HTTP}/api/approve-nonce`, {
-    method: 'POST', headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' }, body: JSON.stringify({ session: 'mal!nombre' }),
-  });
-  ok('approve-nonce sesión inválida → 400', badSess.status === 400);
-  const missSess = await fetch(`${HTTP}/api/approve-nonce`, {
-    method: 'POST', headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' }, body: JSON.stringify({ session: 'no-existe-x' }),
-  });
-  ok('approve-nonce sesión inexistente → 404', missSess.status === 404);
-
-  // approve SIN token (ruta exenta) + guard ve el menú → 200 y la tecla '1' cae
-  ok('approve allow (exento, sin token) → 200', (await approve(n1, 'allow')).status === 200);
-  await new Promise((r) => setTimeout(r, 400));
-  const pane = execFileSync('tmux', ['capture-pane', '-p', '-t', '=deck-appr:']).toString();
-  ok("allow: tecla '1' llegó al pane", pane.split('\n').includes('1'));
-
-  ok('replay del nonce consumido → 401', (await approve(n1, 'allow')).status === 401);
-  ok('nonce basura → 401', (await approve('deadbeef', 'allow')).status === 401);
-
-  const n2 = await nonceFor();
-  ok('answer inválido → 400', (await approve(n2, 'maybe')).status === 400);
-  ok('nonce sobrevive answer inválido, deny → 200', (await approve(n2, 'deny')).status === 200);
-
-  // guard 409: matar el cat → prompt de shell pelado, sin marker de permiso
-  execFileSync('tmux', ['send-keys', '-t', '=deck-appr:', 'C-c']);
-  await new Promise((r) => setTimeout(r, 300));
-  execFileSync('tmux', ['send-keys', '-t', '=deck-appr:', '-l', 'clear']);
-  execFileSync('tmux', ['send-keys', '-t', '=deck-appr:', 'Enter']);
-  await new Promise((r) => setTimeout(r, 400));
-  const n3 = await nonceFor();
-  ok('guard anti-menú-viejo → 409', (await approve(n3, 'allow')).status === 409);
-  ok('nonce consumido aún con 409 (replay 401)', (await approve(n3, 'deny')).status === 401);
-
-  // la exención NO aflojó nada más: vecino /api/* sin cookie → 401; GET (no POST) a approve → 401
-  ok('vecino /api/tmux/sessions cookie-less → 401', (await fetch(`${HTTP}/api/tmux/sessions`)).status === 401);
-  ok('GET /api/approve (no exento) → 401', (await fetch(`${HTTP}/api/approve?nonce=x&answer=allow`)).status === 401);
-
-  // expiry: solo si el server corre con TTL corto (DECK_APPROVE_NONCE_TTL_MS);
-  // contra el server real (TTL 2 min) se saltea para no colgar la suite.
-  if (NONCE_TTL > 0 && NONCE_TTL <= 3000) {
-    const n4 = await nonceFor();
-    await new Promise((r) => setTimeout(r, NONCE_TTL + 400));
-    ok('nonce expirado → 401', (await approve(n4, 'allow')).status === 401);
-  }
-} finally {
-  try { execFileSync('tmux', ['kill-session', '-t', '=deck-appr'], { stdio: 'ignore' }); } catch {}
-}
+// 9n. Retiro de ntfy (tarea 26): los endpoints Permitir/Denegar de la tarea 2
+// (/api/approve-nonce + /api/approve, con /api/approve EXENTO del auth) se
+// borraron junto con la rama ntfy de notify.sh. Acá se verifica que la
+// superficie quedó cerrada: sin token corta el auth (la exención ya no existe)
+// y con token la ruta no existe.
+ok('POST /api/approve sin token → 401 (exención retirada)',
+  (await fetch(`${HTTP}/api/approve?nonce=x&answer=allow`, { method: 'POST' })).status === 401);
+ok('POST /api/approve con token → 404 (ruta retirada)',
+  (await fetch(`${HTTP}/api/approve?nonce=x&answer=allow`, {
+    method: 'POST', headers: { 'x-deck-token': TOKEN },
+  })).status === 404);
+ok('POST /api/approve-nonce con token → 404 (ruta retirada)',
+  (await fetch(`${HTTP}/api/approve-nonce`, {
+    method: 'POST', headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+    body: JSON.stringify({ session: 'deck' }),
+  })).status === 404);
 
 // 9o. GET /api/claude/status (tarea 22): statusline del panel. Contrato blando
 // como el semáforo — sesión inválida → 400, pero presente/ausente/roto → 200
@@ -775,6 +716,12 @@ try {
   ok('push/send → 200 {sent:N} (entrega falla → sent:0, sin tirar)', send.status === 200
     && (await send.json()).sent === 0);
 
+  // pushMissed (tarea 26): web push es la única vía — un envío sin entrega
+  // tiene que quedar contado y visible en /api/host/status (banner del panel)
+  const hs1 = await (await fetch(`${HTTP}/api/host/status`, { headers: { 'x-deck-token': TOKEN } })).json();
+  ok('host/status pushMissed refleja el envío sin entrega',
+    !!hs1.pushMissed && hs1.pushMissed.count >= 1 && hs1.pushMissed.last > 0);
+
   const uns = await pushPost('unsubscribe', { endpoint: FAKE_SUB.endpoint });
   ok('push/unsubscribe → {removed:1} y la lista queda vacía', uns.status === 200
     && (await uns.json()).removed === 1
@@ -782,6 +729,12 @@ try {
 
   // sin subscripciones, send entrega a nadie
   ok('push/send sin subs → sent:0', (await (await pushPost('send', { title: 'T', body: 'x' })).json()).sent === 0);
+
+  // re-suscribir salda el aviso: el contador vuelve a cero (null en el status)
+  await pushPost('subscribe', { subscription: FAKE_SUB });
+  const hs2 = await (await fetch(`${HTTP}/api/host/status`, { headers: { 'x-deck-token': TOKEN } })).json();
+  ok('push/subscribe resetea pushMissed → null', hs2.pushMissed === null);
+  await pushPost('unsubscribe', { endpoint: FAKE_SUB.endpoint });
 } finally {
   if (subsBackup !== null) fs.writeFileSync(SUBS_FILE, subsBackup);
   else fs.rmSync(SUBS_FILE, { force: true });

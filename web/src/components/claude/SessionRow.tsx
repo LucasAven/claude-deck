@@ -87,9 +87,10 @@ export function SessionRow() {
   const stateByName: Record<string, string | undefined> = {}
   for (const s of sessions) stateByName[s.name] = s.state
 
-  // botón de opt-in de Web Push (tarea 23): oculto si el browser no soporta
-  // (degradación silenciosa a ntfy). Ámbar cuando estás suscripto; el tap
-  // alterna suscribir/desuscribir (o informa el permiso denegado).
+  // botón de opt-in de Web Push (tarea 23): oculto si el browser no soporta.
+  // Es LA fuente de notificaciones (ntfy se retiró, tarea 26). Ámbar cuando
+  // estás suscripto; el tap alterna suscribir/desuscribir (o informa el
+  // permiso denegado).
   const pushState = useDeckStore((s) => s.pushState)
   const pushTitle =
     pushState === 'on'
