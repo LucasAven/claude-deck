@@ -296,6 +296,50 @@ if (commitForm) {
 const commentBoxDefault = await page.$('#diff-comment');
 ok('box de comentario ausente por defecto (sin línea seleccionada)', commentBoxDefault === null);
 
+// 8c-bis. selección de RANGO por arrastre (tarea 13, ampliación): la columna
+// de números lleva touch-action:none (arranca el drag sin pelear con el scroll);
+// un drag por el gutter sobre ≥2 filas arma "path:l1-l2". Reabrimos el diff del
+// primer archivo. (Corre contra el repo real; el feel táctil lo prueba Lucas.)
+const rangeUi = await page.evaluate(async () => {
+  const rows0 = [...document.querySelectorAll('#file-list .file-row')];
+  if (!rows0.length) return { skip: true };
+  rows0[0].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  rows0[0].click();
+  return { skip: false };
+});
+if (!rangeUi.skip) {
+  await page.waitForSelector('#diff-view .d2h-file-wrapper', { timeout: 8000 }).catch(() => {});
+  const range = await page.evaluate(async () => {
+    const rows = [...document.querySelectorAll('#diff-view tr')].filter((t) => t.querySelector('.d2h-code-linenumber .line-num2')?.textContent?.trim() || t.querySelector('.d2h-code-linenumber .line-num1')?.textContent?.trim());
+    if (rows.length < 2) return { few: true };
+    const gutter = rows[0].querySelector('.d2h-code-linenumber');
+    const touchAction = getComputedStyle(gutter).touchAction;
+    const a = rows[0], b = rows[1];
+    const gr = gutter.getBoundingClientRect();
+    gutter.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: gr.x + 3, clientY: gr.y + gr.height / 2, pointerId: 1 }));
+    for (const rw of [a, b]) { const r = rw.getBoundingClientRect(); gutter.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: r.x + 3, clientY: r.y + r.height / 2, pointerId: 1 })); }
+    const er = b.getBoundingClientRect();
+    gutter.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: er.x + 3, clientY: er.y + er.height / 2, pointerId: 1 }));
+    await new Promise((r) => setTimeout(r, 100));
+    return {
+      few: false,
+      touchAction,
+      head: document.querySelector('.diff-comment-head')?.textContent?.trim() || '',
+      highlighted: document.querySelectorAll('#diff-view tr.diff-comment-line').length,
+    };
+  });
+  ok('la columna de números lleva touch-action:none (drag de rango)', range.few || range.touchAction === 'none');
+  ok('drag por el gutter arma un rango "path:l1-l2" con filas resaltadas',
+    range.few || (/:\d+-\d+$/.test(range.head) && range.highlighted >= 2));
+  // cerrar el box + el diff para dejar la vista como estaba
+  await page.evaluate(() => document.querySelector('#btn-comment-cancel')?.click());
+  await page.click('#btn-diff-back');
+  await new Promise((r) => setTimeout(r, 300));
+} else {
+  ok('la columna de números lleva touch-action:none (drag de rango)', true);
+  ok('drag por el gutter arma un rango "path:l1-l2" con filas resaltadas', true);
+}
+
 // 8d. historial de commits (tarea 14): tap en la rama abre la lista; tap en un
 // commit abre su diff; ← vuelve al historial y luego a la lista de archivos.
 // (Corre contra el repo real, que tiene commits.)

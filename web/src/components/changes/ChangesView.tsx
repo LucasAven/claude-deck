@@ -160,6 +160,9 @@ export function ChangesView() {
   const [comment, setComment] = useState<{ path: string; line: string } | null>(null)
   const [commentText, setCommentText] = useState('')
   const tapDown = useRef<{ x: number; y: number } | null>(null)
+  // Arrastre de rango (tarea 13, ampliación): el <tr> ancla desde donde empezó
+  // el drag en la columna de números. Ver el porqué del mecanismo abajo.
+  const rangeAnchor = useRef<HTMLElement | null>(null)
   // El path del diff abierto, en un ref: los handlers de puntero son estables
   // (van en el elemento memoizado del diff — ver diffBody) así que no pueden
   // cerrar sobre `diff` directamente sin quedar viejos.
@@ -171,33 +174,88 @@ export function ChangesView() {
     diffRef.current?.querySelectorAll('.diff-comment-line').forEach((el) => el.classList.remove('diff-comment-line'))
   }, [])
 
-  // Delegación en el contenedor (los rows entran por innerHTML). Tap con slop:
-  // sólo cuenta si el dedo casi no se movió — así no pelea con el scroll táctil
-  // del diff (mismo criterio que useTap). Si peleara igual, queda anotado para
-  // que Lucas lo pruebe en el celu (no cambiar el gesto sin su ok).
+  // nº de línea de una fila de código (nuevo, o el viejo en borrados); '' si no es una.
+  const rowLine = (tr: Element): string => {
+    const ln = tr.querySelector('.d2h-code-linenumber')
+    if (!ln) return ''
+    return (ln.querySelector('.line-num2')?.textContent?.trim() || ln.querySelector('.line-num1')?.textContent?.trim() || '')
+  }
+  // filas de código del diff, en orden del DOM (sin hunk headers ni placeholders).
+  const codeRows = (): HTMLElement[] =>
+    [...(diffRef.current?.querySelectorAll('tr') ?? [])].filter((tr) => tr.querySelector('.d2h-code-linenumber')) as HTMLElement[]
+
+  // Delegación en el contenedor (los rows entran por innerHTML). Dos gestos:
+  //   · TAP con slop → una línea (igual que antes; no pelea con el scroll).
+  //   · DRAG desde la COLUMNA DE NÚMEROS → rango de líneas.
+  // Mecanismo del rango (elegido con evidencia): `touch-action: none` SOLO en
+  // `.d2h-code-linenumber` (ver app.css) — un toque que arranca en el gutter no
+  // lo consume el scroll del navegador, así que el drag es nuestro; un toque que
+  // arranca sobre el código scrollea como siempre. Por eso el ancla sólo se arma
+  // si el pointerdown cae en el gutter. (El long-press-para-armar se descartó:
+  // competía con el tap simple y seguía necesitando cancelar el scroll a mano.)
+  // Si el feel del drag queda dudoso en touch real, queda para que Lucas lo
+  // pruebe en el celu — no cambiar el gesto sin su ok.
   const onDiffPointerDown = useCallback((e: React.PointerEvent) => {
     tapDown.current = { x: e.clientX, y: e.clientY }
+    rangeAnchor.current = null
+    const gutter = (e.target as HTMLElement).closest('.d2h-code-linenumber')
+    const tr = gutter?.closest('tr') as HTMLElement | undefined
+    if (tr && rowLine(tr)) rangeAnchor.current = tr // drag potencial de rango
   }, [])
-  const onDiffPointerUp = useCallback((e: React.PointerEvent) => {
-    const TAP_SLOP = 10
-    const down = tapDown.current
-    tapDown.current = null
-    const path = diffFileRef.current
-    if (!down || !path) return
-    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > TAP_SLOP) return // fue scroll
-    const tr = (e.target as HTMLElement).closest('tr')
-    if (!tr || !diffRef.current?.contains(tr)) return
-    const lnCell = tr.querySelector('.d2h-code-linenumber')
-    if (!lnCell) return // fila de contexto de hunk (.d2h-info) o placeholder vacío
-    const n2 = lnCell.querySelector('.line-num2')?.textContent?.trim()
-    const n1 = lnCell.querySelector('.line-num1')?.textContent?.trim()
-    const line = n2 || n1 // número del archivo nuevo; para borrados cae al viejo
-    if (!line) return
-    clearHighlight()
-    tr.classList.add('diff-comment-line')
-    setComment({ path, line })
-    setCommentText('')
-  }, [clearHighlight])
+  const onDiffPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!rangeAnchor.current) return // sólo si el drag arrancó en el gutter
+      // el toque tiene captura implícita del gutter, así que el elemento bajo el
+      // dedo se busca con elementFromPoint (e.target queda pegado al ancla).
+      const tr = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('tr') as HTMLElement | null
+      if (!tr || !diffRef.current?.contains(tr) || !rowLine(tr)) return
+      const rows = codeRows()
+      const ia = rows.indexOf(rangeAnchor.current)
+      const ib = rows.indexOf(tr)
+      if (ia === -1 || ib === -1) return
+      const [lo, hi] = ia <= ib ? [ia, ib] : [ib, ia]
+      clearHighlight()
+      for (let i = lo; i <= hi; i++) rows[i].classList.add('diff-comment-line')
+    },
+    [clearHighlight],
+  )
+  const onDiffPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      const TAP_SLOP = 10
+      const down = tapDown.current
+      const startedInGutter = rangeAnchor.current !== null
+      tapDown.current = null
+      rangeAnchor.current = null
+      const path = diffFileRef.current
+      if (!path) return
+
+      // ¿Se resaltó un rango durante el drag? (arranque en el gutter + movimiento)
+      if (startedInGutter) {
+        const nums = codeRows().filter((tr) => tr.classList.contains('diff-comment-line')).map(rowLine).map(Number)
+        if (nums.length) {
+          const l1 = Math.min(...nums)
+          const l2 = Math.max(...nums)
+          setComment({ path, line: l1 === l2 ? String(l1) : `${l1}-${l2}` })
+          setCommentText('')
+          return
+        }
+        // no se movió sobre ninguna fila (tap en el gutter) → cae al tap simple
+      }
+
+      // TAP simple (con slop): una sola línea.
+      if (!down) return
+      if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > TAP_SLOP) return // fue scroll
+      const tr = (e.target as HTMLElement).closest('tr')
+      if (!tr || !diffRef.current?.contains(tr)) return
+      const line = rowLine(tr)
+      if (!line) return // fila de contexto de hunk (.d2h-info) o placeholder vacío
+      clearHighlight()
+      tr.classList.add('diff-comment-line')
+      setComment({ path, line })
+      setCommentText('')
+    },
+    [clearHighlight],
+  )
 
   const clearComment = () => {
     clearHighlight()
@@ -305,6 +363,7 @@ export function ChangesView() {
           ref={diffRef}
           className="scroll"
           onPointerDown={onDiffPointerDown}
+          onPointerMove={onDiffPointerMove}
           onPointerUp={onDiffPointerUp}
           dangerouslySetInnerHTML={{ __html: diff.html }}
         />
@@ -334,7 +393,7 @@ export function ChangesView() {
           ))}
       </div>
     )
-  }, [diff, onDiffPointerDown, onDiffPointerUp])
+  }, [diff, onDiffPointerDown, onDiffPointerMove, onDiffPointerUp])
 
   const inHistory = history !== null
 
