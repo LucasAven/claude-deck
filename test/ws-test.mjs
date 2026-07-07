@@ -695,6 +695,42 @@ try {
   try { execFileSync('tmux', ['kill-session', '-t', '=deck-appr'], { stdio: 'ignore' }); } catch {}
 }
 
+// 9o. GET /api/claude/status (tarea 22): statusline del panel. Contrato blando
+// como el semáforo — sesión inválida → 400, pero presente/ausente/roto → 200
+// con {status:{...}|null}, nunca error. El <sesión>.status.json lo escribe el
+// hook statusLine (scripts/statusline.sh); acá se simula escribiéndolo directo
+// (nombre scratch, no una sesión real; se limpia al salir).
+const STATUS_FILE = `${os.homedir()}/.claude-deck/state/wsstat22.status.json`;
+const statusGet = (session) => fetch(`${HTTP}/api/claude/status?session=${session}`, { headers: { 'x-deck-token': TOKEN } });
+try {
+  fs.mkdirSync(`${os.homedir()}/.claude-deck/state`, { recursive: true });
+  fs.rmSync(STATUS_FILE, { force: true });
+  const absent = await statusGet('wsstat22');
+  ok('status ausente → { status: null } 200', absent.status === 200 && (await absent.json()).status === null);
+
+  const bad = await statusGet('mal!nombre');
+  ok('status sesión inválida → 400', bad.status === 400);
+
+  fs.writeFileSync(STATUS_FILE, JSON.stringify({
+    model: 'Opus 4.8', modelId: 'claude-opus-4-8', ctxPct: 42, ctxSize: 200000,
+    inputTokens: 84000, outputTokens: 120, costUsd: 1.2345, exceeds200k: false,
+  }));
+  const present = await statusGet('wsstat22');
+  const pj = await present.json();
+  ok('status presente → { status: {...} } 200', present.status === 200
+    && pj.status?.ctxPct === 42 && pj.status?.model === 'Opus 4.8'
+    && pj.status?.inputTokens === 84000 && pj.status?.exceeds200k === false);
+
+  fs.writeFileSync(STATUS_FILE, 'no es json{');
+  const broken = await statusGet('wsstat22');
+  ok('status JSON roto → { status: null } 200', broken.status === 200 && (await broken.json()).status === null);
+
+  const noauth = await fetch(`${HTTP}/api/claude/status?session=wsstat22`);
+  ok('status sin token → 401', noauth.status === 401);
+} finally {
+  fs.rmSync(STATUS_FILE, { force: true });
+}
+
 // 10. sesión inexistente → 404
 const nf = await fetch(`${HTTP}/api/git/summary?session=no-existe`, { headers: { 'x-deck-token': TOKEN } });
 ok('?session= inexistente → 404', nf.status === 404);

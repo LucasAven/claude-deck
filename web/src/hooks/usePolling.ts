@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useDeckStore } from '../store'
 import { refreshHost } from '../lib/host'
+import { refreshStatus } from '../lib/status'
 import { refreshTree } from '../lib/files'
 
 // Auto-refresh cada 8 s mientras la pestaña esté visible + manejo de
@@ -19,7 +20,10 @@ export function usePolling() {
       refreshGit()
       refreshHost()
       const tab = useDeckStore.getState().activeTab
-      if (tab === 'claude') refreshSessions()
+      if (tab === 'claude') {
+        refreshSessions()
+        refreshStatus() // statusline: solo la sesión activa (piggyback, tarea 22)
+      }
       if (tab === 'files') refreshTree(false) // sigue el cwd del pane: re-render solo si cambió la raíz
     }, 8000)
 
@@ -31,6 +35,7 @@ export function usePolling() {
         refreshGit()
         refreshHost()
         refreshSessions()
+        refreshStatus()
         if (useDeckStore.getState().activeTab === 'files') refreshTree(false)
         // iOS suele matar los WS en background: reconectar sin esperar backoff
         window.claudeConn?.resume()

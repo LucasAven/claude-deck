@@ -142,9 +142,11 @@ Para enterarte en el celular cuando Claude pide un permiso o termina una tarea:
    mv .claude/settings.example.json .claude/settings.json
    ```
 
-   Eso registra hooks en los eventos `Notification` (Claude espera tu input), `PermissionRequest` (Claude pide un permiso) y `Stop` (Claude terminó), que ejecutan `scripts/notify.sh` → `curl` a `ntfy.sh/$NTFY_TOPIC`. Además registra `UserPromptSubmit` y `PreToolUse` (y los mismos tres de arriba) ejecutando `scripts/state.sh`, que alimenta el semáforo de los chips (ver abajo) — no manda push. Ver "Hooks" en la doc oficial de Claude Code.
+   Eso registra hooks en los eventos `Notification` (Claude espera tu input), `PermissionRequest` (Claude pide un permiso) y `Stop` (Claude terminó), que ejecutan `scripts/notify.sh` → `curl` a `ntfy.sh/$NTFY_TOPIC`. Además registra `UserPromptSubmit` y `PreToolUse` (y los mismos tres de arriba) ejecutando `scripts/state.sh`, que alimenta el semáforo de los chips (ver abajo) — no manda push. Y un `statusLine` que ejecuta `scripts/statusline.sh`, que alimenta la statusline del panel (contexto/tokens, ver abajo). Ver "Hooks" en la doc oficial de Claude Code.
 
-   > Nota: los hooks aplican al `claude` que corras **en este repo**. Para tener push (y semáforo) trabajando en cualquier repo, definí los hooks en el `settings.json` global (`~/.claude/settings.json`) con las rutas absolutas de `scripts/notify.sh` y `scripts/state.sh` — los scripts son autocontenidos; notify.sh lee el topic del `.env` de este repo.
+   > Nota: los hooks aplican al `claude` que corras **en este repo**. Para tener push (y semáforo, y statusline) trabajando en cualquier repo, definí los hooks en el `settings.json` global (`~/.claude/settings.json`) con las rutas absolutas de `scripts/notify.sh`, `scripts/state.sh` y `scripts/statusline.sh` — los scripts son autocontenidos; notify.sh lee el topic del `.env` de este repo.
+   >
+   > `statusLine` es un único objeto por perfil (no una lista de hooks): si ya tenés una statusline propia, `statusline.sh` la **encadena** (le pasa el mismo stdin y muestra su salida) en vez de reemplazarla — apuntá `DECK_STATUSLINE_CHAIN` a tu script si no está en `~/.claude/statusline-command.sh`.
 
 El push es **contextual**: el título es el nombre de la sesión tmux, y el cuerpo dice qué pasa — con el hook `PermissionRequest`, el tool y el comando exacto que Claude quiere correr (`Bash: npm publish` + su descripción); con `Notification` solo, el mensaje genérico del evento; con `Stop`, un resumen de la última respuesta. Si ambos eventos de permiso están hookeados no hay push doble: el genérico se suprime solo (marcador con TTL en `$TMPDIR`). Si `DECK_URL` está en el `.env` (la escriben `deck install`/`deck url` al configurar tailscale serve), tocar la notificación abre el panel **con esa sesión ya seleccionada** (`?session=`).
 
@@ -159,6 +161,14 @@ Además el push se **suprime si ya estás mirando** (presencia): con la Mac desb
 ### Semáforo de sesiones (punto en el chip)
 
 Cada chip de sesión muestra un punto con lo que su Claude está haciendo: **verde = trabajando, ámbar = espera tu input, gris = idle**. Lo alimentan los mismos hooks: `scripts/state.sh` escribe el estado en `~/.claude-deck/state/<sesión>` (`UserPromptSubmit`/`PreToolUse` → working, `Notification`/`PermissionRequest` → waiting, `Stop` → idle) y el server lo mezcla en `GET /api/tmux/sessions`. El mismo script anota además el `transcript_path` que trae cada evento (`<sesión>.transcript`) — es lo que le permite al overlay 📜 saber qué `.jsonl` corresponde a cada sesión tmux. Una sesión sin registro (un shell pelado, o un `claude` sin estos hooks) no muestra punto. Un `working` sin señales por más de 5 min decae a "sin punto" (un claude matado con `kill` nunca emite `Stop`); `waiting` e `idle` no decaen — un permiso pendiente sigue en ámbar aunque vuelvas horas después.
+
+### Statusline del panel (contexto y tokens)
+
+Una línea fina y discreta arriba de la barra de teclas rápidas, como el `statusLine` de Claude Code pero en el celu: **% de contexto usado**, **tokens de input**, y de yapa **modelo** y **costo de la sesión**. Se pone ámbar al 75% y roja al 90% (o si Claude ya superó los 200k), para que veas de un vistazo cuándo conviene `/compact`.
+
+La fuente es el hook `statusLine` de Claude Code: `scripts/statusline.sh` recibe por stdin el JSON con `model`/`context_window`/`cost`, escribe un `~/.claude-deck/state/<sesión>.status.json` curado (escritura atómica, mismo patrón que el semáforo) y **pasa el stdin a tu statusline previa** (`DECK_STATUSLINE_CHAIN`, default `~/.claude/statusline-command.sh`) para no pisarte la línea de la terminal — si no tenés una, renderea una mínima. El server lo sirve en `GET /api/claude/status?session=` y el frontend lo lee **en el poll existente** (sin poll nuevo). Sin el hook activo (o antes del primer turno) la línea simplemente no aparece.
+
+Para activarlo hay que registrar el hook `statusLine` en el `settings.json` (ver "Activar notificaciones" abajo y `settings.example.json`); como es un único objeto por perfil, `statusline.sh` está pensado para **encadenar** tu statusline existente en vez de reemplazarla.
 
 ### Panel de host y alerta de batería
 
@@ -194,6 +204,7 @@ Todas las rutas requieren auth (cookie o header `x-deck-token`).
 | `DELETE /api/tmux/sessions/:name` | Mata la sesión tmux (y su `*-shell` acompañante si quedó de la v1) |
 | `PATCH /api/tmux/sessions/:name` | Renombra la sesión (y su `*-shell` si existe). Body JSON: `{ "newName": "<nombre>" }` (letras/números/`-`/`_`, máx 32, sufijo `-shell` reservado). 409 si el nombre ya existe |
 | `GET /api/claude/transcript?session=<s>&bytes=<n>` | Turnos legibles (vos/Claude/tools) del transcript `.jsonl` de la sesión — fuente primaria del overlay 📜. El `.jsonl` lo apunta el marker que escriben los hooks (`state.sh`); sin marker responde `{ turns: [] }` y la UI cae a `capture-pane`. `bytes` acota la cola leída (default 2 MB, máx 32 MB) |
+| `GET /api/claude/status?session=<s>` | Statusline del panel: `{ status: { model, modelId, ctxPct, ctxSize, inputTokens, outputTokens, costUsd, exceeds200k } \| null }` leído del `<sesión>.status.json` que escribe el hook `statusLine` (`scripts/statusline.sh`). Contrato blando: sesión inválida → 400, pero ausente/roto → 200 con `{ status: null }` (nunca error) |
 | `GET /api/tmux/scrollback?session=<s>&lines=<n>` | Últimas `n` líneas del pane vía `capture-pane` (`text/plain`, default 500, máx 5000) — fallback del overlay 📜 para shells. Ojo: Claude Code 2.x corre en alternate screen, tmux nunca acumula SU transcript — por eso existe el endpoint de arriba |
 | `POST /api/paste-image?session=<s>` | Sube una imagen (PNG/JPEG, máx 15 MB): la pone en el clipboard de la Mac y manda `Ctrl+V` a la sesión — Claude Code la ingiere como `[Image #N]`. Fallback: escribe la ruta del archivo en el prompt |
 | `GET /api/git/summary?session=<s>` | Rama, upstream, ahead/behind, archivos |

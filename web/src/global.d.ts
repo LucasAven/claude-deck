@@ -21,4 +21,5 @@ interface Window {
   refreshTree?: (force: boolean) => Promise<void>
   refreshSessions?: () => Promise<void>
   refreshHost?: () => Promise<void>
+  refreshClaudeStatus?: () => Promise<void>
 }

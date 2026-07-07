@@ -1384,6 +1384,64 @@ ok('dispatch: el segundo tap confirma y postea el body correcto (mode auto + mod
   && dispRun.postedBody.mode === 'auto' && dispRun.postedBody.model === 'opus'
   && dispRun.postedBody.effort === 'high' && dispRun.sheetClosedAfterPost);
 
+// 21. statusline del panel (tarea 22): línea fina con % de contexto + tokens
+// (+ modelo y costo). /api/claude/status mockeado sobre window.fetch; se maneja
+// con refreshClaudeStatus() (puente global, como refreshHost). Se verifica el
+// render del %, tokens compactos, y el umbral de color (ok/warn/alert), más el
+// caso null (línea oculta) y ctxPct null (muestra "—").
+const slRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  let mock = null; // { status: {...} | null }
+  window.fetch = (url, opts) => {
+    if (String(url).includes('/api/claude/status')) {
+      return Promise.resolve(new Response(JSON.stringify(mock), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+  const sl = document.querySelector('#statusline');
+  const out = {};
+
+  // sin datos (hook inactivo) → línea oculta
+  mock = { status: null };
+  await window.refreshClaudeStatus(); await frame();
+  out.hiddenWhenNull = sl.classList.contains('hidden');
+
+  // contexto sano (42%) → visible, ok, tokens compactos + modelo + costo
+  mock = { status: { model: 'Opus 4.8', modelId: 'claude-opus-4-8', ctxPct: 42, ctxSize: 200000, inputTokens: 84000, outputTokens: 120, costUsd: 1.2345, exceeds200k: false } };
+  await window.refreshClaudeStatus(); await frame();
+  out.okVisible = !sl.classList.contains('hidden') && sl.classList.contains('sl-ok');
+  out.pct = document.querySelector('#sl-pct').textContent;
+  out.tokens = document.querySelector('#sl-tokens').textContent;
+  out.model = document.querySelector('#sl-model').textContent;
+  out.cost = document.querySelector('#sl-cost').textContent;
+
+  // cerca del límite (78%) → warn
+  mock = { status: { ...mock.status, ctxPct: 78 } };
+  await window.refreshClaudeStatus(); await frame();
+  out.warn = sl.classList.contains('sl-warn');
+
+  // muy cerca (92%) → alert
+  mock = { status: { ...mock.status, ctxPct: 92 } };
+  await window.refreshClaudeStatus(); await frame();
+  out.alert = sl.classList.contains('sl-alert');
+
+  // exceeds200k fuerza alert aunque ctxPct sea bajo/null
+  mock = { status: { ...mock.status, ctxPct: null, exceeds200k: true } };
+  await window.refreshClaudeStatus(); await frame();
+  out.exceedsAlert = sl.classList.contains('sl-alert') && document.querySelector('#sl-pct').textContent === '—';
+
+  window.fetch = realFetch;
+  return out;
+});
+ok('statusline: oculta sin datos (status null)', slRun.hiddenWhenNull);
+ok('statusline: contexto sano → visible, ok, % + tokens + modelo + costo',
+  slRun.okVisible && slRun.pct === '42%' && slRun.tokens === '84k tok'
+  && slRun.model === 'Opus 4.8' && slRun.cost === '$1.23');
+ok('statusline: 78% → warn (ámbar)', slRun.warn);
+ok('statusline: 92% → alert (rojo)', slRun.alert);
+ok('statusline: exceeds200k fuerza alert y % "—"', slRun.exceedsAlert);
+
 await browser.close();
 console.log(results.join('\n'));
 process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);
