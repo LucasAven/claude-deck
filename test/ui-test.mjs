@@ -1106,8 +1106,18 @@ const hostRun = await page.evaluate(async () => {
   await refreshHost(); await frame();
   out.dismissed = banner.classList.contains('hidden');
 
-  // chip → sheet con nombre y las 4 filas del mock; toggle prendido
-  chip.click(); // el chip está pineado fuera de la tira scrolleable: click directo
+  // regresión tarea 20: el host-chip NO debe abrir el sheet con un `click`
+  // pelado. Al cerrar el scrollback (📜) tocando su ✕ —que se solapa con este
+  // chip debajo del overlay— el navegador sintetiza un `click` fantasma sobre el
+  // chip recién expuesto; con onClick eso abría el host-sheet solo. Ahora el
+  // chip va por useTap (solo pointer events), así que ignora el click fantasma.
+  chip.click();
+  await frame();
+  out.chipIgnoresBareClick = sheet.classList.contains('hidden');
+
+  // chip → sheet con nombre y las 4 filas del mock; toggle prendido. El chip
+  // está pineado fuera de la tira scrolleable, pero abre por useTap (pointerup)
+  tap(chip);
   await frame();
   out.sheetOpen = !sheet.classList.contains('hidden');
   out.sheetName = document.querySelector('#host-name').textContent;
@@ -1147,6 +1157,7 @@ ok('host: umbral y toggle reflejan la alerta del server',
 ok('host: toggle manda POST {enabled:false} y se apaga',
   hostRun.toggleOff && hostRun.posts.some((p) => p.enabled === false));
 ok('host: tap en el fondo cierra el sheet', hostRun.sheetClosed);
+ok('host: chip ignora el click fantasma (regresión tarea 20)', hostRun.chipIgnoresBareClick);
 
 // 18. worktree en un tap (tarea 5): long-press en el + abre el menú CREAR
 // (el tap corto sigue creando sesión — acá NO se tapea corto para no crear una

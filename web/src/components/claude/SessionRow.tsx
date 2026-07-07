@@ -62,6 +62,12 @@ export function SessionRow() {
   // tarea 5: el + pasó de click simple a useTap para ganar el long-press (menú
   // CREAR); el tap corto sigue creando sesión igual que siempre
   const addTap = useTap(() => createSession(), openCreateMenu)
+  // el chip de host va con useTap (no onClick): un onClick se dispara con el
+  // `click` fantasma que el navegador sintetiza tras un tap táctil, y al cerrar
+  // el scrollback (📜) tocando su ✕ —que se solapa con este chip debajo del
+  // overlay— ese click fantasma caía acá y abría el host-sheet solo (tarea 20).
+  // useTap solo escucha pointer events, así que ignora ese click fantasma.
+  const hostChipTap = useTap(() => openHostSheet())
 
   // chip 🔋 solo si el host reporta batería (Mac de escritorio / pmset ilegible
   // → null); la barrita interna del ícono refleja el nivel (ancho útil 13.2px)
@@ -83,7 +89,7 @@ export function SessionRow() {
         id="host-chip"
         className={'chip host-chip' + (batt ? '' : ' hidden') + (battLow(hostStatus) ? ' warn' : '')}
         title="Estado de la Mac"
-        onClick={() => openHostSheet()}
+        {...hostChipTap}
       >
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <rect x="2" y="7.5" width="17" height="9" rx="2.5" />
