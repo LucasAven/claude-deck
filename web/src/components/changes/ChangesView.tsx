@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { html as diff2htmlHtml } from 'diff2html'
 import { useDeckStore, type GitFile } from '../../store'
 import { stageFile, fetchDiff, commitChanges, pushChanges } from '../../lib/git'
+import { pasteTextToPrompt } from '../../lib/image'
 
 // Pestaña Cambios (index.html:136-148, app.js:1633-1785). El header + la lista
 // salen de `git` (refreshGit vive en el store); el diff es estado local (esta
@@ -117,6 +118,67 @@ export function ChangesView() {
   const refreshGit = useDeckStore((s) => s.refreshGit)
   const [diff, setDiff] = useState<DiffState | null>(null)
   const diffRef = useRef<HTMLDivElement>(null)
+  // Comentar una línea del diff (tarea 13): estado {path, line} de la línea
+  // seleccionada. La fila resaltada vive dentro de dangerouslySetInnerHTML, así
+  // que el highlight se toggea imperativo sobre el <tr> (§5.7); el box es un
+  // componente normal debajo de #diff-view.
+  const [comment, setComment] = useState<{ path: string; line: string } | null>(null)
+  const [commentText, setCommentText] = useState('')
+  const tapDown = useRef<{ x: number; y: number } | null>(null)
+  // El path del diff abierto, en un ref: los handlers de puntero son estables
+  // (van en el elemento memoizado del diff — ver diffBody) así que no pueden
+  // cerrar sobre `diff` directamente sin quedar viejos.
+  const diffFileRef = useRef<string | null>(null)
+  diffFileRef.current = diff?.file.path ?? null
+
+  // Limpia el highlight ámbar de cualquier fila marcada dentro del diff.
+  const clearHighlight = useCallback(() => {
+    diffRef.current?.querySelectorAll('.diff-comment-line').forEach((el) => el.classList.remove('diff-comment-line'))
+  }, [])
+
+  // Delegación en el contenedor (los rows entran por innerHTML). Tap con slop:
+  // sólo cuenta si el dedo casi no se movió — así no pelea con el scroll táctil
+  // del diff (mismo criterio que useTap). Si peleara igual, queda anotado para
+  // que Lucas lo pruebe en el celu (no cambiar el gesto sin su ok).
+  const onDiffPointerDown = useCallback((e: React.PointerEvent) => {
+    tapDown.current = { x: e.clientX, y: e.clientY }
+  }, [])
+  const onDiffPointerUp = useCallback((e: React.PointerEvent) => {
+    const TAP_SLOP = 10
+    const down = tapDown.current
+    tapDown.current = null
+    const path = diffFileRef.current
+    if (!down || !path) return
+    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > TAP_SLOP) return // fue scroll
+    const tr = (e.target as HTMLElement).closest('tr')
+    if (!tr || !diffRef.current?.contains(tr)) return
+    const lnCell = tr.querySelector('.d2h-code-linenumber')
+    if (!lnCell) return // fila de contexto de hunk (.d2h-info) o placeholder vacío
+    const n2 = lnCell.querySelector('.line-num2')?.textContent?.trim()
+    const n1 = lnCell.querySelector('.line-num1')?.textContent?.trim()
+    const line = n2 || n1 // número del archivo nuevo; para borrados cae al viejo
+    if (!line) return
+    clearHighlight()
+    tr.classList.add('diff-comment-line')
+    setComment({ path, line })
+    setCommentText('')
+  }, [clearHighlight])
+
+  const clearComment = () => {
+    clearHighlight()
+    setComment(null)
+    setCommentText('')
+  }
+
+  const addComment = () => {
+    if (!comment) return
+    const text = commentText.trim()
+    // "En <path>:<line>: <comentario>" → al prompt, SIN enviar; el usuario lo
+    // termina/manda desde la pestaña Claude (se acumulan si agrega varios).
+    pasteTextToPrompt(`En ${comment.path}:${comment.line}: ${text}`)
+    useDeckStore.getState().setActiveTab('claude')
+    clearComment()
+  }
 
   // diff recién pintado (o cambio de archivo): al tope, como view.scrollTop = 0
   useEffect(() => {
@@ -147,6 +209,7 @@ export function ChangesView() {
 
   const closeDiff = () => {
     useDeckStore.setState({ inDiff: false })
+    clearComment() // tarea 13: el box y su highlight se desarman con el diff
     setDiff(null)
     refreshGit()
   }
@@ -158,6 +221,37 @@ export function ChangesView() {
 
   const staged = git?.files.filter((f) => f.staged) ?? []
   const unstaged = git?.files.filter((f) => !f.staged) ?? []
+
+  // El diff-view se memoiza sobre `diff`: abrir/mover el box de comentario
+  // (tarea 13) cambia otro estado, y sin esto React reescribiría el innerHTML
+  // en cada re-render, borrando el highlight imperativo de la fila (§5.7).
+  const diffBody = useMemo(() => {
+    if (diff && diff.html) {
+      return (
+        <div
+          id="diff-view"
+          ref={diffRef}
+          className="scroll"
+          onPointerDown={onDiffPointerDown}
+          onPointerUp={onDiffPointerUp}
+          dangerouslySetInnerHTML={{ __html: diff.html }}
+        />
+      )
+    }
+    return (
+      <div id="diff-view" ref={diffRef} className={'scroll' + (diff ? '' : ' hidden')}>
+        {diff && (
+          <div className="empty-state">
+            {diff.loading
+              ? 'Cargando diff…'
+              : diff.error
+                ? `No se pudo cargar el diff: ${diff.error}`
+                : 'Sin diferencias (¿archivo binario o vacío?)'}
+          </div>
+        )}
+      </div>
+    )
+  }, [diff, onDiffPointerDown, onDiffPointerUp])
 
   return (
     <>
@@ -193,24 +287,29 @@ export function ChangesView() {
         ))}
       </div>
 
-      {diff && diff.html ? (
-        <div
-          id="diff-view"
-          ref={diffRef}
-          className="scroll"
-          dangerouslySetInnerHTML={{ __html: diff.html }}
-        />
-      ) : (
-        <div id="diff-view" ref={diffRef} className={'scroll' + (diff ? '' : ' hidden')}>
-          {diff && (
-            <div className="empty-state">
-              {diff.loading
-                ? 'Cargando diff…'
-                : diff.error
-                  ? `No se pudo cargar el diff: ${diff.error}`
-                  : 'Sin diferencias (¿archivo binario o vacío?)'}
-            </div>
-          )}
+      {diffBody}
+
+      {comment && (
+        <div id="diff-comment" className="diff-comment">
+          <div className="diff-comment-head">
+            En {comment.path}:{comment.line}
+          </div>
+          <textarea
+            id="diff-comment-text"
+            className="diff-comment-input"
+            value={commentText}
+            placeholder="Comentario…"
+            autoFocus
+            onChange={(e) => setCommentText(e.target.value)}
+          />
+          <div className="diff-comment-actions">
+            <button id="btn-comment-cancel" className="commit-btn" onClick={clearComment}>
+              Cancelar
+            </button>
+            <button id="btn-comment-add" className="commit-btn primary" onClick={addComment}>
+              Agregar al prompt
+            </button>
+          </div>
         </div>
       )}
 

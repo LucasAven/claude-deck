@@ -291,6 +291,11 @@ if (commitForm) {
   ok('botones de commit deshabilitados con el mensaje vacío', true);
 }
 
+// 8c. comentar una línea del diff (tarea 13): el box arranca oculto (no hay
+// línea seleccionada). El feel tap-vs-scroll lo prueba Lucas en el celu.
+const commentBoxDefault = await page.$('#diff-comment');
+ok('box de comentario ausente por defecto (sin línea seleccionada)', commentBoxDefault === null);
+
 // 9. pestaña Archivos (reemplazó a Shell): árbol read-only del dir de la sesión
 await page.click('.tab[data-tab="files"]');
 await page.waitForSelector('#file-tree .ft-row', { timeout: 8000 }).catch(() => {});

@@ -1123,6 +1123,38 @@ body.composer-open .tabbar { display: none; }
 }
 .commit-btn:disabled { opacity: 0.4; }
 
+/* ---------- comentar una línea del diff (tarea 13) ---------- */
+/* highlight ámbar de la fila seleccionada (toggle imperativo sobre el <tr>) */
+#diff-view tr.diff-comment-line td { box-shadow: inset 3px 0 0 var(--accent); }
+.diff-comment {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+.diff-comment-head {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.diff-comment-input {
+  width: 100%;
+  min-height: 88px;
+  resize: none;
+  padding: 12px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  caret-color: var(--accent);
+}
+.diff-comment-input:focus { outline: none; border-color: var(--accent); }
+.diff-comment-actions { display: flex; gap: 10px; }
+
 /* ---------- pestaña Archivos (árbol + vista de archivo) ---------- */
 #files-title {
   color: var(--accent);
