@@ -123,6 +123,17 @@ body {
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
+/* chip "levantado" durante el drag de reordenamiento (tarea 19): se destaca y
+   se saca del hit-test (pointer-events:none) para que elementFromPoint vea el
+   chip de abajo y el swap fluya */
+.chip.dragging {
+  pointer-events: none;
+  opacity: 0.85;
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  transform: scale(1.05);
+}
 .chip-add {
   min-width: 40px;
   font-size: 16px;

@@ -620,6 +620,38 @@ ok('semáforo: dots working/waiting/idle según state y sin dot cuando null',
   && dots.idle === 'chip-dot chip-dot-idle'
   && dots.none === null);
 
+// 21. drag para reordenar los chips (tarea 19): el orden lo decide el usuario y
+// se persiste en localStorage['deck-chip-order']; las sesiones nuevas (no
+// presentes en el orden guardado) van SIEMPRE al final. Acá se verifica la
+// REGLA DE ORDEN (headless): el gesto de drag —long-press + arrastre— y su feel
+// los prueba Lucas en el celu (pointer events sintéticos cubiertos por el
+// puppeteer scratch del agente). Cada chip lleva data-name para el hit-test.
+const chipOrder = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const mock = [
+    { name: 'deck', attached: true, dir: '/tmp', state: null },
+    { name: 'zz-a', attached: false, dir: '/tmp', state: null },
+    { name: 'zz-b', attached: false, dir: '/tmp', state: null },
+    { name: 'zz-c', attached: false, dir: '/tmp', state: null },
+  ];
+  window.fetch = (url, opts) => String(url).includes('/api/tmux/sessions')
+    ? Promise.resolve(new Response(JSON.stringify(mock), { status: 200 }))
+    : realFetch(url, opts);
+  // orden guardado parcial: zz-c primero, zz-a después; deck y zz-b son "nuevos"
+  // (no están en el orden) → al final, alfabético entre ellos (deck, zz-b)
+  localStorage.setItem('deck-chip-order', JSON.stringify(['zz-c', 'zz-a']));
+  await refreshSessions();
+  const domNames = [...document.querySelectorAll('#session-chips .chip')].map((c) => c.dataset.name);
+  const allHaveDataName = domNames.every((n) => !!n);
+  localStorage.removeItem('deck-chip-order');
+  window.fetch = realFetch;
+  await refreshSessions(); // repinta con las sesiones reales
+  return { domNames, allHaveDataName };
+});
+ok('reorden: el orden guardado manda y las sesiones nuevas van al final',
+  JSON.stringify(chipOrder.domNames) === JSON.stringify(['zz-c', 'zz-a', 'deck', 'zz-b']));
+ok('cada chip lleva data-name (hit-test del drag)', chipOrder.allHaveDataName);
+
 // 14. composer de prompts (tarea 7): el ✎ abre un sheet a media pantalla con
 // textarea nativo; enviar = term.paste + \r diferido (espiados: nada llega a
 // la sesión real); borrador por sesión en localStorage (draft:<sesión>).

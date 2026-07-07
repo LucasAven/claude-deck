@@ -2,6 +2,7 @@ import { useDeckStore } from '../../store'
 import { battLow, openHostSheet } from '../../lib/host'
 import { openCreateMenu } from '../../lib/worktree'
 import { useTap } from '../../hooks/useTap'
+import { useChipDrag } from '../../hooks/useChipDrag'
 
 // Fila de sesiones (index.html:23-33): chips + botón +, chip de host (Fase 4) y
 // el punto de conexión. Port de refreshSessions/selectSession/renameSession/
@@ -11,7 +12,7 @@ import { useTap } from '../../hooks/useTap'
 // .chip-dot chip-dot-<estado> opcional + label; el activo suma .chip-name (tap →
 // rename) y .chip-x (tap → kill). Rename/kill/confirm siguen con prompt/confirm.
 
-function Chip({ name, state, active }: { name: string; state?: string; active: boolean }) {
+function Chip({ name, state, active, lifted }: { name: string; state?: string; active: boolean; lifted: boolean }) {
   const selectSession = useDeckStore((s) => s.selectSession)
   const renameSession = useDeckStore((s) => s.renameSession)
   const killSession = useDeckStore((s) => s.killSession)
@@ -19,8 +20,13 @@ function Chip({ name, state, active }: { name: string; state?: string; active: b
   // el chip activo ya no navega (selectSession retorna temprano): el nombre
   // renombra y la ✕ mata. Se usa onClick simple (como el vanilla): estos taps
   // no necesitan mantener el foco del teclado como las quickkeys.
+  // data-name: lo lee el hit-test del drag (tarea 19). lifted: chip levantado.
   return (
-    <button className={'chip' + (active ? ' active' : '')} onClick={() => selectSession(name)}>
+    <button
+      className={'chip' + (active ? ' active' : '') + (lifted ? ' dragging' : '')}
+      data-name={name}
+      onClick={() => selectSession(name)}
+    >
       {state && <span className={'chip-dot chip-dot-' + state} />}
       {active ? (
         <>
@@ -68,11 +74,17 @@ export function SessionRow() {
   const batt = hostStatus?.battery
   const fillW = batt ? Math.max(0.8, (13.2 * batt.pct) / 100).toFixed(1) : '0'
 
+  // tarea 19: drag para reordenar. El hook devuelve el orden en vivo (durante el
+  // drag) y el chip levantado; fuera del drag displayNames == orden del store.
+  const { ref: chipsRef, handlers: dragHandlers, displayNames, lifted } = useChipDrag(sessions)
+  const stateByName: Record<string, string | undefined> = {}
+  for (const s of sessions) stateByName[s.name] = s.state
+
   return (
     <div className="session-row">
-      <div id="session-chips" className="chips">
-        {sessions.map((s) => (
-          <Chip key={s.name} name={s.name} state={s.state} active={s.name === session} />
+      <div id="session-chips" className="chips" ref={chipsRef} {...dragHandlers}>
+        {displayNames.map((name) => (
+          <Chip key={name} name={name} state={stateByName[name]} active={name === session} lifted={name === lifted} />
         ))}
       </div>
       <button id="btn-new-session" className="chip chip-add" title="Nueva sesión" {...addTap}>
