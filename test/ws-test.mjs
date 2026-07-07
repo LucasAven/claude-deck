@@ -432,7 +432,7 @@ try {
   fs.rmSync(WT_REPO, { recursive: true, force: true });
 }
 
-// 9i. GET /api/workspaces + POST /api/dispatch (tarea 6): despachar un agente en
+// 9j. GET /api/workspaces + POST /api/dispatch (tarea 6): despachar un agente en
 // un dir de WORKSPACES_ROOT con prompt inicial + permission-mode. SOLO los checks
 // deterministas que NO lanzan claude (contrato + rechazos + 409): la integridad
 // del quoting/argv del prompt la aserta el script scratch del agente con un stub
@@ -475,6 +475,142 @@ try {
   try { execFileSync('tmux', ['kill-session', '-t', `=${DISP_NAME}`], { stdio: 'ignore' }); } catch {}
   fs.rmSync(DISP_DIR, { recursive: true, force: true });
   fs.rmSync(DISP_FILE, { force: true });
+}
+
+// 9k. POST /api/git/commit + /api/git/push (tarea 12): subcomandos fijos, sin
+// flags del cliente. Repo scratch DENTRO de WORKSPACES_ROOT con remote bare
+// local para el push; sesión tmux deck-ci cd'ada ahí. El mensaje con
+// quotes/newline/$() se asserta VERBATIM en git log (argv, no shell).
+const CI_REPO = `${WROOT}/deck-ci-ws-test`;
+const CI_BARE = `${WROOT}/deck-ci-ws-test-bare.git`;
+const CI_NOREMOTE = `${WROOT}/deck-ci-ws-test-noremote`;
+const post = (path, body, session) => fetch(`${HTTP}${path}?session=${session}`, {
+  method: 'POST',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+});
+try {
+  for (const p of [CI_REPO, CI_BARE, CI_NOREMOTE]) fs.rmSync(p, { recursive: true, force: true });
+  execFileSync('git', ['init', '-q', '-b', 'main', CI_REPO]);
+  execFileSync('git', ['-C', CI_REPO, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+  execFileSync('git', ['init', '-q', '--bare', CI_BARE]);
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-ci', '-c', CI_REPO]);
+
+  // commit con archivo staged → 200 con hash nuevo
+  fs.writeFileSync(`${CI_REPO}/a.txt`, 'hola');
+  execFileSync('git', ['-C', CI_REPO, 'add', 'a.txt']);
+  const cm = await post('/api/git/commit', { message: 'add a.txt' }, 'deck-ci');
+  const cmJson = await cm.json();
+  ok('commit staged → 200 con hash', cm.status === 200 && /^[0-9a-f]{7,40}$/.test(cmJson.hash || ''));
+
+  // nada staged → 400 con el mensaje de git
+  ok('commit sin nada staged → 400', (await post('/api/git/commit', { message: 'vacio' }, 'deck-ci')).status === 400);
+  // mensaje vacío / demasiado largo → 400
+  ok('commit mensaje vacío → 400', (await post('/api/git/commit', { message: '   ' }, 'deck-ci')).status === 400);
+  ok('commit mensaje >2000 → 400', (await post('/api/git/commit', { message: 'x'.repeat(2001) }, 'deck-ci')).status === 400);
+
+  // quotes/newline/$() lands VERBATIM (argv, no shell)
+  fs.writeFileSync(`${CI_REPO}/b.txt`, 'chau');
+  execFileSync('git', ['-C', CI_REPO, 'add', 'b.txt']);
+  const weird = 'fix: "quote" y $(whoami)';
+  await post('/api/git/commit', { message: weird }, 'deck-ci');
+  const subj = execFileSync('git', ['-C', CI_REPO, 'log', '-1', '--format=%s']).toString().trim();
+  ok('mensaje con quotes/$() verbatim en git log', subj === weird);
+
+  // push sin upstream → -u origin main; el bare recibe el commit
+  execFileSync('git', ['-C', CI_REPO, 'remote', 'add', 'origin', CI_BARE]);
+  const ps = await post('/api/git/push', undefined, 'deck-ci');
+  let upstream = '';
+  try { upstream = execFileSync('git', ['-C', CI_REPO, 'rev-parse', '--abbrev-ref', 'main@{u}']).toString().trim(); } catch {}
+  const bareHas = execFileSync('git', ['-C', CI_BARE, 'rev-parse', 'refs/heads/main']).toString().trim();
+  ok('push sin upstream → 200, -u origin main, bare actualizado',
+    ps.status === 200 && upstream === 'origin/main' && bareHas.length === 40);
+
+  // push sin remote → error surfaceado (400)
+  execFileSync('git', ['init', '-q', '-b', 'main', CI_NOREMOTE]);
+  execFileSync('git', ['-C', CI_NOREMOTE, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-ci2', '-c', CI_NOREMOTE]);
+  ok('push sin remote → 400 con el error de git', (await post('/api/git/push', undefined, 'deck-ci2')).status === 400);
+} finally {
+  for (const s of ['deck-ci', 'deck-ci2']) {
+    try { execFileSync('tmux', ['kill-session', '-t', `=${s}`], { stdio: 'ignore' }); } catch {}
+  }
+  for (const p of [CI_REPO, CI_BARE, CI_NOREMOTE]) fs.rmSync(p, { recursive: true, force: true });
+}
+
+// 9l. GET /api/git/log extendido + /api/git/show (tarea 14): historial con
+// stats y el diff de un commit. Repo scratch con subjects raros + un binario
+// (numstat -/-  → 0) y validación estricta del hash.
+const HL_REPO = `${WROOT}/deck-hist-ws-test`;
+try {
+  fs.rmSync(HL_REPO, { recursive: true, force: true });
+  execFileSync('git', ['init', '-q', '-b', 'main', HL_REPO]);
+  const gc = (...a) => execFileSync('git', ['-C', HL_REPO, '-c', 'user.email=t@t', '-c', 'user.name=Lucas', ...a]);
+  fs.writeFileSync(`${HL_REPO}/f.txt`, 'a\nb\nc\n');
+  gc('add', 'f.txt'); gc('commit', '-q', '-m', 'primer commit con "comillas" y espacios');
+  fs.writeFileSync(`${HL_REPO}/f.txt`, 'a\nX\nc\nd\n');
+  fs.writeFileSync(`${HL_REPO}/bin.dat`, Buffer.from([0, 1, 2, 3]));
+  gc('add', 'f.txt', 'bin.dat'); gc('commit', '-q', '-m', 'segundo: café ☕');
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-hist', '-c', HL_REPO]);
+
+  const logRes = await fetch(`${HTTP}/api/git/log?session=deck-hist&n=10`, { headers: { 'x-deck-token': TOKEN } });
+  const log = await logRes.json();
+  ok('log extendido → 2 commits con hash/subject/author/ts/stats',
+    log.length === 2
+    && /^[0-9a-f]{7,40}$/.test(log[0].hash)
+    && log[0].subject === 'segundo: café ☕' && log[0].author === 'Lucas'
+    && typeof log[0].ts === 'number' && log[0].ts > 0
+    && log[0].add === 2 && log[0].del === 1 // f.txt; bin.dat binario cuenta 0
+    && log[1].subject === 'primer commit con "comillas" y espacios' && log[1].add === 3);
+
+  const showRes = await fetch(`${HTTP}/api/git/show?session=deck-hist&hash=${log[0].hash}`, { headers: { 'x-deck-token': TOKEN } });
+  const showTxt = await showRes.text();
+  ok('show hash válido → 200 con el diff del commit',
+    showRes.status === 200 && showTxt.includes('diff --git') && showTxt.includes('café'));
+
+  for (const bad of ['HEAD', 'main..x', '--stat', 'a'.repeat(41), 'zzz']) {
+    ok(`show hash inválido "${bad}" → 400`,
+      (await fetch(`${HTTP}/api/git/show?session=deck-hist&hash=${encodeURIComponent(bad)}`, { headers: { 'x-deck-token': TOKEN } })).status === 400);
+  }
+  ok('show hash válido pero inexistente → 404',
+    (await fetch(`${HTTP}/api/git/show?session=deck-hist&hash=0000000`, { headers: { 'x-deck-token': TOKEN } })).status === 404);
+
+  // repo sin commits → log []
+  const HL_EMPTY = `${WROOT}/deck-hist-empty`;
+  fs.rmSync(HL_EMPTY, { recursive: true, force: true });
+  execFileSync('git', ['init', '-q', '-b', 'main', HL_EMPTY]);
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-histe', '-c', HL_EMPTY]);
+  const emptyLog = await (await fetch(`${HTTP}/api/git/log?session=deck-histe`, { headers: { 'x-deck-token': TOKEN } })).json();
+  ok('log de repo sin commits → []', Array.isArray(emptyLog) && emptyLog.length === 0);
+  fs.rmSync(HL_EMPTY, { recursive: true, force: true });
+} finally {
+  for (const s of ['deck-hist', 'deck-histe']) {
+    try { execFileSync('tmux', ['kill-session', '-t', `=${s}`], { stdio: 'ignore' }); } catch {}
+  }
+  fs.rmSync(HL_REPO, { recursive: true, force: true });
+}
+
+// 9m. GET /api/git/checks (tarea 15): degradación silenciosa. Los casos
+// deterministas: repo scratch sin remote de GitHub → { pr: null } 200 (gh sale
+// con error → null), y sesión sin repo → { pr: null } 200. Nunca un error que
+// la UI tenga que pintar.
+const CK_REPO = `${WROOT}/deck-checks-ws-test`;
+try {
+  fs.rmSync(CK_REPO, { recursive: true, force: true });
+  execFileSync('git', ['init', '-q', '-b', 'main', CK_REPO]);
+  execFileSync('git', ['-C', CK_REPO, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init']);
+  execFileSync('tmux', ['new-session', '-d', '-s', 'deck-ck', '-c', CK_REPO]);
+
+  const noRemote = await fetch(`${HTTP}/api/git/checks?session=deck-ck`, { headers: { 'x-deck-token': TOKEN } });
+  const noRemoteJson = await noRemote.json();
+  ok('checks repo sin remote → { pr: null } 200', noRemote.status === 200 && noRemoteJson.pr === null);
+
+  const noSession = await fetch(`${HTTP}/api/git/checks?session=no-existe-ck`, { headers: { 'x-deck-token': TOKEN } });
+  const noSessionJson = await noSession.json();
+  ok('checks sesión sin repo → { pr: null } 200', noSession.status === 200 && noSessionJson.pr === null);
+} finally {
+  try { execFileSync('tmux', ['kill-session', '-t', '=deck-ck'], { stdio: 'ignore' }); } catch {}
+  fs.rmSync(CK_REPO, { recursive: true, force: true });
 }
 
 // 10. sesión inexistente → 404

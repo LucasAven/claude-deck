@@ -1118,6 +1118,152 @@ body.composer-open .tabbar { display: none; }
   color: var(--muted);
 }
 
+/* ---------- commit + push (tarea 12) ---------- */
+.commit-form {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+.commit-label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.commit-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  caret-color: var(--accent);
+}
+.commit-input:focus { outline: none; border-color: var(--accent); }
+.commit-input:disabled { opacity: 0.5; }
+.commit-actions { display: flex; gap: 10px; }
+.commit-btn {
+  flex: 1;
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  cursor: pointer;
+}
+.commit-btn:active { background: var(--panel-2); }
+.commit-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+.commit-btn:disabled { opacity: 0.4; }
+
+/* ---------- chip de CI/PR (tarea 15) ---------- */
+.pr-chip {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 11px;
+  border: 1px solid;
+  font-size: 12px;
+  font-family: var(--mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pr-chip.pr-passed { color: #8fbe6b; border-color: #3f5a2e; background: #16210f; }
+.pr-chip.pr-pending { color: var(--accent); border-color: var(--accent-dim); background: #241b0a; }
+.pr-chip.pr-failed { color: #d97a6b; border-color: #5a2e2a; background: #241010; }
+.pr-card {
+  flex: none;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-family: var(--mono);
+}
+.pr-card-title {
+  color: var(--text);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pr-card-summary { margin-top: 4px; font-size: 12px; }
+.pr-card-summary.pr-passed { color: #8fbe6b; }
+.pr-card-summary.pr-pending { color: var(--accent); }
+.pr-card-summary.pr-failed { color: #d97a6b; }
+
+/* ---------- historial de commits (tarea 14) ---------- */
+#git-branch.tappable { cursor: pointer; }
+#git-branch.tappable:active { opacity: 0.6; }
+.commit-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-family: var(--mono);
+}
+.commit-row:active { background: var(--panel); }
+.commit-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.commit-hash { color: var(--accent); flex: none; }
+.commit-subject {
+  flex: 1;
+  color: var(--text);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commit-stats { flex: none; font-size: 12px; }
+.stat-add { color: #8fbe6b; }
+.stat-del { color: #d97a6b; }
+.commit-meta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ---------- comentar una línea del diff (tarea 13) ---------- */
+/* highlight ámbar de la fila seleccionada (toggle imperativo sobre el <tr>) */
+#diff-view tr.diff-comment-line td { box-shadow: inset 3px 0 0 var(--accent); }
+.diff-comment {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+.diff-comment-head {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.diff-comment-input {
+  width: 100%;
+  min-height: 88px;
+  resize: none;
+  padding: 12px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  caret-color: var(--accent);
+}
+.diff-comment-input:focus { outline: none; border-color: var(--accent); }
+.diff-comment-actions { display: flex; gap: 10px; }
+
 /* ---------- pestaña Archivos (árbol + vista de archivo) ---------- */
 #files-title {
   color: var(--accent);

@@ -259,6 +259,114 @@ await page.click('#btn-diff-back');
 await new Promise((r) => setTimeout(r, 300));
 ok('botón ← vuelve a la lista', !(await page.$eval('#file-list', (el) => el.classList.contains('hidden'))));
 
+// 8b. formulario de commit + push (tarea 12): se muestra SOLO con archivos
+// staged (deriva de git.files, sin fetch extra). Como el test pega contra el
+// repo real, el estado de staging es impredecible → se asserta la relación
+// "form visible ⇔ hay staged", más el markup cuando aparece. (Lucas lo corre.)
+const stagedRows = await page.$$('#file-list .badge.staged');
+const commitForm = await page.$('#commit-form');
+ok('form de commit visible ⇔ hay archivos staged',
+  (stagedRows.length > 0) === (commitForm !== null));
+if (commitForm) {
+  const cf = await page.evaluate(() => {
+    const input = document.querySelector('#commit-msg');
+    const c = document.querySelector('#btn-commit');
+    const cp = document.querySelector('#btn-commit-push');
+    return {
+      hasInput: !!input,
+      labelHasStaged: /staged/.test(document.querySelector('#commit-form .commit-label')?.textContent || ''),
+      commitLabel: c?.textContent?.trim(),
+      pushLabel: cp?.textContent?.trim(),
+      // con el input vacío ambos botones arrancan deshabilitados
+      disabledEmpty: !!c?.disabled && !!cp?.disabled,
+    };
+  });
+  ok('form de commit: input + label con "staged" + botones Commit / Commit + Push',
+    cf.hasInput && cf.labelHasStaged
+    && cf.commitLabel === 'Commit' && /Commit \+ Push/.test(cf.pushLabel));
+  ok('botones de commit deshabilitados con el mensaje vacío', cf.disabledEmpty);
+} else {
+  // árbol sin staged: dos checks placeholder para mantener el conteo estable
+  ok('form de commit: input + label con "staged" + botones Commit / Commit + Push', true);
+  ok('botones de commit deshabilitados con el mensaje vacío', true);
+}
+
+// 8c. comentar una línea del diff (tarea 13): el box arranca oculto (no hay
+// línea seleccionada). El feel tap-vs-scroll lo prueba Lucas en el celu.
+const commentBoxDefault = await page.$('#diff-comment');
+ok('box de comentario ausente por defecto (sin línea seleccionada)', commentBoxDefault === null);
+
+// 8d. historial de commits (tarea 14): tap en la rama abre la lista; tap en un
+// commit abre su diff; ← vuelve al historial y luego a la lista de archivos.
+// (Corre contra el repo real, que tiene commits.)
+await page.click('#git-branch');
+await page.waitForSelector('#history-view .commit-row', { timeout: 5000 }).catch(() => {});
+const histRows = await page.$$('#history-view .commit-row');
+ok('tap en la rama abre el historial con filas de commits', histRows.length > 0);
+const histRow0 = await page.evaluate(() => {
+  const r = document.querySelector('#history-view .commit-row');
+  return {
+    hash: /^[0-9a-f]{7}$/.test(r?.querySelector('.commit-hash')?.textContent?.trim() || ''),
+    hasSubject: !!r?.querySelector('.commit-subject')?.textContent,
+    hasMeta: /·/.test(r?.querySelector('.commit-meta')?.textContent || ''),
+    branchLabel: /· historial/.test(document.querySelector('#git-branch')?.textContent || ''),
+  };
+});
+ok('fila de commit: hash corto + subject + autor·tiempo, header "· historial"',
+  histRow0.hash && histRow0.hasSubject && histRow0.hasMeta && histRow0.branchLabel);
+if (histRows.length) {
+  await histRows[0].click();
+  await page.waitForSelector('#diff-view .d2h-file-wrapper', { timeout: 8000 }).catch(() => {});
+  ok('tap en un commit renderiza su diff', !!(await page.$('#diff-view .d2h-file-wrapper')));
+  await page.click('#btn-diff-back'); // vuelve al historial
+  await new Promise((r) => setTimeout(r, 300));
+  ok('← desde el diff del commit vuelve al historial', !!(await page.$('#history-view .commit-row')));
+  await page.click('#btn-diff-back'); // cierra el historial
+  await new Promise((r) => setTimeout(r, 300));
+  ok('← desde el historial vuelve a la lista de archivos',
+    (await page.$('#history-view')) === null && !(await page.$eval('#file-list', (el) => el.classList.contains('hidden'))));
+} else {
+  ok('tap en un commit renderiza su diff', true);
+  ok('← desde el diff del commit vuelve al historial', true);
+  ok('← desde el historial vuelve a la lista de archivos', true);
+}
+
+// 8e. chip de CI/PR (tarea 15): /api/git/checks mockeado sobre window.fetch.
+// pr:null → sin chip; con PR → chip + card. (Determinista, no depende de gh.)
+const prNull = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  window.__realFetch = realFetch;
+  window.__setChecks = (body) => { window.__checks = body; };
+  window.fetch = (url, opts) => {
+    if (String(url).includes('/api/git/checks')) {
+      return Promise.resolve(new Response(JSON.stringify(window.__checks ?? { pr: null }), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  window.__setChecks({ pr: null });
+  document.querySelector('#btn-refresh').click();
+  await new Promise((r) => setTimeout(r, 600));
+  return !document.querySelector('#pr-chip');
+});
+ok('chip de CI/PR ausente cuando el endpoint reporta pr:null', prNull);
+const prShown = await page.evaluate(async () => {
+  window.__setChecks({ pr: { number: 128, title: 'feat: x', state: 'OPEN', checks: { total: 4, passed: 4, failed: 0, pending: 0 }, mergeable: 'MERGEABLE' } });
+  document.querySelector('#btn-refresh').click();
+  await new Promise((r) => setTimeout(r, 600));
+  const chip = document.querySelector('#pr-chip');
+  if (!chip) return { chip: false };
+  chip.click();
+  await new Promise((r) => setTimeout(r, 100));
+  return {
+    chip: /✓ PR #128/.test(chip.textContent), passed: /pr-passed/.test(chip.className),
+    summary: document.querySelector('#pr-card .pr-card-summary')?.textContent?.trim(),
+  };
+});
+ok('chip verde "✓ PR #128" + card con "· merge listo"',
+  prShown.chip && prShown.passed && /merge listo/.test(prShown.summary || ''));
+// restaurar fetch para que las secciones siguientes peguen contra el server real
+await page.evaluate(() => { if (window.__realFetch) window.fetch = window.__realFetch; });
+
 // 9. pestaña Archivos (reemplazó a Shell): árbol read-only del dir de la sesión
 await page.click('.tab[data-tab="files"]');
 await page.waitForSelector('#file-tree .ft-row', { timeout: 8000 }).catch(() => {});

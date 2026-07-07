@@ -486,19 +486,152 @@ async function gitStage(dir: string, rel: string, action: 'stage' | 'unstage'): 
   }
 }
 
-async function gitLog(dir: string, n: number) {
+// Commit + push desde Cambios (tarea 12): subcomandos FIJOS, sin flags del
+// cliente jamás. El mensaje viaja como UN solo argv (sin shell, sin
+// interpolación); nunca --amend, -a ni nada más. Identidad = la del repo tal
+// cual (no seteamos user/email/trailer: los commits parecen de Lucas).
+async function gitCommit(dir: string, message: string): Promise<string> {
   try {
-    const { stdout } = await execFileP('git', ['-C', dir, 'log', '--no-color', '--oneline', '-n', String(n)])
-    return stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const sp = line.indexOf(' ')
-        return { hash: sp === -1 ? line : line.slice(0, sp), subject: sp === -1 ? '' : line.slice(sp + 1) }
-      })
+    await execFileP('git', ['-C', dir, 'commit', '-m', message])
+  } catch (e: any) {
+    const msg = String(e?.stderr || e?.stdout || e?.message || e).split('\n').filter(Boolean)[0] || 'git commit falló'
+    throw new HttpError(400, msg)
+  }
+  const { stdout } = await execFileP('git', ['-C', dir, 'rev-parse', '--short', 'HEAD'])
+  return stdout.trim()
+}
+
+// Push sin flags del cliente; --force/-f NO existen acá. Si la rama no tiene
+// upstream configurado, degrada a `git push -u origin <rama>` (decisión de
+// Lucas: -u es el ÚNICO flag extra permitido). Timeout holgado: es red.
+async function gitPush(dir: string): Promise<void> {
+  let hasUpstream = true
+  try {
+    await execFileP('git', ['-C', dir, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
+  } catch {
+    hasUpstream = false
+  }
+  let args = ['-C', dir, 'push']
+  if (!hasUpstream) {
+    const branch = (await execFileP('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
+    // detached / sin commits → push a secas: git tira el error correcto y sube al cliente
+    if (branch && branch !== 'HEAD') args = ['-C', dir, 'push', '-u', 'origin', branch]
+  }
+  try {
+    await execFileP('git', args, { timeout: 60000 })
+  } catch (e: any) {
+    // errores de auth son verbosos: hasta ~500 chars, multilínea OK
+    const raw = String(e?.stderr || e?.stdout || e?.message || e).trim()
+    throw new HttpError(400, raw.slice(0, 500) || 'git push falló')
+  }
+}
+
+// Historial de commits (tarea 14): hash/subject/autor/epoch + stats +N −M
+// agregadas de --numstat. Separador %x00 (no aparece en subjects); cada commit
+// arranca con %x01 y le siguen sus líneas de numstat (binarios emiten `-`/`-`
+// → cuentan 0). El tiempo relativo lo calcula el cliente desde `ts` (endpoint
+// locale-free).
+interface Commit {
+  hash: string
+  subject: string
+  author: string
+  ts: number
+  add: number
+  del: number
+}
+async function gitLog(dir: string, n: number): Promise<Commit[]> {
+  try {
+    const { stdout } = await execFileP(
+      'git',
+      ['-C', dir, 'log', '--no-color', '-n', String(n), '--format=%x01%h%x00%s%x00%an%x00%ct', '--numstat'],
+      { maxBuffer: 10 * 1024 * 1024 },
+    )
+    const commits: Commit[] = []
+    let cur: Commit | null = null
+    for (const line of stdout.split('\n')) {
+      if (line.startsWith('\x01')) {
+        const [hash, subject, author, ct] = line.slice(1).split('\x00')
+        cur = { hash, subject: subject ?? '', author: author ?? '', ts: Number(ct) || 0, add: 0, del: 0 }
+        commits.push(cur)
+      } else if (line.trim() && cur) {
+        const [a, d] = line.split('\t')
+        cur.add += a === '-' ? 0 : Number(a) || 0
+        cur.del += d === '-' ? 0 : Number(d) || 0
+      }
+    }
+    return commits
   } catch {
     return [] // repo sin commits todavía
   }
+}
+
+// git show de un commit (tarea 14): mismo visor diff2html que /api/git/diff.
+// El hash se valida ANTES con ^[0-9a-f]{7,40}$ (nunca refs/rangos/HEAD^ sin
+// validar); 404 si git falla (hash desconocido).
+async function gitShow(dir: string, hash: string): Promise<string> {
+  let out = ''
+  try {
+    out = (await execFileP('git', ['-C', dir, 'show', '--no-color', hash], { maxBuffer: 10 * 1024 * 1024 })).stdout
+  } catch {
+    throw new HttpError(404, 'commit no encontrado')
+  }
+  if (Buffer.byteLength(out) > DIFF_LIMIT) {
+    out = out.slice(0, DIFF_LIMIT) + '\n... [diff truncado: supera 500 KB]\n'
+  }
+  return out
+}
+
+// Chip de estado CI/PR (tarea 15): normaliza `gh pr view` a un JSON chico.
+// DEGRADACIÓN SILENCIOSA ES EL CONTRATO: gh ausente (ENOENT) / sin auth / sin
+// remote de GitHub / sin PR para la rama → { pr: null } con 200, nunca un
+// error que la UI tenga que pintar (el chip simplemente no aparece). Cache por
+// dir con TTL corto: el frontend pollea cada 8 s y pegarle a la API de GitHub
+// en cada uno quemaría el rate limit sin ganar frescura. Ojo: bajo launchd gh
+// puede faltar del PATH (el plist ya agrega el bin de homebrew para tmux/git);
+// si falta, ENOENT → degradación, así que no rompe.
+interface PrChecks {
+  number: number
+  title: string
+  state: string
+  checks: { total: number; passed: number; failed: number; pending: number }
+  mergeable: string
+}
+const checksCache = new Map<string, { ts: number; data: { pr: PrChecks | null } }>()
+const CHECKS_TTL = 60_000
+
+async function gitChecks(dir: string): Promise<{ pr: PrChecks | null }> {
+  const cached = checksCache.get(dir)
+  if (cached && Date.now() - cached.ts < CHECKS_TTL) return cached.data
+
+  let data: { pr: PrChecks | null } = { pr: null }
+  try {
+    const { stdout } = await execFileP(
+      'gh',
+      ['pr', 'view', '--json', 'number,title,state,mergeable,statusCheckRollup'],
+      { cwd: dir, timeout: 10_000 },
+    )
+    const pr = JSON.parse(stdout)
+    const checks = { total: 0, passed: 0, failed: 0, pending: 0 }
+    for (const c of pr.statusCheckRollup || []) {
+      checks.total++
+      if (c.state) {
+        // StatusContext (checks legacy de la API de status)
+        if (c.state === 'SUCCESS') checks.passed++
+        else if (c.state === 'PENDING' || c.state === 'EXPECTED') checks.pending++
+        else checks.failed++
+      } else {
+        // CheckRun (GitHub Actions y afines)
+        if (c.status && c.status !== 'COMPLETED') checks.pending++
+        else if (['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(c.conclusion)) checks.passed++
+        else checks.failed++
+      }
+    }
+    data = { pr: { number: pr.number, title: pr.title, state: pr.state, checks, mergeable: pr.mergeable } }
+  } catch {
+    data = { pr: null } // contrato: cualquier fallo → sin chip
+  }
+  checksCache.set(dir, { ts: Date.now(), data })
+  return data
 }
 
 // ---------------------------------------------------------------------------
@@ -871,12 +1004,56 @@ app.post('/api/git/stage', async (c) => {
   return c.json({ ok: true })
 })
 
+// Commit (tarea 12). Body JSON: { message }. Subcomando fijo, mensaje como
+// argv único; devuelve el hash corto nuevo para que la UI confirme.
+app.post('/api/git/commit', async (c) => {
+  const dir = await resolveGitDir(c.req.query('session'))
+  let body: { message?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const message = typeof body.message === 'string' ? body.message.trim() : ''
+  if (!message) throw new HttpError(400, 'el mensaje del commit no puede estar vacío')
+  if (message.length > 2000) throw new HttpError(400, 'el mensaje del commit es demasiado largo (máx 2000)')
+  const hash = await gitCommit(dir, message)
+  return c.json({ hash })
+})
+
+// Push (tarea 12). Sin body, sin flags del cliente. --force nunca existe.
+app.post('/api/git/push', async (c) => {
+  const dir = await resolveGitDir(c.req.query('session'))
+  await gitPush(dir)
+  return c.json({ ok: true })
+})
+
 app.get('/api/git/log', async (c) => {
   const dir = await resolveGitDir(c.req.query('session'))
   let n = Number.parseInt(c.req.query('n') || '15', 10)
   if (!Number.isFinite(n)) n = 15
   n = Math.min(Math.max(n, 1), 200)
   return c.json(await gitLog(dir, n))
+})
+
+// Chip de CI/PR (tarea 15). Degradación silenciosa: sin repo/gh/PR → { pr:null }
+// con 200 (nunca error — el chip solo no aparece).
+app.get('/api/git/checks', async (c) => {
+  let dir: string
+  try {
+    dir = await resolveGitDir(c.req.query('session'))
+  } catch {
+    return c.json({ pr: null })
+  }
+  return c.json(await gitChecks(dir))
+})
+
+// Diff completo de un commit (tarea 14): visor diff2html vía git show.
+app.get('/api/git/show', async (c) => {
+  const dir = await resolveGitDir(c.req.query('session'))
+  const hash = c.req.query('hash') || ''
+  if (!/^[0-9a-f]{7,40}$/.test(hash)) throw new HttpError(400, 'hash inválido')
+  return c.text(await gitShow(dir, hash))
 })
 
 // Ramas del repo de la sesión (tarea 5): alimenta el dropdown "Basado en" del
