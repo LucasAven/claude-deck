@@ -1394,7 +1394,9 @@ app.get('/api/fs/file', async (c) => {
 app.get('/api/fs/raw', async (c) => {
   const dir = await resolveFsDir(c.req.query('session'))
   const { body, type } = fsRawFile(dir, c.req.query('path') || '')
-  return c.body(body, 200, {
+  // Buffer tipa Uint8Array<ArrayBufferLike> y c.body() exige ArrayBuffer: la
+  // copia re-ancla los bytes en un ArrayBuffer propio (barata, cap 5 MB).
+  return c.body(new Uint8Array(body), 200, {
     'content-type': type,
     'cache-control': 'no-cache',
     'content-security-policy': "sandbox; default-src 'none'; script-src 'none'; style-src 'unsafe-inline'",
