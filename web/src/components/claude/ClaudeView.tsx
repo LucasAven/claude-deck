@@ -5,6 +5,7 @@ import { HostBanner } from './HostBanner'
 import { Terminal } from './Terminal'
 import { Composer } from './Composer'
 import { Scrollback } from './Scrollback'
+import { Statusline } from './Statusline'
 import { ControlBar } from './ControlBar'
 
 // Pestaña Claude (index.html:22-134). SIEMPRE montada (§5.1): el div del
@@ -23,6 +24,7 @@ export function ClaudeView() {
       <Terminal />
       <Composer />
       <Scrollback />
+      <Statusline />
       <ControlBar />
     </>
   )

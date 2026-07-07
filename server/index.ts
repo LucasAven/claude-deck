@@ -191,6 +191,23 @@ function sessionState(name: string): SessionState | null {
   }
 }
 
+// --- statusline por sesión (tarea 22) --------------------------------------
+// El hook statusLine de Claude Code escribe ~/.claude-deck/state/<sesión>.status.json
+// vía scripts/statusline.sh (curado a model/ctxPct/tokens/costo; mtime = ts).
+// Contrato blando como el semáforo: sin archivo o JSON roto → null (nunca error),
+// para que el panel muestre "sin datos" y no ensucie la consola.
+function statusForSession(name: string): unknown | null {
+  if (!SESSION_RE.test(name)) return null // nunca joinear nombres raros al path
+  try {
+    const file = path.join(STATE_DIR, `${name}.status.json`)
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+    if (!parsed || typeof parsed !== 'object') return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
 // --- transcript de Claude por sesión (tarea 9, fase jsonl) ----------------
 // EXCEPCIÓN DELIBERADA AL PERÍMETRO (solo lectura, documentada en README):
 // los transcripts viven en ~/.claude*/projects, FUERA de WORKSPACES_ROOT.
@@ -954,6 +971,16 @@ app.get('/api/claude/transcript', async (c) => {
   // oculta el botón si un re-fetch no crece)
   if (turns.length > TRANSCRIPT_TURNS_MAX) turns = turns.slice(-TRANSCRIPT_TURNS_MAX)
   return c.json({ file: path.basename(file), turns, more })
+})
+
+// Statusline del panel (tarea 22): contexto/tokens/costo del Claude de la
+// sesión, como el statusLine de Claude Code. Contrato blando: sesión inválida
+// → 400, pero presente/ausente → 200 con {status:{...}|null} (nunca 404/500),
+// así el poll piggyback no genera ruido cuando el hook aún no escribió nada.
+app.get('/api/claude/status', (c) => {
+  const session = c.req.query('session') || TMUX_SESSION
+  if (!SESSION_RE.test(session)) throw new HttpError(400, 'nombre de sesión inválido')
+  return c.json({ status: statusForSession(session) })
 })
 
 // Imagen desde el celular → Claude Code de la sesión.

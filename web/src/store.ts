@@ -60,6 +60,21 @@ export interface HostStatus {
   alert: HostAlert
 }
 
+// Statusline del panel (tarea 22): lo escribe el hook statusLine de Claude Code
+// (scripts/statusline.sh → ~/.claude-deck/state/<sesión>.status.json), lo sirve
+// GET /api/claude/status. Campos null antes del primer turno (ctxPct) o si el
+// hook no está activo (claudeStatus null). El % de contexto es la señal cara.
+export interface ClaudeStatus {
+  model: string | null
+  modelId: string | null
+  ctxPct: number | null
+  ctxSize: number | null
+  inputTokens: number | null
+  outputTokens: number | null
+  costUsd: number | null
+  exceeds200k: boolean
+}
+
 // Scrollback legible (app.js:1088-1231): parte reactiva del overlay. El modo
 // 'turns' pinta los turnos del transcript (asistente como markdown sanitizado),
 // 'text' el capture-pane crudo. El resto del estado del fetch (bytes/líneas
@@ -121,6 +136,7 @@ interface DeckStore {
   gitChecks: PrChecks | null // chip de CI/PR (tarea 15); null → sin chip
   hostStatus: HostStatus | null
   hostBannerDismissed: boolean
+  claudeStatus: ClaudeStatus | null // statusline del panel (tarea 22)
   snippets: string[] | null
   snippetsEditing: boolean
 
@@ -202,6 +218,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   gitChecks: null,
   hostStatus: null,
   hostBannerDismissed: false,
+  claudeStatus: null,
   snippets: null,
   snippetsEditing: false,
 
@@ -332,12 +349,15 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     if (name === get().session) return
     closeComposer() // guarda el borrador de la sesión actual antes de cambiarla
     closeSwitchMenu()
-    set({ session: name, switchState: loadSwitch(name) })
+    // claudeStatus: null → la statusline no muestra datos rancios de la sesión
+    // saliente mientras llega el fetch de la nueva (tarea 22)
+    set({ session: name, switchState: loadSwitch(name), claudeStatus: null })
     persistActiveSession(name)
     get().hideHint()
     window.claudeConn?.reconnect()
     get().refreshSessions()
     get().refreshGit()
+    window.refreshClaudeStatus?.()
   },
 
   // app.js:1514-1531. El estado de switchers y el borrador del composer son por

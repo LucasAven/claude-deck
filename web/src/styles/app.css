@@ -405,6 +405,38 @@ body.composer-open .tabbar { display: none; }
 .scrollback-more:active { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- barra de control inferior (pestaña Claude) ---------- */
+/* statusline del panel (tarea 22): línea fina y discreta arriba de la controlbar,
+   tipo el statusLine de Claude Code. Mono, chica, color de alerta al llenarse el
+   contexto. Oculta (display:none) si el hook no escribió estado. */
+.statusline {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.statusline.hidden { display: none; }
+.statusline .sl-label { opacity: 0.7; }
+.statusline .sl-sep { opacity: 0.4; }
+.statusline #sl-pct { font-weight: 600; }
+.statusline .sl-model { color: var(--text); opacity: 0.8; }
+/* niveles de contexto: ok (muted) → warn (ámbar) → alerta (rojo) */
+.statusline.sl-warn #sl-pct { color: var(--accent); }
+.statusline.sl-alert { color: #e5534b; }
+.statusline.sl-alert #sl-pct { color: #e5534b; font-weight: 700; }
+/* la statusline y la controlbar comparten borde: sin doble línea (solo cuando
+   la statusline está visible; oculta con display:none la controlbar recupera el
+   suyo — el combinador + igual matchea elementos display:none) */
+.statusline:not(.hidden) + .controlbar { border-top: none; }
+
 .controlbar {
   position: relative; /* ancla del popover .switch-menu */
   flex: none;
