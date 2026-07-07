@@ -120,6 +120,33 @@ async function tmuxRenameSession(oldName: string, newName: string): Promise<void
   await execFileP('tmux', ['rename-session', '-t', `=${oldName}`, newName])
 }
 
+// send-keys a un pane. target `=sesion:` — send-keys no acepta `=sesion`
+// pelado (gotcha 3), igual que tmuxPaneDir/capture-pane. Los args van tal cual:
+// nombres de tecla (`C-v`, `Escape`) o `-l <literal>` para texto crudo.
+async function tmuxSendKeys(session: string, ...keys: string[]): Promise<void> {
+  await execFileP('tmux', ['send-keys', '-t', `=${session}:`, ...keys])
+}
+
+// Guard anti-menú-viejo (tarea 2): para cuando se toca "Permitir/Denegar" en la
+// notificación, el menú de permiso puede haberse cerrado ya (respondido en VS
+// Code, o Claude siguió) y las teclas caerían en lo que tenga foco. Marker
+// verificado contra un claude real (Haiku, Darwin 25) en prompts de Bash Y de
+// Write: la opción resaltada "1. Yes" + el footer "Esc to cancel" aparecen en
+// los dos; la línea del prompt normal (`❯ `) no los tiene, así que el falso
+// positivo es improbable.
+async function paneLooksLikePermissionPrompt(session: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileP(
+      'tmux',
+      ['capture-pane', '-p', '-t', `=${session}:`],
+      { maxBuffer: 2 * 1024 * 1024 },
+    )
+    return /(^|\n)\s*(?:❯\s*)?1\.\s+Yes\b/.test(stdout) && /Esc to cancel/.test(stdout)
+  } catch {
+    return false
+  }
+}
+
 async function tmuxRefreshClients(name: string): Promise<void> {
   // Redibujo completo de todos los clientes attacheados a la sesión (los ptys
   // de este server). El frontend lo pide al volver de background: iOS puede
@@ -593,6 +620,12 @@ const app = new Hono()
 // Todo (estáticos incluidos) exige cookie `deck_token` o header `x-deck-token`.
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url)
+  // Exención (tarea 2): POST /api/approve va SIN cookie/token — la app de ntfy
+  // del celu dispara la acción HTTP sin `deck_token`. El nonce ES la credencial
+  // (imposible de adivinar, expira, se consume atómico). Sigue detrás del rate
+  // limiter (`app.use('/api/*')`, registrado abajo, corre igual). Exención
+  // acotada a ese path exacto + método, para no aflojar nada más.
+  if (c.req.method === 'POST' && url.pathname === '/api/approve') return next()
   const qtoken = url.searchParams.get('token')
   if (qtoken !== null) {
     if (isTokenValid(qtoken)) {
@@ -646,6 +679,60 @@ app.get('/api/presence', (c) => {
     if (p.visible && now - p.at < PRESENCE_TTL_MS && !sessions.includes(p.session)) sessions.push(p.session)
   }
   return c.json({ visible: sessions.length > 0, sessions })
+})
+
+// Permitir/Denegar desde la notificación ntfy (tarea 2). notify.sh pide un
+// nonce a 127.0.0.1 (auth normal, x-deck-token del .env) y arma dos acciones
+// HTTP en el push; el celu las dispara SIN token contra POST /api/approve
+// (exento del auth arriba) — el nonce es la credencial: single-use, TTL corto,
+// atado a la sesión. El AUTH_TOKEN JAMÁS viaja a ntfy. Un restart del server
+// invalida los nonces pendientes (Map en memoria) — aceptable: el botón falla.
+const APPROVE_NONCE_TTL_MS = Number(process.env.DECK_APPROVE_NONCE_TTL_MS) || 2 * 60_000
+const approveNonces = new Map<string, { session: string; expires: number }>()
+function sweepApproveNonces() {
+  const now = Date.now()
+  for (const [n, v] of approveNonces) if (now > v.expires) approveNonces.delete(n)
+}
+setInterval(sweepApproveNonces, 60_000).unref()
+
+app.post('/api/approve-nonce', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const session = typeof body?.session === 'string' ? body.session : ''
+  if (!SESSION_RE.test(session)) throw new HttpError(400, 'nombre de sesión inválido')
+  if (!(await tmuxHasSession(session))) throw new HttpError(404, `sesión tmux no encontrada: ${session}`)
+  sweepApproveNonces()
+  const nonce = crypto.randomBytes(16).toString('hex')
+  approveNonces.set(nonce, { session, expires: Date.now() + APPROVE_NONCE_TTL_MS })
+  return c.json({ nonce })
+})
+
+// EXENTO del middleware de auth (ver app.use('*')): el nonce es la credencial.
+app.post('/api/approve', async (c) => {
+  const nonce = c.req.query('nonce') || ''
+  const answer = c.req.query('answer') || ''
+  if (answer !== 'allow' && answer !== 'deny') throw new HttpError(400, 'answer inválido')
+  // consumo atómico: sacar del Map ANTES de actuar — un replay ya no lo encuentra
+  const entry = approveNonces.get(nonce)
+  if (entry) approveNonces.delete(nonce)
+  if (!entry || Date.now() > entry.expires) throw new HttpError(401, 'nonce inválido o expirado')
+  const { session } = entry
+  if (!(await tmuxHasSession(session))) throw new HttpError(404, 'sesión tmux no encontrada')
+  // guard anti-menú-viejo: si el pane ya no muestra un prompt de permiso, las
+  // teclas caerían en lo que tenga foco → 409, y el fallback del push es abrir la app
+  if (!(await paneLooksLikePermissionPrompt(session))) {
+    throw new HttpError(409, 'el menú de permiso ya no está abierto')
+  }
+  // Teclas verificadas contra un claude real (probe de la tarea 2): el menú es
+  // de selección inmediata (el dígito confirma, sin Enter). Opción 1 = "Yes" en
+  // TODO menú (Bash, Write). Para denegar, la numeración del "No" se corre según
+  // la fila "always allow" (2 o 3) → Escape cancela el prompt siempre, sin
+  // depender del número (verificado que rechaza la tool y no crea el archivo).
+  if (answer === 'allow') {
+    await tmuxSendKeys(session, '-l', '1')
+  } else {
+    await tmuxSendKeys(session, 'Escape')
+  }
+  return c.json({ ok: true, answer })
 })
 
 // Scrollback legible (tarea 9): texto plano del pane para el overlay de
@@ -748,11 +835,10 @@ app.post('/api/paste-image', async (c) => {
       file = pngFile
     }
     await execFileP('osascript', ['-e', `set the clipboard to (read (POSIX file "${file}") as «class PNGf»)`])
-    // ojo: send-keys necesita target de pane — `=sesion:` (como tmuxPaneDir)
-    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, 'C-v'])
+    await tmuxSendKeys(session, 'C-v')
   } catch {
     mode = 'path'
-    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, '-l', `${file} `])
+    await tmuxSendKeys(session, '-l', `${file} `)
   }
   return c.json({ ok: true, mode })
 })

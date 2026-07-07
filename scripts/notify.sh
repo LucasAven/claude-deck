@@ -38,6 +38,10 @@ TITLE="${SESSION:-claude-deck}"
 # Cuerpo por defecto = argv, como siempre (configs de hooks viejas)
 BODY="${1:-Claude espera tu respuesta}"
 
+# ¿Este push corresponde a un prompt de permiso? (tarea 2) Solo esos llevan los
+# botones Permitir/Denegar — Stop / idle no tienen menú que contestar.
+IS_PERMISSION=0
+
 # Dedup permiso: PermissionRequest y Notification(permission_prompt) disparan
 # los dos para el MISMO prompt (medido: ~6 s de diferencia). Si ambos eventos
 # están hookeados, el rico (PermissionRequest) marca y el genérico se calla.
@@ -48,6 +52,7 @@ if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   SID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
   case "$EVENT" in
     PermissionRequest)
+      IS_PERMISSION=1
       # payload real: tool_name + tool_input.{command,description,file_path…}
       TOOL="$(printf '%s' "$PAYLOAD" | jq -r '.tool_name // empty' 2>/dev/null || true)"
       DETAIL="$(printf '%s' "$PAYLOAD" | jq -r '.tool_input.command // .tool_input.file_path // .tool_input.url // empty' 2>/dev/null || true)"
@@ -74,6 +79,9 @@ ${DESC:0:200}"
         MTIME="$(stat -f %m "$MARK_DIR/permreq-$SID" 2>/dev/null || echo 0)"
         [ $((NOW - MTIME)) -lt 30 ] && exit 0 # ya salió el push rico
       fi
+      # Si el rico no llegó a marcar (solo Notification hookeado), este push
+      # ES el del permiso y debe llevar los botones.
+      [ "$NTYPE" = "permission_prompt" ] && IS_PERMISSION=1
       MSG="$(printf '%s' "$PAYLOAD" | jq -r '.message // empty' 2>/dev/null || true)"
       [ -n "$MSG" ] && BODY="${MSG:0:300}"
       ;;
@@ -126,8 +134,32 @@ fi
 # Click → PWA con la sesión ya seleccionada (init lee ?session=). Solo con
 # nombres que el server acepta (mismo SESSION_RE) — así no hace falta encodear.
 ARGS=(-s -m 5 -H "Title: $TITLE" -H "Tags: robot" -d "$BODY")
+LINK_OK=0
 if [ -n "${DECK_URL:-}" ] && printf '%s' "$SESSION" | grep -qE '^[A-Za-z0-9_-]{1,32}$'; then
   ARGS+=(-H "Click: ${DECK_URL%/}/?session=$SESSION")
+  LINK_OK=1
+fi
+
+# Botones Permitir/Denegar (tarea 2): solo para prompts de permiso. Se pide un
+# nonce al server LOCAL (auth normal con el AUTH_TOKEN, jamás a ntfy); si sale,
+# se arman dos acciones http que el celu dispara contra /api/approve (exento de
+# auth: el nonce es la credencial). Sin DECK_URL / sin server / nonce fallido →
+# se degrada al push plano de la tarea 1 (sin botones). El AUTH_TOKEN NO aparece
+# en ninguna cabecera, URL ni cuerpo que toque ntfy.
+if [ "$IS_PERMISSION" = 1 ] && [ "$LINK_OK" = 1 ]; then
+  TOKEN="$(env_get AUTH_TOKEN)"
+  PORT="${DECK_PORT:-$(env_get DECK_PORT)}"; PORT="${PORT:-7433}"
+  if [ -n "$TOKEN" ] && [ -n "$SESSION" ]; then
+    NONCE="$(curl -s -m 2 -H "x-deck-token: $TOKEN" -H 'Content-Type: application/json' \
+      -d "{\"session\":\"$SESSION\"}" \
+      "http://127.0.0.1:${PORT}/api/approve-nonce" 2>/dev/null \
+      | jq -r '.nonce // empty' 2>/dev/null || true)"
+    if [ -n "$NONCE" ]; then
+      BASE="${DECK_URL%/}/api/approve?nonce=$NONCE"
+      # ntfy capea en 3 acciones: Permitir, Denegar y ver (deep-link).
+      ARGS+=(-H "Actions: http, Permitir, ${BASE}&answer=allow, method=POST, clear=true; http, Denegar, ${BASE}&answer=deny, method=POST, clear=true; view, Abrir app, ${DECK_URL%/}/?session=$SESSION")
+    fi
+  fi
 fi
 
 curl "${ARGS[@]}" "https://ntfy.sh/$NTFY_TOPIC" >/dev/null 2>&1 || true
