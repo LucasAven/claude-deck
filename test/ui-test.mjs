@@ -1601,11 +1601,28 @@ const pushRun = await page.evaluate(async () => {
     },
   });
 
+  // el tap va por el botón real (useTap = par pointerdown+pointerup), no por
+  // __deckPush.toggle(): así el check cubre el cableado del botón además del flujo
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
   window.__deckPush.setState('off'); await frame();
-  window.__deckPush.toggle(); // off → subscribe
+  tap(btn); // off → subscribe
   await new Promise((r) => setTimeout(r, 200));
   out.subscribed = posts.some((p) => p.url.includes('/api/push/subscribe') && p.body.subscription?.endpoint === fakeSub.endpoint);
   out.stateOnAfterSubscribe = document.querySelector('#btn-push').classList.contains('active');
+
+  // regresión (misma familia que la tarea 20): un `click` pelado NO debe
+  // togglear la campana — es el click fantasma que el navegador sintetiza al
+  // cerrar un overlay cuyo ✕ se solapa con ella, y con onClick la toggleaba
+  // sola (pudiendo desuscribir el push). useTap solo escucha pointer events.
+  window.__deckPush.setState('off'); await frame();
+  const postsBefore = posts.length;
+  btn.click();
+  await new Promise((r) => setTimeout(r, 200));
+  out.ghostClickIgnored = posts.length === postsBefore
+    && !document.querySelector('#btn-push').classList.contains('active');
 
   window.fetch = realFetch;
   window.Notification = realNotif;
@@ -1620,6 +1637,7 @@ ok('push: on → visible con .active', pushRun.onActive);
 ok('push: denied → visible con .denied', pushRun.deniedClass);
 ok('push: tap en off suscribe (POST /api/push/subscribe con la subscription) y queda active',
   pushRun.subscribed && pushRun.stateOnAfterSubscribe);
+ok('push: campana ignora el click fantasma (regresión estilo tarea 20)', pushRun.ghostClickIgnored);
 
 // 23. banner de pushes perdidas (tarea 26): web push es la ÚNICA vía de
 // notificación desde el retiro de ntfy — si el server contó envíos sin entrega

@@ -75,6 +75,9 @@ export function SessionRow() {
   // overlay— ese click fantasma caía acá y abría el host-sheet solo (tarea 20).
   // useTap solo escucha pointer events, así que ignora ese click fantasma.
   const hostChipTap = useTap(() => openHostSheet())
+  // la campana va por useTap por el mismo motivo (el click fantasma de cerrar
+  // un overlay encima la toggleaba sola — podía DESUSCRIBIR el push sin querer)
+  const pushTap = useTap(() => togglePush())
 
   // chip 🔋 solo si el host reporta batería (Mac de escritorio / pmset ilegible
   // → null); la barrita interna del ícono refleja el nivel (ancho útil 13.2px)
@@ -133,7 +136,7 @@ export function SessionRow() {
           (pushState === 'denied' ? ' denied' : '')
         }
         title={pushTitle}
-        onClick={() => togglePush()}
+        {...pushTap}
       >
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z" />
