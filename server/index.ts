@@ -1518,9 +1518,13 @@ app.put('/api/snippets', async (c) => {
 // ---------------------------------------------------------------------------
 const VAPID_FILE = path.join(os.homedir(), '.claude-deck', 'vapid.json')
 const PUSH_SUBS_FILE = path.join(os.homedir(), '.claude-deck', 'push-subscriptions.json')
-// asunto VAPID: los push services piden un mailto/URL de contacto; local, no se
-// expone (bind 127.0.0.1). Override por si Lucas quiere el suyo.
-const VAPID_SUBJECT = process.env.DECK_VAPID_SUBJECT || 'mailto:claude-deck@localhost'
+// asunto VAPID: los push services piden un mailto/URL de contacto. Apple lo
+// VALIDA de verdad: con `mailto:...@localhost` responde 403 BadJwtToken y la
+// push nunca sale (probado 2026-07-07; ntfy tapaba el fallo por la degradación
+// silenciosa) — por eso el default es la DECK_URL, una https real del tailnet
+// que Apple acepta (201). Override por si Lucas quiere otro contacto.
+const VAPID_SUBJECT =
+  process.env.DECK_VAPID_SUBJECT || process.env.DECK_URL || 'mailto:claude-deck@localhost'
 
 type PushSub = { endpoint: string; keys: { p256dh: string; auth: string } }
 
@@ -1615,8 +1619,12 @@ async function sendWebPush(payload: { title: string; body: string; url?: string;
       survivors.push(s)
     } catch (e) {
       // 404/410 = subscription muerta (browser desinstaló / rotó) → podar; el
-      // resto de los errores (red, 5xx del push service) se conservan.
+      // resto de los errores (red, 5xx del push service) se conservan. Loguear
+      // siempre: un rechazo silencioso acá degrada a ntfy y nadie se entera
+      // (así se escondió el 403 BadJwtToken del subject inválido).
       const code = (e as { statusCode?: number }).statusCode
+      const detail = String((e as { body?: unknown }).body ?? (e as Error).message ?? '').slice(0, 200)
+      console.log(`[deck] ${new Date().toISOString()} web push falló endpoint=…${s.endpoint.slice(-10)} status=${code ?? '?'} ${detail}`)
       if (code !== 404 && code !== 410) survivors.push(s)
     }
   }
