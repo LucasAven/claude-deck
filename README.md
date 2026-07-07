@@ -100,6 +100,17 @@ Instala el server como **LaunchAgent** (`~/Library/LaunchAgents/com.claude-deck.
 > Si pasa, configurá un helper que no dependa del agente: `git config --global
 > credential.helper osxkeychain` (HTTPS) o una clave SSH sin passphrase para el
 > deploy. No es un bug del panel: `push` es un subcomando fijo sin flags.
+>
+> Lo mismo aplica al **commit si firmás con GPG** (`commit.gpgsign=true`): sin
+> tty, el pinentry de terminal no puede pedirte la passphrase y el commit falla
+> con `gpg failed to sign the data`. Solución: `brew install pinentry-mac`,
+> apuntalo en `~/.gnupg/gpg-agent.conf` (`pinentry-program
+> /opt/homebrew/bin/pinentry-mac`), reiniciá el agente (`gpgconf --kill
+> gpg-agent`) y en la primera firma marcá "Save in Keychain" — de ahí en más
+> firma headless. Y si tenés más de un GnuPG instalado (p. ej. GPG Suite +
+> homebrew), fijá el binario que tiene tu clave: `git config --global
+> gpg.program <ruta>` — el PATH del LaunchAgent puede resolver al otro y dar
+> `No secret key`.
 
 **Cada vez que te vas** (esto sí es el "un comando"):
 
