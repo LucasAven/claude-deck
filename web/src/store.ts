@@ -4,6 +4,7 @@ import { SESSION_NAME_RE } from './lib/keys'
 import { closeSwitchMenu, loadSwitch } from './lib/switch'
 import { closeComposer } from './lib/composer'
 import { invalidateTree, refreshTree } from './lib/files'
+import { orderNames } from './lib/chiporder'
 
 // Estado global (zustand). El módulo de terminal/WS (Fase 2) lo lee fuera de
 // React con useDeckStore.getState() y dispara updates sin prop-drilling — ver
@@ -315,10 +316,13 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     const names = sessions.map((s) => s.name)
     const cur = get().session
     if (cur && !names.includes(cur)) names.push(cur)
-    names.sort()
+    // tarea 19: el orden lo decide el usuario (drag), persistido en localStorage.
+    // orderNames respeta el orden guardado y manda las sesiones nuevas al final;
+    // sin orden guardado equivale al alfabético de antes.
+    const ordered = orderNames(names)
     const stateByName: Record<string, string | undefined> = {}
     for (const s of sessions) stateByName[s.name] = (s.state as string) || undefined
-    set({ sessions: names.map((n) => ({ name: n, state: stateByName[n] })) })
+    set({ sessions: ordered.map((n) => ({ name: n, state: stateByName[n] })) })
   },
 
   // app.js:1500-1512. Persistir, cerrar hint/menú/composer (guardando el
