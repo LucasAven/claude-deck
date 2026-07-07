@@ -638,9 +638,12 @@ ok('✎ abre el composer (sheet visible, controlbar oculta)',
 ok('composer: textarea con foco y sesión en el header',
   compOpen.focused && compOpen.session === 'deck');
 
-// 14b. tipear + botón \n + borrador con debounce (500 ms)
+// 14b. tipear con salto de línea nativo (Enter del teclado) + borrador con
+// debounce (500 ms). El botón \n del composer se retiró (tarea 21): el Enter del
+// teclado virtual ya inserta el salto en el textarea.
+ok('botón \\n del composer retirado (Enter nativo hace el salto)', (await page.$('#composer-nl')) === null);
 await page.type('#composer-text', 'línea uno');
-await tapSel('#composer-nl');
+await page.keyboard.press('Enter');
 await page.type('#composer-text', 'línea dos');
 await new Promise((r) => setTimeout(r, 800));
 const compDraft = await page.evaluate(() => ({
@@ -648,10 +651,31 @@ const compDraft = await page.evaluate(() => ({
   stored: localStorage.getItem('draft:deck'),
   savedShown: !document.querySelector('#composer-saved').classList.contains('hidden'),
 }));
-ok('botón \\n inserta salto de línea en el textarea', compDraft.value === 'línea uno\nlínea dos');
+ok('Enter inserta salto de línea nativo en el textarea', compDraft.value === 'línea uno\nlínea dos');
 ok('borrador persistido en draft:deck tras el debounce (indicador visible)',
   compDraft.stored === 'línea uno\nlínea dos' && compDraft.savedShown);
 await page.screenshot({ path: new URL('./shot-composer.png', import.meta.url).pathname });
+
+// 14b-bis (tarea 21). con el composer abierto, pegar texto NO viaja al pty: el
+// handler global de paste hace early-return si el foco es editable / composerOpen,
+// así el textarea lo maneja nativo. Espiamos term.paste y sendKeys: 0 llamadas.
+const compPaste = await page.evaluate(() => {
+  const pastes = [], keys = [];
+  const origPaste = claudeConn.term.paste.bind(claudeConn.term);
+  const origSend = claudeConn.sendKeys;
+  claudeConn.term.paste = (t) => pastes.push(t);
+  claudeConn.sendKeys = (d) => keys.push(d);
+  const ta = document.querySelector('#composer-text');
+  ta.focus();
+  const dt = new DataTransfer();
+  dt.setData('text/plain', 'pegado en el composer');
+  ta.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }));
+  claudeConn.term.paste = origPaste;
+  claudeConn.sendKeys = origSend;
+  return { pastes, keys };
+});
+ok('paste con composer abierto NO llega al pty (0 term.paste, 0 sendKeys)',
+  compPaste.pastes.length === 0 && compPaste.keys.length === 0);
 
 // 14c. el borrador sobrevive a un reload (iOS matando la pestaña) y se
 // restaura al reabrir el composer para esa sesión

@@ -5,7 +5,6 @@ import {
   registerComposerTextarea,
   closeComposer,
   sendComposer,
-  composerNewline,
   scheduleDraftSave,
   toggleComposerSnips,
 } from '../../lib/composer'
@@ -30,7 +29,6 @@ export function Composer() {
 
   const cancelTap = useTap(() => closeComposer())
   const sendTap = useTap(() => sendComposer())
-  const nlTap = useTap(() => composerNewline())
   const snipsTap = useTap(() => toggleComposerSnips())
 
   return (
@@ -52,9 +50,7 @@ export function Composer() {
         {snipsOpen && <SnippetsPalette />}
       </div>
       <div className="composer-foot">
-        <button id="composer-nl" className="ctl-sq" title="Salto de línea" {...nlTap}>
-          {'\\n'}
-        </button>
+        {/* sin botón \n: el Enter del teclado virtual ya hace salto de línea nativo en el textarea */}
         <button id="composer-snippets" className={'ctl-sq' + (snipsOpen ? ' active' : '')} title="Snippets" {...snipsTap}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 6.5h16M4 12h16M4 17.5h16" />
