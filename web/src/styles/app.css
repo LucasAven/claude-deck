@@ -1190,8 +1190,11 @@ body.composer-open .tabbar { display: none; }
 }
 
 /* ---------- comentar una línea del diff (tarea 13) ---------- */
-/* highlight ámbar de la fila seleccionada (toggle imperativo sobre el <tr>) */
+/* highlight ámbar de la(s) fila(s) seleccionada(s) (toggle imperativo sobre el <tr>) */
 #diff-view tr.diff-comment-line td { box-shadow: inset 3px 0 0 var(--accent); }
+/* drag de rango: sólo la columna de números no scrollea, así el arrastre desde
+   ahí lo capturamos nosotros; el código sigue scrolleando con el dedo (tarea 13) */
+#diff-view .d2h-code-linenumber { touch-action: none; }
 .diff-comment {
   flex: none;
   display: flex;
