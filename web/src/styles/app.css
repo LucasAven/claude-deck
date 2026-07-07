@@ -620,6 +620,9 @@ body.composer-open .tabbar { display: none; }
   border-color: var(--accent);
   color: var(--accent);
 }
+/* fila con muchas pills (effort: 6) → envuelve en ~3 por renglón */
+.dp-modes.dp-wrap { flex-wrap: wrap; }
+.dp-wrap .dp-pill { flex: 1 1 28%; min-width: 0; }
 /* Autorun armado: el botón grita que corre sin permisos */
 .wt-submit.dp-confirm {
   background: var(--accent-dim);

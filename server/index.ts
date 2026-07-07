@@ -987,7 +987,7 @@ app.get('/api/workspaces', (c) => {
 // chip normal (con dot de estado de la tarea 4).
 //
 // Entrega del prompt (decidido con prototipo contra un claude real, tarea 6):
-// argv posicional `claude $'<prompt>' --permission-mode <m> [--model <a>]` vía send-keys -l
+// argv posicional `claude $'<prompt>' --permission-mode <m> [--model <a>] [--effort <e>]` vía send-keys -l
 // (quoting ANSI-C, ver shQuote). Se probó (a) argv vs (b) paste con
 // bracketed-paste; (a) resultó 100% confiable en la matriz de quoting (comillas
 // dobles/simples, $(), backticks, y prompts MULTILÍNEA) y se validó end-to-end
@@ -1004,6 +1004,10 @@ const DISPATCH_MODES = ['plan', 'acceptEdits', 'auto']
 // verificados contra el claude real (--model opus arrancó [Opus 4.8]); el CLI no
 // valida el alias al parsear, así que acotamos server-side a este whitelist.
 const DISPATCH_MODELS = ['', 'sonnet', 'opus', 'haiku']
+// Effort opcional → --effort <level>. '' = sin flag (default del CLI). Valores
+// verificados contra el claude real: el propio CLI los enumera ("Valid values:
+// low, medium, high, xhigh, max") al rechazar uno inválido.
+const DISPATCH_EFFORTS = ['', 'low', 'medium', 'high', 'xhigh', 'max']
 // binario a lanzar; override SOLO para tests (un stub que ecoa su argv, así la
 // matriz de quoting se aserta sin lanzar un claude real — jamás un auto/bypass
 // de verdad en tests). En producción siempre 'claude'.
@@ -1028,7 +1032,7 @@ function shQuote(s: string): string {
   )
 }
 app.post('/api/dispatch', async (c) => {
-  let body: { dir?: unknown; prompt?: unknown; mode?: unknown; model?: unknown }
+  let body: { dir?: unknown; prompt?: unknown; mode?: unknown; model?: unknown; effort?: unknown }
   try {
     body = await c.req.json()
   } catch {
@@ -1038,9 +1042,11 @@ app.post('/api/dispatch', async (c) => {
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
   const mode = typeof body.mode === 'string' ? body.mode : ''
   const model = typeof body.model === 'string' ? body.model : ''
+  const effort = typeof body.effort === 'string' ? body.effort : ''
 
   if (!DISPATCH_MODES.includes(mode)) throw new HttpError(400, 'modo inválido')
   if (!DISPATCH_MODELS.includes(model)) throw new HttpError(400, 'modelo inválido')
+  if (!DISPATCH_EFFORTS.includes(effort)) throw new HttpError(400, 'effort inválido')
   if (!prompt) throw new HttpError(400, 'prompt vacío')
   if (prompt.length > 10000) throw new HttpError(400, 'prompt demasiado largo (máx 10000)')
   // dir es un basename de primer nivel: sin separadores ni "." especiales
@@ -1074,9 +1080,10 @@ app.post('/api/dispatch', async (c) => {
 
   // el shell recién nacido tarda un toque en estar listo; luego mandamos la
   // línea literal y, con otro respiro, el Enter (mismo patrón que el prototipo)
-  // sin modelo elegido NO se pasa --model (queda el default del CLI)
+  // sin modelo/effort elegido NO se pasa la flag (queda el default del CLI)
   const modelFlag = model ? ` --model ${model}` : ''
-  const line = `${CLAUDE_BIN} ${shQuote(prompt)} --permission-mode ${mode}${modelFlag}`
+  const effortFlag = effort ? ` --effort ${effort}` : ''
+  const line = `${CLAUDE_BIN} ${shQuote(prompt)} --permission-mode ${mode}${modelFlag}${effortFlag}`
   await new Promise((r) => setTimeout(r, 250))
   try {
     await execFileP('tmux', ['send-keys', '-t', `=${session}:`, '-l', line])
@@ -1086,8 +1093,8 @@ app.post('/api/dispatch', async (c) => {
     const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
     throw new HttpError(500, `sesión ${session} creada, pero el envío del prompt falló: ${msg}`)
   }
-  console.log(`[deck] ${new Date().toISOString()} dispatch ${dirName} (modo ${mode}${model ? `, modelo ${model}` : ''}) -> sesión ${session}`)
-  return c.json({ session, dir, mode, model })
+  console.log(`[deck] ${new Date().toISOString()} dispatch ${dirName} (modo ${mode}${model ? `, modelo ${model}` : ''}${effort ? `, effort ${effort}` : ''}) -> sesión ${session}`)
+  return c.json({ session, dir, mode, model, effort })
 })
 
 // File browser (solo lectura). ?path= relativo a la raíz de la sesión;

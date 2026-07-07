@@ -53,6 +53,8 @@ export async function fetchWorkspaces(): Promise<string[] | null> {
 export type DispatchMode = 'plan' | 'acceptEdits' | 'auto'
 // modelo → alias de --model; '' = default del CLI (no se pasa la flag)
 export type DispatchModel = '' | 'sonnet' | 'opus' | 'haiku'
+// effort → nivel de --effort; '' = default del CLI (no se pasa la flag)
+export type DispatchEffort = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export type DispatchResult = { ok: true; session: string } | { ok: false; error: string }
 
@@ -61,12 +63,13 @@ export async function dispatchAgent(
   prompt: string,
   mode: DispatchMode,
   model: DispatchModel,
+  effort: DispatchEffort,
 ): Promise<DispatchResult> {
   try {
     const res = await api('/api/dispatch', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dir, prompt, mode, model }),
+      body: JSON.stringify({ dir, prompt, mode, model, effort }),
     })
     if (!res.ok) {
       let msg = `HTTP ${res.status}`
