@@ -1,6 +1,6 @@
 import { useDeckStore } from '../../store'
 import { useTap } from '../../hooks/useTap'
-import { closeSettingsSheet } from '../../lib/settings'
+import { closeSettingsSheet, toggleTmuxStatus } from '../../lib/settings'
 import { openHostSheet } from '../../lib/host'
 import { openQuickkeysSheet } from '../../lib/quickkeys'
 import { togglePush } from '../../lib/push'
@@ -43,14 +43,22 @@ const SET_ICONS = {
       <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
     </>,
   ),
+  term: svg(
+    <>
+      <rect x="2.5" y="4.5" width="19" height="15" rx="2" />
+      <path d="M6.5 9l3 2.5-3 2.5M12 14h5" />
+    </>,
+  ),
 }
 
 export function SettingsSheet() {
   const open = useDeckStore((s) => s.settingsSheetOpen)
   const pushState = useDeckStore((s) => s.pushState)
   const h = useDeckStore((s) => s.hostStatus)
+  const hideTmuxStatus = useDeckStore((s) => s.hideTmuxStatus)
 
   const pushTap = useTap(() => togglePush())
+  const tmuxTap = useTap(() => toggleTmuxStatus())
   const battTap = useTap(() => {
     closeSettingsSheet()
     openHostSheet()
@@ -112,6 +120,20 @@ export function SettingsSheet() {
           </div>
           <span className="set-chev">›</span>
         </button>
+        <div id="set-tmux-row" className="set-row">
+          <span className="set-ico">{SET_ICONS.term}</span>
+          <div className="set-info">
+            <div className="set-label">Ocultar barra de tmux</div>
+            <div className="set-sub">La franja verde con el nombre y la hora</div>
+          </div>
+          <button
+            id="tmux-status-toggle"
+            className={'switch' + (hideTmuxStatus ? ' on' : '')}
+            role="switch"
+            title="Ocultar barra de tmux"
+            {...tmuxTap}
+          />
+        </div>
       </div>
     </div>
   )

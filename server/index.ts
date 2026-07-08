@@ -128,6 +128,18 @@ async function tmuxSendKeys(session: string, ...keys: string[]): Promise<void> {
   await execFileP('tmux', ['send-keys', '-t', `=${session}:`, ...keys])
 }
 
+// status bar de tmux (la franja verde con [sesión]/hora): es una opción POR
+// SESIÓN — no hay forma de ocultarla solo en un cliente, así que apagarla afecta
+// a todo attach de la misma sesión (incluida una terminal de la laptop). El
+// toggle vive en la PWA (deck-hide-tmux-status en localStorage); el estado
+// inicial se aplica al attachear (chain en el spawn) y los cambios en vivo por
+// el mensaje WS {t:'statusbar'}. Fire-and-forget: un fallo no debe tirar nada.
+async function tmuxSetStatus(name: string, on: boolean): Promise<void> {
+  try {
+    await execFileP('tmux', ['set-option', '-t', `=${name}:`, 'status', on ? 'on' : 'off'])
+  } catch { /* sesión muerta o sin permisos: sin efecto */ }
+}
+
 async function tmuxRefreshClients(name: string): Promise<void> {
   // Redibujo completo de todos los clientes attacheados a la sesión (los ptys
   // de este server). El frontend lo pide al volver de background: iOS puede
@@ -1834,7 +1846,10 @@ async function handleTerm(ws: WebSocket, url: URL) {
     // `; set-option mouse on`: tmux captura la rueda del mouse y scrollea su
     // historial (copy-mode). El frontend traduce gestos táctiles a eventos de
     // rueda — sin esto, no habría forma de ver scrollback desde el celular.
-    p = pty.spawn('tmux', ['new-session', '-A', '-s', tmuxName, '-c', DEFAULT_DIR, ';', 'set-option', 'mouse', 'on'], {
+    // `; set-option status <on|off>`: refleja la pref de la PWA (statusbar=off)
+    // al attachear, siempre explícito para RE-encender si otro cliente la apagó.
+    const statusOn = url.searchParams.get('statusbar') !== 'off'
+    p = pty.spawn('tmux', ['new-session', '-A', '-s', tmuxName, '-c', DEFAULT_DIR, ';', 'set-option', 'mouse', 'on', ';', 'set-option', 'status', statusOn ? 'on' : 'off'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
@@ -1875,6 +1890,10 @@ async function handleTerm(ws: WebSocket, url: URL) {
       // resume desde el celular: forzar repaint (garantiza al menos un 'out',
       // que el frontend usa como señal de vida del socket)
       void tmuxRefreshClients(tmuxName)
+    } else if (m.t === 'statusbar') {
+      // toggle en vivo del status bar de tmux desde el sheet de ajustes; el
+      // estado inicial ya vino por el query param al attachear
+      void tmuxSetStatus(tmuxName, m.on === true)
     }
   })
 

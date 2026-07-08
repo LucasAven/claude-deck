@@ -124,6 +124,17 @@ export interface SwitchState {
 }
 
 const ACTIVE_SESSION_KEY = 'deck-active-session'
+const HIDE_TMUX_STATUS_KEY = 'deck-hide-tmux-status'
+
+// pref: ocultar el status bar de tmux (la franja verde). Por dispositivo; el
+// efecto en tmux es por sesión (ver tmuxSetStatus en el server).
+function loadHideTmuxStatus(): boolean {
+  try {
+    return localStorage.getItem(HIDE_TMUX_STATUS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 interface DeckStore {
   // --- núcleo (app.js:7-13) ---
@@ -166,6 +177,8 @@ interface DeckStore {
   quickkeysSheetOpen: boolean
   // sheet de ajustes (engranaje de la fila de sesiones): push + batería + quickkeys
   settingsSheetOpen: boolean
+  // pref: ocultar el status bar de tmux (franja verde), persistida por dispositivo
+  hideTmuxStatus: boolean
   switchMenu: SwitchMenuKind
   switchState: SwitchState
   imgChip: ImgChip | null
@@ -266,6 +279,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   quickkeys: loadQuickkeys(),
   quickkeysSheetOpen: false,
   settingsSheetOpen: false,
+  hideTmuxStatus: loadHideTmuxStatus(),
   switchMenu: null,
   switchState: {},
   imgChip: null,

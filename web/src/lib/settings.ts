@@ -12,3 +12,17 @@ export function openSettingsSheet() {
 export function closeSettingsSheet() {
   useDeckStore.setState({ settingsSheetOpen: false })
 }
+
+// toggle del status bar de tmux (franja verde): flip + persist + aplicar en vivo
+// a la sesión attacheada. El estado inicial de cada attach viaja por el query
+// param statusbar=off (ver term.ts); esto cubre el cambio sin reconectar.
+export function toggleTmuxStatus() {
+  const hide = !useDeckStore.getState().hideTmuxStatus
+  useDeckStore.setState({ hideTmuxStatus: hide })
+  try {
+    localStorage.setItem('deck-hide-tmux-status', hide ? '1' : '0')
+  } catch {
+    /* modo privado: no crítico */
+  }
+  window.claudeConn?.setStatusBar(!hide)
+}

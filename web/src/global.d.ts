@@ -7,6 +7,7 @@
 interface ClaudeConn {
   term: import('@xterm/xterm').Terminal
   sendKeys: (data: string) => void
+  setStatusBar: (on: boolean) => void
   fit: (force?: boolean) => void
   reconnect: () => void
   sendVis: () => void

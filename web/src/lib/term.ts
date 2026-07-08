@@ -128,7 +128,10 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
     // permite el server. Un retry/resume nunca crea: si la sesión murió en
     // otro lado, el server contesta meta gone y caemos a una viva.
     const create = wantedSession === useDeckStore.getState().expectCreate ? '&create=1' : ''
-    const url = `${proto}://${location.host}/ws/term?session=${encodeURIComponent(wantedSession ?? '')}${create}`
+    // statusbar=off aplica la pref (ocultar la franja verde de tmux) YA en el
+    // attach, sin race: el server la chainea al new-session (ver handleTerm)
+    const statusbar = useDeckStore.getState().hideTmuxStatus ? '&statusbar=off' : ''
+    const url = `${proto}://${location.host}/ws/term?session=${encodeURIComponent(wantedSession ?? '')}${create}${statusbar}`
     const sock = new WebSocket(url)
     ws = sock
 
@@ -195,6 +198,10 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
     fit: doFit,
     sendKeys(d: string) {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'in', d }))
+    },
+    setStatusBar(on: boolean) {
+      // toggle en vivo de la franja verde de tmux (por sesión, ver server)
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'statusbar', on }))
     },
     reconnect() {
       // cortar el attach actual y conectar a la sesión seleccionada
