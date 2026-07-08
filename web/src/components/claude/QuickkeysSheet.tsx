@@ -10,11 +10,11 @@ import {
 } from '../../lib/quickkeys'
 
 // Editor de la barra de quickkeys (tarea 11b). Bottom sheet con el esqueleto
-// del host-sheet (siempre montado, toggle hidden, backdrop cierra). Se abre con
-// long-press sobre cualquier tecla de la barra. Edición estilo snippets: los
-// chips de "En la barra" tienen ◀ (mover un lugar antes; el primero no lo
-// muestra) y ✕ (sacar; la última tecla no lo muestra — sin teclas no habría
-// dónde hacer long-press para volver acá); los del catálogo agregan al final.
+// del host-sheet (siempre montado, toggle hidden, backdrop cierra). Se abre
+// desde el sheet de Ajustes (antes: long-press sobre la barra). Edición estilo
+// snippets: los chips de "En la barra" tienen ◀ (mover un lugar antes; el
+// primero no lo muestra) y ✕ (sacar; la última tecla no lo muestra — una barra
+// vacía dejaría la fila muerta); los del catálogo agregan al final.
 // Cada cambio persiste al instante en localStorage (deck-quickkeys). TODO va
 // con useTap, nunca onClick: el sheet se cierra sobre la controlbar y un click
 // fantasma sobre lo que quede debajo repetiría el bug de las tareas 20/27.

@@ -1,10 +1,11 @@
 import { useDeckStore } from '../../store'
 import { openCreateMenu } from '../../lib/worktree'
-import { togglePush } from '../../lib/push'
+import { openSettingsSheet } from '../../lib/settings'
 import { useTap } from '../../hooks/useTap'
 import { useChipDrag } from '../../hooks/useChipDrag'
 
-// Fila de sesiones (index.html:23-33): chips + botón + y campana de push.
+// Fila de sesiones (index.html:23-33): chips + botón + y engranaje de ajustes
+// (que reemplazó a la campana de push — el toggle vive en el SettingsSheet).
 // El chip de batería y el punto de conexión se mudaron a la Statusline.
 // Port de refreshSessions/selectSession/renameSession/
 // killSession/createSession (app.js:1443-1628) — la lógica vive en el store; acá
@@ -67,28 +68,16 @@ export function SessionRow() {
   // tarea 5: el + pasó de click simple a useTap para ganar el long-press (menú
   // CREAR); el tap corto sigue creando sesión igual que siempre
   const addTap = useTap(() => createSession(), openCreateMenu)
-  // la campana va por useTap (no onClick): el `click` fantasma que el navegador
-  // sintetiza al cerrar un overlay encima la toggleaba sola — podía DESUSCRIBIR
-  // el push sin querer (misma trampa que el host-chip, tarea 20)
-  const pushTap = useTap(() => togglePush())
+  // el engranaje va por useTap (no onClick): el `click` fantasma que el
+  // navegador sintetiza al cerrar un overlay encima lo abriría solo (misma
+  // trampa que el host-chip, tarea 20)
+  const settingsTap = useTap(() => openSettingsSheet())
 
   // tarea 19: drag para reordenar. El hook devuelve el orden en vivo (durante el
   // drag) y el chip levantado; fuera del drag displayNames == orden del store.
   const { ref: chipsRef, handlers: dragHandlers, displayNames, lifted } = useChipDrag(sessions)
   const stateByName: Record<string, string | undefined> = {}
   for (const s of sessions) stateByName[s.name] = s.state
-
-  // botón de opt-in de Web Push (tarea 23): oculto si el browser no soporta.
-  // Es LA fuente de notificaciones (ntfy se retiró, tarea 26). Ámbar cuando
-  // estás suscripto; el tap alterna suscribir/desuscribir (o informa el
-  // permiso denegado).
-  const pushState = useDeckStore((s) => s.pushState)
-  const pushTitle =
-    pushState === 'on'
-      ? 'Notificaciones activas · tocá para desactivar'
-      : pushState === 'denied'
-        ? 'Permiso de notificaciones denegado (activalo en Ajustes)'
-        : 'Activar notificaciones en esta app'
 
   return (
     <div className="session-row">
@@ -100,22 +89,11 @@ export function SessionRow() {
       <button id="btn-new-session" className="chip chip-add" title="Nueva sesión" {...addTap}>
         +
       </button>
-      {/* opt-in de Web Push (tarea 23): campana, oculta si no hay soporte */}
-      <button
-        id="btn-push"
-        className={
-          'chip push-chip' +
-          (pushState === 'unsupported' ? ' hidden' : '') +
-          (pushState === 'on' ? ' active' : '') +
-          (pushState === 'denied' ? ' denied' : '')
-        }
-        title={pushTitle}
-        {...pushTap}
-      >
+      {/* engranaje: abre el sheet de ajustes (push + batería + quickkeys) */}
+      <button id="btn-settings" className="chip settings-chip" title="Ajustes" {...settingsTap}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z" />
-          <path d="M10.5 19a1.8 1.8 0 0 0 3 0" />
-          {pushState === 'on' && <circle cx="18" cy="6" r="3" fill="currentColor" stroke="none" />}
+          <circle cx="12" cy="12" r="3.2" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" />
         </svg>
       </button>
     </div>

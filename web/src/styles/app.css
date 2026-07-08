@@ -149,16 +149,10 @@ body {
   -webkit-touch-callout: none;
 }
 
-/* botón de opt-in de Web Push (tarea 23): campana pineada a la derecha;
-   .active (suscripto) en ámbar como el resto de los estados activos; .denied
-   atenuado (informa, no puede re-pedir permiso) */
-.push-chip { padding: 4px 9px; }
-.push-chip svg { display: block; }
-.push-chip.active {
-  border-color: var(--accent-dim);
-  color: var(--accent);
-}
-.push-chip.denied { opacity: 0.5; }
+/* engranaje de ajustes: pineado a la derecha (reemplazó a la campana de push,
+   que ahora es un toggle dentro del settings-sheet) */
+.settings-chip { padding: 4px 9px; }
+.settings-chip svg { display: block; }
 
 /* ---------- barra de teclas rápidas ---------- */
 .quickkeys {
@@ -1084,6 +1078,44 @@ body.composer-open .tabbar { display: none; }
   cursor: pointer;
 }
 .qk-reset:active { color: var(--accent); border-color: var(--accent); }
+
+/* ---------- sheet de ajustes (engranaje): reusa host-sheet ---------- */
+.set-title {
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 4px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+/* fila: ícono | label + subtítulo | control (switch o chevron). Las filas que
+   navegan son <button>: se resetea el estilo nativo */
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 62px;
+  padding: 10px 2px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+.set-ico { flex: none; display: flex; color: var(--muted); }
+.set-info { flex: 1; min-width: 0; }
+.set-label { font-size: 15px; color: var(--text); }
+.set-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.set-chev { flex: none; color: var(--muted); font-size: 20px; line-height: 1; }
+button.set-row:active .set-label { color: var(--accent); }
+.set-row:last-child { border-bottom: none; }
+/* permiso de push denegado: la fila informa pero el toggle no puede re-pedir */
+.set-row.denied { cursor: default; }
+.set-row.denied .switch { opacity: 0.45; }
 
 .host-alert {
   display: flex;

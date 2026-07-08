@@ -12,6 +12,7 @@ import { HostSheet } from './components/claude/HostSheet'
 import { WorktreeSheet } from './components/claude/WorktreeSheet'
 import { DispatchSheet } from './components/claude/DispatchSheet'
 import { QuickkeysSheet } from './components/claude/QuickkeysSheet'
+import { SettingsSheet } from './components/claude/SettingsSheet'
 import { closeSwitchMenu } from './lib/switch'
 import { closeCreateMenu } from './lib/worktree'
 import { refreshHost } from './lib/host'
@@ -117,6 +118,7 @@ export function App() {
         <WorktreeSheet />
         <DispatchSheet />
         <QuickkeysSheet />
+        <SettingsSheet />
         <SnipTip />
 
         <TabBar />

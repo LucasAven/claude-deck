@@ -164,6 +164,8 @@ interface DeckStore {
   // quickkeys configurables (tarea 11b): orden de la barra + sheet de edición
   quickkeys: string[]
   quickkeysSheetOpen: boolean
+  // sheet de ajustes (engranaje de la fila de sesiones): push + batería + quickkeys
+  settingsSheetOpen: boolean
   switchMenu: SwitchMenuKind
   switchState: SwitchState
   imgChip: ImgChip | null
@@ -263,6 +265,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   dispatchSheetOpen: false,
   quickkeys: loadQuickkeys(),
   quickkeysSheetOpen: false,
+  settingsSheetOpen: false,
   switchMenu: null,
   switchState: {},
   imgChip: null,

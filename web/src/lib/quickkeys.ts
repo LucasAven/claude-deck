@@ -5,9 +5,9 @@ import { DEFAULT_QUICKKEYS, QUICKKEYS_LS_KEY } from './keys'
 // store.quickkeys, que persiste en localStorage['deck-quickkeys'] (global del
 // dispositivo, como deck-fontsize y deck-chip-order: el orden solo importa en
 // el teléfono). El editor es un bottom sheet (esqueleto host-sheet) que se abre
-// con LONG-PRESS sobre cualquier tecla de la barra — mismo gesto que el + →
-// menú CREAR. Edición estilo snippets: ◀ mueve un lugar antes, ✕ saca, los
-// chips del catálogo agregan al final.
+// desde el sheet de Ajustes (engranaje de la fila de sesiones; antes era
+// long-press sobre la barra). Edición estilo snippets: ◀ mueve un lugar antes,
+// ✕ saca, los chips del catálogo agregan al final.
 
 function persist(list: string[]) {
   try {
@@ -36,8 +36,7 @@ export function addQuickkey(id: string) {
   setQuickkeys([...cur, id])
 }
 
-// no se puede sacar la última: sin teclas no queda dónde hacer long-press para
-// volver a abrir este editor
+// no se puede sacar la última: una barra vacía dejaría la fila muerta
 export function removeQuickkey(id: string) {
   const cur = useDeckStore.getState().quickkeys
   if (cur.length <= 1) return

@@ -1551,36 +1551,55 @@ ok('statusline: restante 22% (usado 78) → warn (ámbar)', slRun.warn);
 ok('statusline: restante 8% (usado 92) → alert (rojo)', slRun.alert);
 ok('statusline: exceeds200k fuerza alert y % "—"', slRun.exceedsAlert);
 
-// 22. opt-in de Web Push (tarea 23): botón campana #btn-push en la fila de
-// sesiones. Su estado sale del store (pushState), que en el celu lo alimentan
-// las APIs reales (SW/PushManager/Notification) — headless no las tiene, así
-// que se driven vía window.__deckPush.setState. La suscripción real (permiso,
-// push, tap que abre la app) es E2E del celu de Lucas.
+// 22. sheet de ajustes (engranaje #btn-settings, reemplazó a la campana) +
+// opt-in de Web Push (tarea 23): el toggle vive en la fila #set-push-row de
+// #settings-sheet. Su estado sale del store (pushState), que en el celu lo
+// alimentan las APIs reales (SW/PushManager/Notification) — headless no las
+// tiene, así que se driven vía window.__deckPush.setState. La suscripción real
+// (permiso, push, tap que abre la app) es E2E del celu de Lucas.
 const pushRun = await page.evaluate(async () => {
   const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
-  const btn = document.querySelector('#btn-push');
-  const out = { present: !!btn };
+  const sheet = document.querySelector('#settings-sheet');
+  const gear = document.querySelector('#btn-settings');
+  const sw = () => document.querySelector('#push-toggle');
+  const row = () => document.querySelector('#set-push-row');
+  const tapEl = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
+  const out = { present: !!sheet && !!gear, hiddenDefault: sheet.classList.contains('hidden') };
 
-  // unsupported → oculto (sin soporte no hay pushes, el botón no promete nada)
+  // el engranaje abre el sheet
+  tapEl(gear); await frame();
+  out.gearOpens = !sheet.classList.contains('hidden');
+
+  // regresión tarea 20: el engranaje ocupa el lugar de la campana, donde el ✕
+  // del scrollback se solapa — un `click` pelado (el fantasma que el navegador
+  // sintetiza al cerrar ese overlay) NO debe abrir el sheet solo
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  gear.click(); await frame();
+  out.gearIgnoresBareClick = sheet.classList.contains('hidden');
+  tapEl(gear); await frame(); // reabrir para el resto de la sección
+
+  // unsupported → la fila de push no se renderiza (sin soporte no hay pushes)
   window.__deckPush.setState('unsupported'); await frame();
-  out.unsupportedHidden = btn.classList.contains('hidden');
+  out.unsupportedHidesRow = !row();
 
-  // off → visible, sin active ni denied
+  // off → fila visible, switch apagado y sin denied
   window.__deckPush.setState('off'); await frame();
-  out.offVisible = !btn.classList.contains('hidden')
-    && !btn.classList.contains('active') && !btn.classList.contains('denied');
+  out.offVisible = !!row() && !sw().classList.contains('on') && !row().classList.contains('denied');
 
-  // on → visible con .active (ámbar)
+  // on → switch prendido (ámbar)
   window.__deckPush.setState('on'); await frame();
-  out.onActive = !btn.classList.contains('hidden') && btn.classList.contains('active');
+  out.onActive = sw().classList.contains('on');
 
-  // denied → visible con .denied (informa, no re-pide permiso)
+  // denied → fila .denied atenuada, switch apagado (informa, no re-pide permiso)
   window.__deckPush.setState('denied'); await frame();
-  out.deniedClass = !btn.classList.contains('hidden') && btn.classList.contains('denied');
+  out.deniedClass = row().classList.contains('denied') && !sw().classList.contains('on');
 
-  // tap con estado off dispara el flujo de suscripción: se mockean las APIs de
-  // Web Push (no existen headless) + el fetch a /api/push/* para verificar que
-  // el opt-in POSTea la subscription y termina en 'on'
+  // tap en el switch con estado off dispara el flujo de suscripción: se mockean
+  // las APIs de Web Push (no existen headless) + el fetch a /api/push/* para
+  // verificar que el opt-in POSTea la subscription y termina en 'on'
   const posts = [];
   const realFetch = window.fetch;
   window.fetch = (url, opts) => {
@@ -1617,43 +1636,53 @@ const pushRun = await page.evaluate(async () => {
     },
   });
 
-  // el tap va por el botón real (useTap = par pointerdown+pointerup), no por
-  // __deckPush.toggle(): así el check cubre el cableado del botón además del flujo
-  const tap = (el) => {
-    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
-  };
+  // el tap va por el switch real (useTap = par pointerdown+pointerup), no por
+  // __deckPush.toggle(): así el check cubre el cableado del toggle además del flujo
   window.__deckPush.setState('off'); await frame();
-  tap(btn); // off → subscribe
+  tapEl(sw()); // off → subscribe
   await new Promise((r) => setTimeout(r, 200));
   out.subscribed = posts.some((p) => p.url.includes('/api/push/subscribe') && p.body.subscription?.endpoint === fakeSub.endpoint);
-  out.stateOnAfterSubscribe = document.querySelector('#btn-push').classList.contains('active');
+  out.stateOnAfterSubscribe = sw().classList.contains('on');
 
   // regresión (misma familia que la tarea 20): un `click` pelado NO debe
-  // togglear la campana — es el click fantasma que el navegador sintetiza al
-  // cerrar un overlay cuyo ✕ se solapa con ella, y con onClick la toggleaba
-  // sola (pudiendo desuscribir el push). useTap solo escucha pointer events.
+  // togglear el switch — es el click fantasma que el navegador sintetiza al
+  // cerrar un overlay cuyo ✕ se solapa, y con onClick lo toggleaba solo
+  // (pudiendo desuscribir el push). useTap solo escucha pointer events.
   window.__deckPush.setState('off'); await frame();
   const postsBefore = posts.length;
-  btn.click();
+  sw().click();
   await new Promise((r) => setTimeout(r, 200));
-  out.ghostClickIgnored = posts.length === postsBefore
-    && !document.querySelector('#btn-push').classList.contains('active');
+  out.ghostClickIgnored = posts.length === postsBefore && !sw().classList.contains('on');
 
   window.fetch = realFetch;
   window.Notification = realNotif;
   Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: realSW });
   window.__deckPush.setState('off'); await frame(); // dejar limpio
+
+  // fila de batería → cierra ajustes y abre el host-sheet de siempre
+  const hostSheet = document.querySelector('#host-sheet');
+  tapEl(document.querySelector('#set-batt-row')); await frame();
+  out.battOpensHost = sheet.classList.contains('hidden') && !hostSheet.classList.contains('hidden');
+  hostSheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+
+  // el backdrop cierra el sheet (como el resto de los sheets — sin botón Listo)
+  tapEl(gear); await frame();
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  out.backdropCloses = sheet.classList.contains('hidden');
   return out;
 });
-ok('push: botón #btn-push presente', pushRun.present);
-ok('push: unsupported oculta el botón', pushRun.unsupportedHidden);
-ok('push: off → visible sin active/denied', pushRun.offVisible);
-ok('push: on → visible con .active', pushRun.onActive);
-ok('push: denied → visible con .denied', pushRun.deniedClass);
-ok('push: tap en off suscribe (POST /api/push/subscribe con la subscription) y queda active',
+ok('ajustes: sheet presente y oculto por defecto', pushRun.present && pushRun.hiddenDefault);
+ok('ajustes: el engranaje abre el sheet', pushRun.gearOpens);
+ok('ajustes: el engranaje ignora el click fantasma (regresión tarea 20)', pushRun.gearIgnoresBareClick);
+ok('ajustes: fila de batería cierra ajustes y abre el host-sheet', pushRun.battOpensHost);
+ok('ajustes: el backdrop cierra el sheet', pushRun.backdropCloses);
+ok('push: unsupported saca la fila del sheet', pushRun.unsupportedHidesRow);
+ok('push: off → fila visible con switch apagado', pushRun.offVisible);
+ok('push: on → switch prendido', pushRun.onActive);
+ok('push: denied → fila atenuada, switch apagado', pushRun.deniedClass);
+ok('push: tap en off suscribe (POST /api/push/subscribe con la subscription) y el switch queda prendido',
   pushRun.subscribed && pushRun.stateOnAfterSubscribe);
-ok('push: campana ignora el click fantasma (regresión estilo tarea 20)', pushRun.ghostClickIgnored);
+ok('push: el switch ignora el click fantasma (regresión estilo tarea 20)', pushRun.ghostClickIgnored);
 
 // 23. banner de pushes perdidas (tarea 26): web push es la ÚNICA vía de
 // notificación desde el retiro de ntfy — si el server contó envíos sin entrega
@@ -1722,9 +1751,10 @@ ok('push-banner: más perdidas tras el descarte → reaparece', pushBannerRun.re
 
 // 24. quickkeys configurables (tarea 11b): la barra se renderiza desde
 // localStorage['deck-quickkeys'] (default = orden histórico, que la sección 5
-// ya asserta con "nl" primero); long-press en una tecla abre el editor
-// #quickkeys-sheet. sendKeys espiado: nada llega a la sesión deck real.
-// localStorage limpiado al final (la config default no deja rastro).
+// ya asserta con "nl" primero); el editor #quickkeys-sheet se abre desde el
+// sheet de Ajustes (fila "Teclas rápidas" — reemplazó al long-press sobre la
+// barra). sendKeys espiado: nada llega a la sesión deck real. localStorage
+// limpiado al final (la config default no deja rastro).
 const qkRun = await page.evaluate(async () => {
   const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1735,13 +1765,27 @@ const qkRun = await page.evaluate(async () => {
   const down = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
   const up = (el) => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
   const tap = (el) => { down(el); up(el); };
+  const openEditor = async () => {
+    tap(document.querySelector('#btn-settings')); await frame();
+    tap(document.querySelector('#set-qk-row')); await frame();
+  };
   const sheet = document.querySelector('#quickkeys-sheet');
   const out = { present: !!sheet, hiddenDefault: sheet.classList.contains('hidden') };
 
-  // long-press abre el editor sin mandar la tecla (el release no tapea)
+  // la fila "Teclas rápidas" de Ajustes abre el editor (y cierra Ajustes: no se
+  // apilan — comparten z-index); nada viajó a la terminal en el camino
+  await openEditor();
+  out.settingsOpens = !sheet.classList.contains('hidden')
+    && document.querySelector('#settings-sheet').classList.contains('hidden') && sent.length === 0;
+
+  // regresión: el long-press sobre una tecla ya NO abre el editor — ahora es un
+  // tap común y corriente (manda la tecla al soltar)
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
   const esc = document.querySelector('.quickkeys [data-k="esc"]');
   down(esc); await wait(620); up(esc); await frame();
-  out.longPressOpens = !sheet.classList.contains('hidden') && sent.length === 0;
+  out.longPressGone = sheet.classList.contains('hidden') && sent.length === 1;
+  sent.length = 0;
+  await openEditor();
 
   // ✕ saca ctrl+c de la fila y de localStorage; + agrega ctrl+r al final;
   // ◀ lo mueve un lugar antes — cada edición persiste al toque
@@ -1759,7 +1803,7 @@ const qkRun = await page.evaluate(async () => {
   out.backdropCloses = sheet.classList.contains('hidden');
 
   // restaurar por defecto desde el editor → orden histórico de vuelta
-  down(esc); await wait(620); up(esc); await frame();
+  await openEditor();
   tap(document.querySelector('#qk-reset')); await frame();
   out.reset = rowKeys().join(',') === 'nl,slash,esc,up,down,tab,ctrlc';
   sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
@@ -1769,7 +1813,8 @@ const qkRun = await page.evaluate(async () => {
   return out;
 });
 ok('quickkeys: sheet presente y oculto por defecto', qkRun.present && qkRun.hiddenDefault);
-ok('quickkeys: long-press abre el editor sin mandar la tecla', qkRun.longPressOpens);
+ok('quickkeys: la fila de Ajustes abre el editor (y cierra Ajustes) sin mandar teclas', qkRun.settingsOpens);
+ok('quickkeys: el long-press ya no abre el editor — es un tap que manda la tecla', qkRun.longPressGone);
 ok('quickkeys: ✕ saca la tecla (fila + localStorage)', qkRun.removed);
 ok('quickkeys: el catálogo agrega al final', qkRun.added);
 ok('quickkeys: ◀ mueve un lugar antes y persiste', qkRun.moved);

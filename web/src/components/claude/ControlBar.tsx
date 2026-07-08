@@ -6,7 +6,6 @@ import { openModelMenu, openAttachMenu, cycleMode } from '../../lib/switch'
 import { openSnippetsMenu } from '../../lib/snippets'
 import { openComposer } from '../../lib/composer'
 import { openScrollback } from '../../lib/scrollback'
-import { openQuickkeysSheet } from '../../lib/quickkeys'
 import { attachImage, sendPendingImage, hideImgChip } from '../../lib/image'
 import { SwitchMenu } from './SwitchMenu'
 
@@ -18,10 +17,10 @@ import { SwitchMenu } from './SwitchMenu'
 // sigue inerte hasta la Fase 4.
 
 // Una quickkey: manda la secuencia cruda al terminal (app.js:301-339). El
-// long-press (tarea 11b) abre el editor de la barra en vez de mandar la tecla
-// (useTap suprime el tap del release — mismo gesto que el + → menú CREAR).
+// editor de la barra (tarea 11b) ya no se abre por long-press: vive en el
+// sheet de ajustes (engranaje de la fila de sesiones).
 function QuickKey({ k, title, children }: { k: string; title?: string; children: React.ReactNode }) {
-  const tap = useTap(() => window.claudeConn?.sendKeys(KEYS[k]), openQuickkeysSheet)
+  const tap = useTap(() => window.claudeConn?.sendKeys(KEYS[k]))
   return (
     <button data-k={k} title={title} {...tap}>
       {children}
@@ -105,9 +104,9 @@ export function ControlBar() {
 
       {/* tarea 11b: la fila sale del store (deck-quickkeys en localStorage);
           el default conserva el orden histórico (nl primero — app.js:249).
-          long-press en cualquier tecla abre el editor. Rediseño: las teclas se
-          reparten el ancho (sin scroll con la barra default); si configurás más
-          de las que entran, el overflow-x de .quickkeys vuelve como rescate. */}
+          El editor se abre desde Ajustes. Rediseño: las teclas se reparten el
+          ancho (sin scroll con la barra default); si configurás más de las que
+          entran, el overflow-x de .quickkeys vuelve como rescate. */}
       <div className="controlrow quickkeys" data-term="claude">
         {quickkeys.map((id) => {
           const cat = QUICKKEY_CATALOG.find((c) => c.id === id)
