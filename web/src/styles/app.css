@@ -1693,7 +1693,10 @@ button.set-row:active .set-label { color: var(--accent); }
   display: flex;
   border-top: 1px solid var(--border);
   background: var(--panel);
-  padding-bottom: env(safe-area-inset-bottom);
+  /* recortado: el safe-area-inset-bottom del iPhone con gestos (~34px) dejaba una
+     franja negra muerta; la barrita de home queda bien por debajo de los labels,
+     así que se descarta la reserva (targets táctiles cómodos por min-height:56px) */
+  padding-bottom: 0;
 }
 /* teclado virtual abierto (body.kb-open, ver updateViewportGeometry):
    la tabbar se oculta para que la terminal gane esas filas */
@@ -1718,12 +1721,12 @@ body.kb-open .tabbar { display: none; }
 .tab .tab-icon { font-size: 16px; }
 .tab.active { color: var(--accent); }
 /* badge de archivos con cambios sobre la tab Cambios (lo actualiza refreshGit);
-   rediseño: centrado justo sobre el ícono (antes corrido a la derecha) */
+   corrido a la esquina superior derecha del ícono para no taparlo */
 .tab-badge {
   position: absolute;
   top: 2px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(2px);
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
