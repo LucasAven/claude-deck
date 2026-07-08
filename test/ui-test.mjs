@@ -25,7 +25,13 @@ await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true
 
 const consoleErrors = [];
 page.on('pageerror', (e) => consoleErrors.push(String(e)));
-page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+// los 404 de recursos no cuentan como error: la app sondea endpoints que
+// contestan 404 a propósito (p. ej. git/summary con la sesión activa aún no
+// creada por el attach — refreshGit maneja ese 404 cayendo al repo default),
+// pero Chrome los loguea igual como console error. pageerror sigue estricto.
+page.on('console', (m) => {
+  if (m.type() === 'error' && !/status of 404/.test(m.text())) consoleErrors.push(m.text());
+});
 
 // 1. auth por ?token= → redirect a /
 await page.goto(`http://127.0.0.1:7433/?token=${TOKEN}`, { waitUntil: 'networkidle2', timeout: 20000 });
@@ -63,13 +69,22 @@ const geo = await page.evaluate(() => ({
 }));
 ok('controles debajo de la terminal y arriba de las tabs', geo.term < geo.bar && geo.bar < geo.tabs);
 
-// teclas rápidas: Esc no rompe (envía por WS). Desde la tarea 12 la acción
-// dispara en pointerup (tap con slop), no en pointerdown: hay que mandar el par
-await page.$eval('.quickkeys[data-term="claude"] [data-k="esc"]', (b) => {
+// teclas rápidas: Esc dispara sendKeys. Desde la tarea 12 la acción dispara en
+// pointerup (tap con slop), no en pointerdown: hay que mandar el par. Se espía
+// claudeConn.sendKeys: un Esc real contra el zsh pelado de la default recién
+// recreada ensuciaba el prompt (junto con los shift+tab de 5c).
+const escSent = await page.evaluate(() => {
+  const sent = [];
+  const orig = claudeConn.sendKeys;
+  claudeConn.sendKeys = (d) => { sent.push(d); };
+  const b = document.querySelector('.quickkeys[data-term="claude"] [data-k="esc"]');
   b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  claudeConn.sendKeys = orig;
+  return sent;
 });
-ok('tecla rápida Esc enviada sin errores', consoleErrors.length === 0);
+ok('tecla rápida Esc manda \\x1b (espiada, sin tocar la sesión)',
+  escSent.length === 1 && escSent[0] === '\x1b');
 
 // 5-tap. tap vs scroll (tarea 12): apoyar el dedo en un botón y arrastrar para
 // scrollear la fila NO debe dispararlo; el tap (aun con micro-movimiento) sí.
@@ -201,13 +216,25 @@ ok('pills con label fijo (Model y Mode, sin el modelo actual)',
   (await page.$eval('#btn-switch', (el) => el.textContent)).includes('Model')
   && (await page.$eval('#btn-mode', (el) => el.textContent)).includes('Mode'));
 
-// modo: cada tap manda UN shift+tab real; 3 taps = ciclo completo → la sesión
-// tmux queda como estaba
+// modo: cada tap manda UN shift+tab (ESC[Z). Se espía sendKeys en vez de
+// mandarlos de verdad: "ciclo completo → queda como estaba" solo vale si en la
+// sesión corre Claude; contra un zsh pelado cada shift+tab dispara el
+// completado y deja basura tipo "[ZSH_SUBSHELL web/" en la default recreada.
+await page.evaluate(() => {
+  window.__modeKeys = [];
+  window.__modeOrig = claudeConn.sendKeys;
+  claudeConn.sendKeys = (d) => { window.__modeKeys.push(d); };
+});
 for (let i = 1; i <= 3; i++) {
   await page.$eval('#btn-mode', pd);
   await new Promise((r) => setTimeout(r, 150));
 }
-ok('3 taps de Mode (shift+tab reales) sin errores', consoleErrors.length === 0);
+const modeKeys = await page.evaluate(() => {
+  claudeConn.sendKeys = window.__modeOrig;
+  return window.__modeKeys;
+});
+ok('3 taps de Mode mandan 3 shift+tab (espiados, sin tocar la sesión)',
+  modeKeys.length === 3 && modeKeys.every((k) => k === '\x1b[Z'));
 
 // modelo/esfuerzo: solo abrir e inspeccionar (elegir mandaría /model y /effort
 // a la sesión real); cerrar tocando afuera
@@ -565,16 +592,20 @@ if (consoleErrors.length) console.log('ERRORES:', consoleErrors.slice(0, 5).join
 
 // 12. deep-link del push (tarea 1): ?session= selecciona la sesión antes del
 // primer attach e history.replaceState limpia la URL (un reload posterior no
-// queda pineado). Se usa la default —existe seguro—; la selección de una
-// no-default, el rechazo de nombres inválidos y el fallback sin resurrección
-// de una muerta los cubre el scratch puppeteer del agente.
-await page.goto('http://127.0.0.1:7433/?session=deck', { waitUntil: 'networkidle2', timeout: 20000 });
+// queda pineado). Se usa una sesión VIVA de /api/tmux/sessions — hardcodear
+// "deck" apuntaba a la default por nombre (que el server recrea siempre);
+// la selección de una no-default, el rechazo de nombres inválidos y el
+// fallback sin resurrección de una muerta los cubre el scratch del agente.
+const liveName = await page.evaluate(async () =>
+  (((await (await fetch('/api/tmux/sessions', { cache: 'no-store' })).json())[0]) || {}).name);
+ok('hay una sesión viva para el deep-link', typeof liveName === 'string' && liveName.length > 0);
+await page.goto(`http://127.0.0.1:7433/?session=${encodeURIComponent(liveName)}`, { waitUntil: 'networkidle2', timeout: 20000 });
 await new Promise((r) => setTimeout(r, 1500));
 const deepLink = await page.evaluate(() => ({
   urlClean: !location.search.includes('session='),
   active: (document.querySelector('#session-chips .chip.active span:not(.chip-dot)') || {}).textContent,
 }));
-ok('deep-link ?session= selecciona la sesión y limpia la URL', deepLink.urlClean && deepLink.active === 'deck');
+ok('deep-link ?session= selecciona la sesión y limpia la URL', deepLink.urlClean && deepLink.active === liveName);
 
 // 12b. persistencia de la sesión activa (fix: renombrar la default y recargar
 // creaba una "deck" vacía fantasma). init() guarda la sesión elegida en
@@ -582,7 +613,7 @@ ok('deep-link ?session= selecciona la sesión y limpia la URL', deepLink.urlClea
 // Si la guardada ya no existe, el attach sin create=1 contesta meta gone y se
 // cae a una viva — sin resucitar la muerta ni recrear la default de más.
 const persisted = await page.evaluate(() => localStorage.getItem('deck-active-session'));
-ok('sesión activa persistida en localStorage tras init', persisted === 'deck');
+ok('sesión activa persistida en localStorage tras init', persisted === liveName);
 await page.evaluate(() => localStorage.setItem('deck-active-session', 'zz-mock-muerta'));
 await page.goto('http://127.0.0.1:7433/', { waitUntil: 'networkidle2', timeout: 20000 });
 await new Promise((r) => setTimeout(r, 1500));
@@ -592,7 +623,8 @@ const restored = await page.evaluate(async () => ({
   names: (await (await fetch('/api/tmux/sessions', { cache: 'no-store' })).json()).map((s) => s.name),
 }));
 ok('sesión guardada muerta → fallback a una viva y re-persistida, sin resucitarla',
-  restored.active === 'deck' && restored.saved === 'deck' && !restored.names.includes('zz-mock-muerta'));
+  restored.names.includes(restored.active) && restored.saved === restored.active
+  && !restored.names.includes('zz-mock-muerta'));
 
 // 13. semáforo de chips (tarea 4): con un payload mockeado de
 // /api/tmux/sessions los chips pintan el punto según `state` (verde working /
@@ -680,7 +712,7 @@ const compOpen = await page.evaluate(() => ({
 ok('✎ abre el composer (sheet visible, controlbar oculta)',
   compOpen.open && compOpen.bodyOpen && compOpen.controlbarHidden);
 ok('composer: textarea con foco y sesión en el header',
-  compOpen.focused && compOpen.session === 'deck');
+  compOpen.focused && compOpen.session === restored.active);
 
 // 14b. tipear con salto de línea nativo (Enter del teclado) + borrador con
 // debounce (500 ms). El botón \n del composer se retiró (tarea 21): el Enter del
@@ -907,7 +939,7 @@ const sbRun = await page.evaluate(async () => {
   return out;
 });
 ok('📜 abre en modo transcript: turnos con clase por rol y pre oculto',
-  sbRun.aOpen && sbRun.aSession === 'deck' && sbRun.aSrc === '· transcript' && sbRun.aPreHidden
+  sbRun.aOpen && sbRun.aSession === restored.active && sbRun.aSrc === '· transcript' && sbRun.aPreHidden
   && JSON.stringify(sbRun.aTurns) === JSON.stringify([
     'sb-turn sb-user',
     'sb-turn sb-assistant md-body',
