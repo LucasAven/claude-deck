@@ -1,8 +1,8 @@
 import { useRef } from 'react'
-import { KEYS, MODELS, EFFORTS, QUICKKEY_CATALOG } from '../../lib/keys'
+import { KEYS, QUICKKEY_CATALOG } from '../../lib/keys'
 import { useTap } from '../../hooks/useTap'
 import { useDeckStore } from '../../store'
-import { cycleMode, openModelMenu, openAttachMenu } from '../../lib/switch'
+import { openModelMenu, openAttachMenu, cycleMode } from '../../lib/switch'
 import { openSnippetsMenu } from '../../lib/snippets'
 import { openComposer } from '../../lib/composer'
 import { openScrollback } from '../../lib/scrollback'
@@ -10,9 +10,9 @@ import { openQuickkeysSheet } from '../../lib/quickkeys'
 import { attachImage, sendPendingImage, hideImgChip } from '../../lib/image'
 import { SwitchMenu } from './SwitchMenu'
 
-// Controlbar (index.html:88-133). Chip de imagen + popover switch-menu + pills
-// de modo/modelo + fila de quickkeys (adjuntar/snippets/composer/scrollback +
-// teclas crudas). La lógica vive en las libs (switch/snippets/composer/image);
+// Controlbar (index.html:88-133). Chip de imagen + popover switch-menu + fila
+// de acciones (adjuntar/snippets/composer/scrollback + pill modelo·modo) + fila
+// de quickkeys. La lógica vive en las libs (switch/snippets/composer/image);
 // acá se pinta y se cablea con useTap (preventDefault en pointerdown mantiene el
 // foco del teclado virtual — §5.4, NO reemplazar por onClick). El scrollback
 // sigue inerte hasta la Fase 4.
@@ -31,22 +31,16 @@ function QuickKey({ k, title, children }: { k: string; title?: string; children:
 
 export function ControlBar() {
   const imgChip = useDeckStore((s) => s.imgChip)
-  const sw = useDeckStore((s) => s.switchState)
   const snippetsActive = useDeckStore((s) => s.switchMenu === 'snippets')
   const quickkeys = useDeckStore((s) => s.quickkeys)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const modeTap = useTap(() => cycleMode())
-  const modelTap = useTap(() => openModelMenu())
+  const switchTap = useTap(() => openModelMenu())
   const attachTap = useTap(() => openAttachMenu())
   const snippetsTap = useTap(() => openSnippetsMenu())
   const composerTap = useTap(() => openComposer())
   const scrollbackTap = useTap(() => openScrollback())
-
-  const model = MODELS.find((m) => m.id === sw.model)
-  const modelLabel = model ? model.label : sw.model || 'Modelo'
-  const effort = EFFORTS.find((e) => e.id === sw.effort)
-  const effortLabel = effort ? effort.label : ''
 
   const onImgInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -82,28 +76,10 @@ export function ControlBar() {
 
       <SwitchMenu onCamera={() => inputRef.current?.click()} />
 
-      <div className="controlrow switchrow">
-        <button id="btn-mode" className="switch-pill" {...modeTap}>
-          <span className="pill-left">
-            <span id="mode-label">Mode switcher</span>
-          </span>
-          <span className="pill-chev">⇄</span>
-        </button>
-        <button id="btn-model" className="switch-pill" {...modelTap}>
-          <span className="pill-left">
-            <span className="model-star">✦</span>
-            <span id="model-label">{modelLabel}</span>
-          </span>
-          <span className="pill-right">
-            <span id="effort-label" className="pill-muted">
-              {effortLabel}
-            </span>
-            <span className="pill-chev">▾</span>
-          </span>
-        </button>
-      </div>
-
-      <div className="controlrow quickkeys" data-term="claude">
+      {/* rediseño: una sola fila de acciones — los 4 cuadrados + los botones
+          Model (abre el menú de modelo/esfuerzo) y Mode (cicla con shift+tab).
+          Labels fijos: el modelo/esfuerzo en uso los muestra la statusline. */}
+      <div className="controlrow actions">
         <button id="btn-attach" className="ctl-sq" title="Adjuntar: cámara o portapapeles" {...attachTap}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
         </button>
@@ -117,16 +93,28 @@ export function ControlBar() {
         <button id="btn-scrollback" className="ctl-sq" title="Ponerse al día (scrollback legible)" {...scrollbackTap}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5.5h16M4 9.5h16M4 13.5h10" /><path d="M17 21v-6M14 17.8l3 3 3-3" /></svg>
         </button>
-        <span className="ctl-div" />
-        {/* tarea 11b: la fila sale del store (deck-quickkeys en localStorage);
-            el default conserva el orden histórico (nl primero — app.js:249).
-            long-press en cualquier tecla abre el editor. */}
+        <button id="btn-switch" className="switch-pill" title="Modelo y esfuerzo" {...switchTap}>
+          <span className="model-star">✦</span>
+          <span>Model</span>
+        </button>
+        <button id="btn-mode" className="switch-pill" title="Ciclar modo (shift+tab)" {...modeTap}>
+          <span>Mode</span>
+          <span className="pill-chev">⇅</span>
+        </button>
+      </div>
+
+      {/* tarea 11b: la fila sale del store (deck-quickkeys en localStorage);
+          el default conserva el orden histórico (nl primero — app.js:249).
+          long-press en cualquier tecla abre el editor. Rediseño: las teclas se
+          reparten el ancho (sin scroll con la barra default); si configurás más
+          de las que entran, el overflow-x de .quickkeys vuelve como rescate. */}
+      <div className="controlrow quickkeys" data-term="claude">
         {quickkeys.map((id) => {
           const cat = QUICKKEY_CATALOG.find((c) => c.id === id)
           if (!cat) return null
           return (
             <QuickKey key={id} k={id} title={cat.title}>
-              {cat.label}
+              {cat.barLabel ?? cat.label}
             </QuickKey>
           )
         })}

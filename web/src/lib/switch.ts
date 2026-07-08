@@ -41,8 +41,11 @@ function toggle(kind: 'model' | 'attach') {
 export const openModelMenu = () => toggle('model')
 export const openAttachMenu = () => toggle('attach')
 
+// un shift+tab por llamada (la app no lee el modo real del pty; el estado se
+// mira en la terminal). No cierra el menú acá: #btn-mode no está en la lista de
+// exclusión del closer global de App, así que si el popover estaba abierto el
+// propio pointerdown del tap ya lo cerró
 export function cycleMode() {
-  closeSwitchMenu()
   window.claudeConn?.sendKeys('\x1b[Z')
 }
 

@@ -99,6 +99,15 @@ const keyOrder = await page.$$eval(
 );
 ok('teclas "nl" y "/" primeras en la barra de Claude', keyOrder[0] === 'nl' && keyOrder[1] === 'slash');
 ok('una sola barra de teclas (Shell retirado)', (await page.$$('.quickkeys')).length === 1);
+// rediseño: la barra default se reparte el ancho y NO scrollea (el overflow-x
+// queda solo como rescate para barras configuradas con muchas teclas)
+const qkScroll = await page.$eval('.quickkeys[data-term="claude"]', (el) => ({
+  scroll: el.scrollWidth,
+  client: el.clientWidth,
+}));
+ok('las 7 teclas default entran sin scroll', qkScroll.scroll <= qkScroll.client + 1);
+ok('ctrl+c se muestra compacto (^C) en la barra',
+  (await page.$eval('.quickkeys[data-term="claude"] [data-k="ctrlc"]', (b) => b.textContent.trim())) === '^C');
 
 // 5b. adjuntar imagen = solo preview (dos pasos): el chip queda pendiente con
 // el hint de "tocá para enviar" y NO se sube nada hasta confirmar con un tap
@@ -175,31 +184,34 @@ ok('pegar texto llama term.paste con el texto del portapapeles',
   pastedTexts.length === 1 && pastedTexts[0] === 'hola texto pegado');
 ok('el chooser se cierra al elegir una opción', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
 
-// 5c. switchers de modo y modelo/esfuerzo (pills arriba de la fila de teclas)
+// 5c. switchers (rediseño): dos pills en la fila de acciones — "✦ Model" abre
+// el menú de modelo/esfuerzo y "Mode ⇅" cicla con shift+tab
 // pd = tap completo: desde la tarea 12 las pills disparan en pointerup
 const pd = (el) => {
   el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
 };
 const swGeo = await page.evaluate(() => ({
-  pills: document.querySelector('.switchrow').getBoundingClientRect().top,
+  actions: document.querySelector('.controlrow.actions').getBoundingClientRect().top,
   keys: document.querySelector('.quickkeys[data-term="claude"]').getBoundingClientRect().top,
 }));
-ok('pills de modo/modelo arriba de la fila de teclas', swGeo.pills < swGeo.keys);
+ok('fila de acciones (pills Model/Mode) arriba de la fila de teclas', swGeo.actions < swGeo.keys);
+// labels fijos: qué modelo/esfuerzo está en uso lo dice la statusline, no las pills
+ok('pills con label fijo (Model y Mode, sin el modelo actual)',
+  (await page.$eval('#btn-switch', (el) => el.textContent)).includes('Model')
+  && (await page.$eval('#btn-mode', (el) => el.textContent)).includes('Mode'));
 
-// modo: label fijo ("Mode switcher"), cada tap manda UN shift+tab real sin
-// tocar el label; 3 taps = ciclo completo → la sesión tmux queda como estaba
-ok('pill de modo con label fijo', (await page.$eval('#mode-label', (el) => el.textContent)) === 'Mode switcher');
+// modo: cada tap manda UN shift+tab real; 3 taps = ciclo completo → la sesión
+// tmux queda como estaba
 for (let i = 1; i <= 3; i++) {
   await page.$eval('#btn-mode', pd);
   await new Promise((r) => setTimeout(r, 150));
 }
-ok('el label no cambia tras 3 taps (shift+tab reales)',
-  (await page.$eval('#mode-label', (el) => el.textContent)) === 'Mode switcher');
+ok('3 taps de Mode (shift+tab reales) sin errores', consoleErrors.length === 0);
 
 // modelo/esfuerzo: solo abrir e inspeccionar (elegir mandaría /model y /effort
 // a la sesión real); cerrar tocando afuera
-await page.$eval('#btn-model', pd);
+await page.$eval('#btn-switch', pd);
 await new Promise((r) => setTimeout(r, 200));
 ok('menú de modelo: 4 modelos + 4 niveles de esfuerzo',
   (await page.$$('#switch-menu .mi')).length === 4

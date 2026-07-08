@@ -52,7 +52,7 @@ export function App() {
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target as HTMLElement | null
-      if (!t?.closest('#switch-menu, #btn-mode, #btn-model, #btn-attach, #btn-snippets')) closeSwitchMenu()
+      if (!t?.closest('#switch-menu, #btn-switch, #btn-attach, #btn-snippets')) closeSwitchMenu()
       if (!t?.closest('#composer-snips, #composer-snippets')) hideComposerSnips()
       // el menú CREAR se abre con long-press: el pointerdown sobre el propio +
       // corre ANTES de que el hold dispare, así que cerrarlo acá no lo pisa

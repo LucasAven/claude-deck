@@ -84,9 +84,9 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 34px;
-  padding: 4px 14px;
-  border-radius: 17px;
+  min-height: 38px;
+  padding: 4px 15px;
+  border-radius: 19px;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--muted);
@@ -469,29 +469,25 @@ body.composer-open .tabbar { display: none; }
   background: var(--bg);
 }
 
-/* pills de modo y modelo/esfuerzo (arriba de la fila de teclas) */
-.switchrow { display: flex; }
-.switchrow .switch-pill {
+/* pills Model / Mode (rediseño): dos botones que se reparten el resto de la
+   fila de acciones — Model abre el menú de modelo/esfuerzo, Mode cicla con
+   shift+tab. Labels fijos: qué modelo/esfuerzo está en uso lo dice la
+   statusline. Marco y fondo los heredan de .controlrow button (el scope
+   .controlrow es necesario para ganarle en especificidad a esa regla). */
+.controlrow .switch-pill {
   flex: 1;
   min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 14px;
-  font-size: 13px;
-}
-.pill-left,
-.pill-right {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 8px;
+  overflow: hidden;
   white-space: nowrap;
+  color: var(--muted);
+  font-size: 13px;
 }
-.pill-left span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .pill-chev { color: var(--muted); font-size: 11px; }
-.pill-muted { color: var(--muted); font-size: 12px; }
 .model-star { color: #b294bb; }
 
 /* popover compartido de los switchers (abre hacia arriba) */
@@ -814,17 +810,24 @@ body.composer-open .tabbar { display: none; }
   pointer-events: none;
 }
 
-/* fila única scrolleable; pisa los estilos base de .quickkeys */
+/* filas de la controlbar; pisan los estilos base de .quickkeys */
 .controlrow {
   padding: 0;
   border-bottom: none;
-  gap: 10px;
+  gap: 8px;
+}
+/* la fila de acciones no lleva la clase .quickkeys (que es la que trae el
+   display:flex base): sin esto era un bloque — los cuadrados fluían inline sin
+   gap y la pill (div) rompía a su propia línea */
+.controlrow.actions {
+  display: flex;
+  align-items: center;
 }
 .controlrow button {
   min-width: 0;
-  min-height: 44px;
+  min-height: 48px;
   padding: 0 20px;
-  border-radius: 11px;
+  border-radius: 12px;
   border: 1px solid #2a2f37;
   background: #1b1f26;
   color: #cdd2d9;
@@ -835,7 +838,10 @@ body.composer-open .tabbar { display: none; }
   border-color: var(--accent);
   color: var(--accent);
 }
+/* 44px de ancho (no 48): en un viewport de 375px la pill modelo·modo necesita
+   esos 16px extra para que el nombre del modelo se lea entero */
 .controlrow .ctl-sq {
+  flex: none;
   width: 44px;
   min-width: 44px;
   padding: 0;
@@ -849,12 +855,14 @@ body.composer-open .tabbar { display: none; }
 }
 @keyframes img-busy { 50% { opacity: 0.25; } }
 
-.ctl-div {
-  flex: none;
-  width: 1px;
-  height: 26px;
-  background: #2a2f37;
-  margin: 0 2px;
+/* rediseño: las teclas se reparten el ancho parejo — con la barra default no
+   scrollean (la terminal gana ese aire). flex-basis 40px = mínimo con el que
+   las 7 default entran hasta en un iPhone SE (355px útiles); si configurás más
+   teclas de las que entran, la suma de mínimos desborda y el overflow-x
+   heredado de .quickkeys vuelve como rescate. */
+.controlrow.quickkeys button {
+  flex: 1 0 40px;
+  padding: 0 6px;
 }
 
 /* chip de imagen adjunta (preview arriba de la fila de controles) */
@@ -920,7 +928,7 @@ body.composer-open .tabbar { display: none; }
 /* indicador conectado/desconectado */
 .conn { margin-left: auto; display: flex; align-items: center; padding: 0 4px; }
 .conn .dot {
-  width: 10px; height: 10px;
+  width: 12px; height: 12px;
   border-radius: 50%;
   background: #555c66;
   box-shadow: 0 0 0 0 transparent;
@@ -1658,11 +1666,13 @@ body.kb-open .tabbar { display: none; }
 }
 .tab .tab-icon { font-size: 16px; }
 .tab.active { color: var(--accent); }
-/* badge de archivos con cambios sobre la tab Cambios (lo actualiza refreshGit) */
+/* badge de archivos con cambios sobre la tab Cambios (lo actualiza refreshGit);
+   rediseño: centrado justo sobre el ícono (antes corrido a la derecha) */
 .tab-badge {
   position: absolute;
-  top: 6px;
-  left: calc(50% + 8px);
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
   min-width: 16px;
   height: 16px;
   padding: 0 4px;

@@ -30,7 +30,10 @@ export const KEYS: Record<string, string> = {
 // Catálogo de quickkeys disponibles para la barra (tarea 11b): label = lo que
 // muestra el botón, title = tooltip/descripción en el editor. El orden de acá
 // es el del catálogo en el sheet; el de la BARRA sale de deck-quickkeys.
-export const QUICKKEY_CATALOG: { id: string; label: string; title: string }[] = [
+// barLabel (rediseño): forma compacta para la barra (^C en vez de ctrl+c) —
+// las teclas ya no scrollean y el ancho se reparte, así que cada label debe
+// entrar en ~44px; el editor sigue mostrando el label largo.
+export const QUICKKEY_CATALOG: { id: string; label: string; title: string; barLabel?: string }[] = [
   { id: 'nl', label: '\\n', title: 'Salto de línea (sin enviar)' },
   { id: 'slash', label: '/', title: 'Comando slash' },
   { id: 'esc', label: 'esc', title: 'Escape' },
@@ -39,14 +42,14 @@ export const QUICKKEY_CATALOG: { id: string; label: string; title: string }[] = 
   { id: 'left', label: '←', title: 'Flecha izquierda' },
   { id: 'right', label: '→', title: 'Flecha derecha' },
   { id: 'tab', label: 'tab', title: 'Tab' },
-  { id: 'ctrlc', label: 'ctrl+c', title: 'Interrumpir' },
-  { id: 'ctrlr', label: 'ctrl+r', title: 'Buscar en el historial' },
-  { id: 'ctrld', label: 'ctrl+d', title: 'EOF / cerrar' },
-  { id: 'ctrlz', label: 'ctrl+z', title: 'Suspender proceso' },
-  { id: 'ctrla', label: 'ctrl+a', title: 'Inicio de línea' },
-  { id: 'ctrle', label: 'ctrl+e', title: 'Fin de línea' },
-  { id: 'ctrll', label: 'ctrl+l', title: 'Limpiar pantalla' },
-  { id: 'ctrlu', label: 'ctrl+u', title: 'Borrar la línea' },
+  { id: 'ctrlc', label: 'ctrl+c', barLabel: '^C', title: 'Interrumpir' },
+  { id: 'ctrlr', label: 'ctrl+r', barLabel: '^R', title: 'Buscar en el historial' },
+  { id: 'ctrld', label: 'ctrl+d', barLabel: '^D', title: 'EOF / cerrar' },
+  { id: 'ctrlz', label: 'ctrl+z', barLabel: '^Z', title: 'Suspender proceso' },
+  { id: 'ctrla', label: 'ctrl+a', barLabel: '^A', title: 'Inicio de línea' },
+  { id: 'ctrle', label: 'ctrl+e', barLabel: '^E', title: 'Fin de línea' },
+  { id: 'ctrll', label: 'ctrl+l', barLabel: '^L', title: 'Limpiar pantalla' },
+  { id: 'ctrlu', label: 'ctrl+u', barLabel: '^U', title: 'Borrar la línea' },
 ]
 
 // barra por defecto = la histórica (nl primero, pedido del usuario — ui-test
