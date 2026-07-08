@@ -149,16 +149,7 @@ body {
   -webkit-touch-callout: none;
 }
 
-/* chip de batería del host (tarea 17): pineado a la derecha como el + y el
-   dot de conexión; solo se renderiza cuando la Mac reporta batería */
-.host-chip { gap: 6px; padding: 4px 10px; font-size: 12px; }
-.host-chip svg { display: block; }
-.host-chip.warn {
-  border-color: var(--accent-dim);
-  color: var(--accent);
-}
-
-/* botón de opt-in de Web Push (tarea 23): campana pineada como el chip de host;
+/* botón de opt-in de Web Push (tarea 23): campana pineada a la derecha;
    .active (suscripto) en ámbar como el resto de los estados activos; .denied
    atenuado (informa, no puede re-pedir permiso) */
 .push-chip { padding: 4px 9px; }
@@ -428,7 +419,9 @@ body.composer-open .tabbar { display: none; }
 /* ---------- barra de control inferior (pestaña Claude) ---------- */
 /* statusline del panel (tarea 22): línea fina y discreta arriba de la controlbar,
    tipo el statusLine de Claude Code. Mono, chica, color de alerta al llenarse el
-   contexto. Oculta (display:none) si el hook no escribió estado. */
+   contexto. SIEMPRE visible: a la derecha viven el chip de batería del host y el
+   dot de conexión (mudados de la fila de sesiones); los segmentos de contexto se
+   ocultan solos si el hook no escribió estado. */
 .statusline {
   flex: none;
   display: flex;
@@ -444,7 +437,6 @@ body.composer-open .tabbar { display: none; }
   white-space: nowrap;
   overflow: hidden;
 }
-.statusline.hidden { display: none; }
 .statusline .sl-label { opacity: 0.7; }
 .statusline .sl-sep { opacity: 0.4; }
 .statusline #sl-pct { font-weight: 600; }
@@ -453,10 +445,37 @@ body.composer-open .tabbar { display: none; }
 .statusline.sl-warn #sl-pct { color: var(--accent); }
 .statusline.sl-alert { color: #e5534b; }
 .statusline.sl-alert #sl-pct { color: #e5534b; font-weight: 700; }
-/* la statusline y la controlbar comparten borde: sin doble línea (solo cuando
-   la statusline está visible; oculta con display:none la controlbar recupera el
-   suyo — el combinador + igual matchea elementos display:none) */
-.statusline:not(.hidden) + .controlbar { border-top: none; }
+/* la statusline y la controlbar comparten borde: sin doble línea */
+.statusline + .controlbar { border-top: none; }
+/* batería del host + dot de conexión, pineados a la derecha de la statusline
+   (tarea 17/20; antes en la fila de sesiones). El chip mantiene color propio
+   (muted / ámbar en warn) para no teñirse de rojo con sl-alert del contexto. */
+.statusline .sl-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.sl-batt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel);
+  padding: 1px 7px;
+  margin: 0;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.sl-batt:active { border-color: var(--accent); color: var(--accent); }
+.sl-batt.hidden { display: none; }
+.sl-batt.warn {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+.sl-batt svg { display: block; }
 
 .controlbar {
   position: relative; /* ancla del popover .switch-menu */
@@ -925,10 +944,10 @@ body.composer-open .tabbar { display: none; }
 }
 #img-chip-close:active { color: var(--accent); }
 
-/* indicador conectado/desconectado */
-.conn { margin-left: auto; display: flex; align-items: center; padding: 0 4px; }
+/* indicador conectado/desconectado (vive en .sl-right de la statusline) */
+.conn { display: flex; align-items: center; }
 .conn .dot {
-  width: 12px; height: 12px;
+  width: 10px; height: 10px;
   border-radius: 50%;
   background: #555c66;
   box-shadow: 0 0 0 0 transparent;

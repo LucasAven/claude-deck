@@ -15,6 +15,7 @@ import { QuickkeysSheet } from './components/claude/QuickkeysSheet'
 import { closeSwitchMenu } from './lib/switch'
 import { closeCreateMenu } from './lib/worktree'
 import { refreshHost } from './lib/host'
+import { refreshStatus } from './lib/status'
 import { initPushState } from './lib/push'
 import { hideComposerSnips } from './lib/composer'
 import { attachImage, pasteTextToPrompt } from './lib/image'
@@ -37,6 +38,7 @@ export function App() {
       const s = useDeckStore.getState()
       s.refreshSessions() // primeros chips sin esperar el poll
       s.refreshGit() // primer badge de Cambios sin esperar el poll
+      refreshStatus() // primera statusline (ctx/tokens/modelo) sin esperar el poll de 8 s
     })
     refreshHost() // primer estado del host (chip de batería) sin esperar el poll
     initPushState() // estado del opt-in de Web Push (tarea 23) para el botón 🔔

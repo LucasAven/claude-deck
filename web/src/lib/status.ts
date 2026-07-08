@@ -2,8 +2,8 @@ import { useDeckStore, sessionQuery, type ClaudeStatus } from '../store'
 import { api } from './api'
 
 // Statusline del panel (tarea 22): línea fina tipo statusLine de Claude Code con
-// % de contexto usado + tokens (+ modelo y costo de la sesión, que vienen gratis
-// en el mismo JSON). Fuente: GET /api/claude/status?session=, que lee el
+// % de contexto usado + tokens (+ modelo de la sesión, que viene gratis en el
+// mismo JSON). Fuente: GET /api/claude/status?session=, que lee el
 // <sesión>.status.json que escribe el hook statusLine (scripts/statusline.sh).
 // Se refresca en el poll de 8 s existente (piggyback, sin poll nuevo) y al
 // cambiar de sesión. Contrato blando: ausente → claudeStatus null (línea oculta).
@@ -43,12 +43,6 @@ export function fmtTokens(n: number | null): string {
   if (n < 1000) return String(n)
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
   return `${(n / 1_000_000).toFixed(1)}M`
-}
-
-// Costo de la sesión: siempre en centavos-legibles (0.0235 → "$0.02", 1.5 → "$1.50").
-export function fmtCost(n: number | null): string {
-  if (n == null || !Number.isFinite(n) || n <= 0) return ''
-  return `$${n.toFixed(2)}`
 }
 
 export async function refreshStatus(): Promise<void> {

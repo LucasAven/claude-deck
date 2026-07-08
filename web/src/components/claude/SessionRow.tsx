@@ -1,12 +1,12 @@
 import { useDeckStore } from '../../store'
-import { battLow, openHostSheet } from '../../lib/host'
 import { openCreateMenu } from '../../lib/worktree'
 import { togglePush } from '../../lib/push'
 import { useTap } from '../../hooks/useTap'
 import { useChipDrag } from '../../hooks/useChipDrag'
 
-// Fila de sesiones (index.html:23-33): chips + botón +, chip de host (Fase 4) y
-// el punto de conexión. Port de refreshSessions/selectSession/renameSession/
+// Fila de sesiones (index.html:23-33): chips + botón + y campana de push.
+// El chip de batería y el punto de conexión se mudaron a la Statusline.
+// Port de refreshSessions/selectSession/renameSession/
 // killSession/createSession (app.js:1443-1628) — la lógica vive en el store; acá
 // solo se pinta. React reconcilia, así que el chipsKey anti-parpadeo ya no hace
 // falta, pero el orden y la estructura del DOM se conservan: .chip con
@@ -62,27 +62,15 @@ function Chip({ name, state, active, lifted }: { name: string; state?: string; a
 export function SessionRow() {
   const sessions = useDeckStore((s) => s.sessions)
   const session = useDeckStore((s) => s.session)
-  const connected = useDeckStore((s) => s.connected)
   const createSession = useDeckStore((s) => s.createSession)
-  const hostStatus = useDeckStore((s) => s.hostStatus)
 
   // tarea 5: el + pasó de click simple a useTap para ganar el long-press (menú
   // CREAR); el tap corto sigue creando sesión igual que siempre
   const addTap = useTap(() => createSession(), openCreateMenu)
-  // el chip de host va con useTap (no onClick): un onClick se dispara con el
-  // `click` fantasma que el navegador sintetiza tras un tap táctil, y al cerrar
-  // el scrollback (📜) tocando su ✕ —que se solapa con este chip debajo del
-  // overlay— ese click fantasma caía acá y abría el host-sheet solo (tarea 20).
-  // useTap solo escucha pointer events, así que ignora ese click fantasma.
-  const hostChipTap = useTap(() => openHostSheet())
-  // la campana va por useTap por el mismo motivo (el click fantasma de cerrar
-  // un overlay encima la toggleaba sola — podía DESUSCRIBIR el push sin querer)
+  // la campana va por useTap (no onClick): el `click` fantasma que el navegador
+  // sintetiza al cerrar un overlay encima la toggleaba sola — podía DESUSCRIBIR
+  // el push sin querer (misma trampa que el host-chip, tarea 20)
   const pushTap = useTap(() => togglePush())
-
-  // chip 🔋 solo si el host reporta batería (Mac de escritorio / pmset ilegible
-  // → null); la barrita interna del ícono refleja el nivel (ancho útil 13.2px)
-  const batt = hostStatus?.battery
-  const fillW = batt ? Math.max(0.8, (13.2 * batt.pct) / 100).toFixed(1) : '0'
 
   // tarea 19: drag para reordenar. El hook devuelve el orden en vivo (durante el
   // drag) y el chip levantado; fuera del drag displayNames == orden del store.
@@ -112,20 +100,6 @@ export function SessionRow() {
       <button id="btn-new-session" className="chip chip-add" title="Nueva sesión" {...addTap}>
         +
       </button>
-      {/* chip de batería del host: pineado como el +, tap abre el sheet */}
-      <button
-        id="host-chip"
-        className={'chip host-chip' + (batt ? '' : ' hidden') + (battLow(hostStatus) ? ' warn' : '')}
-        title="Estado de la Mac"
-        {...hostChipTap}
-      >
-        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="2" y="7.5" width="17" height="9" rx="2.5" />
-          <path d="M22 10.5v3" />
-          <rect id="host-batt-fill" x="4.2" y="9.7" width={fillW} height="4.6" rx="1" fill="currentColor" stroke="none" />
-        </svg>
-        <span id="host-chip-pct">{batt ? `${batt.pct}%` : ''}</span>
-      </button>
       {/* opt-in de Web Push (tarea 23): campana, oculta si no hay soporte */}
       <button
         id="btn-push"
@@ -144,9 +118,6 @@ export function SessionRow() {
           {pushState === 'on' && <circle cx="18" cy="6" r="3" fill="currentColor" stroke="none" />}
         </svg>
       </button>
-      <span className={'conn' + (connected ? ' on' : '')} id="conn-claude">
-        <span className="dot" />
-      </span>
     </div>
   )
 }

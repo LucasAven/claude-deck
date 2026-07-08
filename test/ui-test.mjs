@@ -1486,12 +1486,13 @@ ok('dispatch: el segundo tap confirma y postea el body correcto (mode auto + mod
   && dispRun.postedBody.effort === 'high' && dispRun.sheetClosedAfterPost);
 
 // 21. statusline del panel (tarea 22): línea fina con % de contexto RESTANTE +
-// tokens (+ modelo y costo). El endpoint expone ctxPct = usado; el display lo
-// invierte a restante (100 - usado). /api/claude/status mockeado sobre
-// window.fetch; se maneja con refreshClaudeStatus() (puente global, como
+// tokens (+ modelo; el costo se retiró). El endpoint expone ctxPct = usado; el
+// display lo invierte a restante (100 - usado). /api/claude/status mockeado
+// sobre window.fetch; se maneja con refreshClaudeStatus() (puente global, como
 // refreshHost). Se verifica el render del % restante, tokens compactos, y el
-// umbral de color (ok/warn/alert cuando queda poco), más el caso null (línea
-// oculta) y ctxPct null (muestra "—").
+// umbral de color (ok/warn/alert cuando queda poco), más el caso null (la línea
+// queda visible —ahora aloja batería + conexión— pero sin segmentos de ctx) y
+// ctxPct null (muestra "—").
 const slRun = await page.evaluate(async () => {
   const realFetch = window.fetch;
   let mock = null; // { status: {...} | null }
@@ -1505,12 +1506,15 @@ const slRun = await page.evaluate(async () => {
   const sl = document.querySelector('#statusline');
   const out = {};
 
-  // sin datos (hook inactivo) → línea oculta
+  // sin datos (hook inactivo) → sin segmentos de ctx, pero la línea sigue
+  // visible (aloja batería + conexión, que viven acá desde que dejaron la
+  // fila de sesiones)
   mock = { status: null };
   await window.refreshClaudeStatus(); await frame();
-  out.hiddenWhenNull = sl.classList.contains('hidden');
+  out.bareWhenNull = !sl.classList.contains('hidden') && !document.querySelector('#sl-pct')
+    && !!sl.querySelector('#host-chip') && !!sl.querySelector('#conn-claude');
 
-  // usado 42% → RESTANTE 58%, visible, ok, tokens compactos + modelo + costo;
+  // usado 42% → RESTANTE 58%, ok, tokens compactos + modelo (sin costo);
   // label "ctx restante"
   mock = { status: { model: 'Opus 4.8', modelId: 'claude-opus-4-8', ctxPct: 42, ctxSize: 200000, inputTokens: 84000, outputTokens: 120, costUsd: 1.2345, exceeds200k: false } };
   await window.refreshClaudeStatus(); await frame();
@@ -1519,7 +1523,7 @@ const slRun = await page.evaluate(async () => {
   out.label = sl.querySelector('.sl-label').textContent;
   out.tokens = document.querySelector('#sl-tokens').textContent;
   out.model = document.querySelector('#sl-model').textContent;
-  out.cost = document.querySelector('#sl-cost').textContent;
+  out.noCost = !document.querySelector('#sl-cost');
 
   // usado 78% → restante 22% (≤25) → warn
   mock = { status: { ...mock.status, ctxPct: 78 } };
@@ -1539,10 +1543,10 @@ const slRun = await page.evaluate(async () => {
   window.fetch = realFetch;
   return out;
 });
-ok('statusline: oculta sin datos (status null)', slRun.hiddenWhenNull);
-ok('statusline: usado 42% → restante 58%, ok, label + tokens + modelo + costo',
+ok('statusline: sin datos queda pelada (sin ctx) pero visible, con batería + conexión adentro', slRun.bareWhenNull);
+ok('statusline: usado 42% → restante 58%, ok, label + tokens + modelo (sin costo)',
   slRun.okVisible && slRun.pct === '58%' && slRun.label === 'ctx restante'
-  && slRun.tokens === '84k tok' && slRun.model === 'Opus 4.8' && slRun.cost === '$1.23');
+  && slRun.tokens === '84k tok' && slRun.model === 'Opus 4.8' && slRun.noCost);
 ok('statusline: restante 22% (usado 78) → warn (ámbar)', slRun.warn);
 ok('statusline: restante 8% (usado 92) → alert (rojo)', slRun.alert);
 ok('statusline: exceeds200k fuerza alert y % "—"', slRun.exceedsAlert);
