@@ -142,6 +142,9 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
       sendVis()
       lastCols = 0
       lastRows = 0
+      // Best-effort: el resize "de verdad" del pty se garantiza al recibir meta
+      // (ver onmessage), porque este del onopen puede caer en el gap del server
+      // antes de que registre su handler y se pierda (tarea 33).
       requestAnimationFrame(() => doFit(true))
     }
 
@@ -173,6 +176,13 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
         } else {
           useDeckStore.setState({ expectCreate: null })
           if (m.created) store.showHint()
+          // (RE)ENVIAR EL RESIZE AL RECIBIR meta (tarea 33): el resize del onopen
+          // puede perderse porque el server registra su handler de mensajes tras
+          // un await (spawn del pty) y ws NO bufferea, dejando el pty en el
+          // default 80x24 con negro abajo. meta llega recien cuando el server ya
+          // esta listo, asi que este resize si se procesa. force=true: el onopen
+          // ya pudo fijar lastCols/lastRows y sin force el dedup lo comeria.
+          doFit(true)
         }
       }
     }
@@ -229,16 +239,6 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
       // fuerza el SIGWINCH (mismo camino que abrir el teclado). Si no llega
       // NINGÚN output en 2 s, el socket estaba muerto → reconectar.
       doFit(true)
-      // Espacio muerto al volver del background (tarea 33): #app sigue bien al
-      // --vvh, pero iOS restaura la geometría en varios frames y el fit de acá
-      // arriba puede medir el term-wrap antes de que asiente su alto → xterm
-      // queda con filas de menos y sobra negro abajo (otra cosa que solo el
-      // teclado arreglaba: su visualViewport resize re-dispara fit() con el
-      // layout ya firme). Sin teclado ese evento no llega, así que re-fitteamos
-      // nosotros cuando el layout se asentó; si las filas cambian, sendResize
-      // manda el resize real y tmux redibuja para llenar el hueco.
-      setTimeout(() => doFit(false), 150)
-      setTimeout(() => doFit(false), 450)
       try {
         ws.send(JSON.stringify({ t: 'refresh' }))
       } catch {
