@@ -6,9 +6,8 @@ import { closeComposer } from './lib/composer'
 import { invalidateTree, refreshTree } from './lib/files'
 import { orderNames } from './lib/chiporder'
 
-// Estado global (zustand). El módulo de terminal/WS (Fase 2) lo lee fuera de
-// React con useDeckStore.getState() y dispara updates sin prop-drilling — ver
-// docs/REACT-PORT.md §1. La forma inicial sale de app.js:7-13 + §3.
+// Estado global (zustand): el módulo de terminal/WS lo lee fuera de React con
+// useDeckStore.getState() y dispara updates sin prop-drilling.
 
 export type Tab = 'claude' | 'changes' | 'files'
 export type SwitchMenuKind = 'model' | 'attach' | 'snippets' | null

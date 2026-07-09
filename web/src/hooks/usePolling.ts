@@ -8,8 +8,8 @@ import { refreshTree } from '../lib/files'
 // visibilitychange (app.js:2185-2208). refreshGit y refreshHost corren en
 // cualquier tab (badge de Cambios y chip de batería siempre al día).
 //
-// Fase 1: presencia (sendVis) + git. Fase 2 suma sessions (solo en la tab
-// claude). Fase 4 suma host. tree se suma en la Fase 5 — ver docs/REACT-PORT.md §3.
+// sessions solo corre en la tab claude; tree solo en la tab files (sigue el
+// cwd del pane).
 export function usePolling() {
   useEffect(() => {
     const { refreshGit, refreshSessions } = useDeckStore.getState()

@@ -20,8 +20,8 @@ import { fileURLToPath } from 'node:url'
 const execFileP = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(__dirname, '..')
-// Estáticos: el build de Vite (web/dist). El dual-root de la migración a React
-// (fallback a public/, docs/REACT-PORT.md) se retiró al borrar la app vanilla;
+// Estáticos: el build de Vite (web/dist). El dual-root con fallback a public/
+// se retiró al borrar la app vanilla del port a React;
 // buildear es obligatorio, así que sin build frenamos acá con un error claro
 // en vez de servir 404s silenciosos.
 const PUBLIC_DIR = path.join(ROOT, 'web', 'dist')
