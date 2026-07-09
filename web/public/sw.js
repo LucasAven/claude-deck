@@ -21,8 +21,8 @@ self.addEventListener('push', (e) => {
       body: d.body || '',
       tag: d.tag || undefined,
       data: { url: d.url || '/' },
-      icon: '/icon.svg',
-      badge: '/icon.svg',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
     }),
   );
 });
