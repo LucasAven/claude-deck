@@ -112,7 +112,7 @@ const keyOrder = await page.$$eval(
   '.quickkeys[data-term="claude"] button[data-k]',
   (bs) => bs.map((b) => b.dataset.k),
 );
-ok('teclas "nl" y "/" primeras en la barra de Claude', keyOrder[0] === 'nl' && keyOrder[1] === 'slash');
+ok('teclas "nl", "enter" y "/" primeras en la barra de Claude', keyOrder[0] === 'nl' && keyOrder[1] === 'enter' && keyOrder[2] === 'slash');
 ok('una sola barra de teclas (Shell retirado)', (await page.$$('.quickkeys')).length === 1);
 // rediseño: la barra default se reparte el ancho y NO scrollea (el overflow-x
 // queda solo como rescate para barras configuradas con muchas teclas)
@@ -120,7 +120,7 @@ const qkScroll = await page.$eval('.quickkeys[data-term="claude"]', (el) => ({
   scroll: el.scrollWidth,
   client: el.clientWidth,
 }));
-ok('las 7 teclas default entran sin scroll', qkScroll.scroll <= qkScroll.client + 1);
+ok('las 8 teclas default entran sin scroll', qkScroll.scroll <= qkScroll.client + 1);
 ok('ctrl+c se muestra compacto (^C) en la barra',
   (await page.$eval('.quickkeys[data-term="claude"] [data-k="ctrlc"]', (b) => b.textContent.trim())) === '^C');
 
@@ -1866,7 +1866,7 @@ const qkRun = await page.evaluate(async () => {
   // restaurar por defecto desde el editor → orden histórico de vuelta
   await openEditor();
   tap(document.querySelector('#qk-reset')); await frame();
-  out.reset = rowKeys().join(',') === 'nl,slash,esc,up,down,tab,ctrlc';
+  out.reset = rowKeys().join(',') === 'nl,enter,slash,esc,up,down,tab,ctrlc';
   sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
 
   claudeConn.sendKeys = realSend;
@@ -1881,6 +1881,28 @@ ok('quickkeys: el catálogo agrega al final', qkRun.added);
 ok('quickkeys: ◀ mueve un lugar antes y persiste', qkRun.moved);
 ok('quickkeys: el primer chip no tiene ◀ y el backdrop cierra', qkRun.firstNoMove && qkRun.backdropCloses);
 ok('quickkeys: restaurar por defecto vuelve al orden histórico', qkRun.reset);
+
+// 24b. quickkey "enter" (tarea 29): viene en la barra default (segunda, tras
+// nl), con el glyph ⏎ (distinto de nl = \n para no confundir "enviar" con
+// "salto"); un tap corto manda CR crudo ('\r'), que envía/acepta el prompt de
+// Claude. sendKeys espiado: nada real llega a la sesión deck.
+const enterRun = await page.evaluate(async () => {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
+  const sent = [];
+  const realSend = claudeConn.sendKeys;
+  claudeConn.sendKeys = (s) => sent.push(s);
+  const down = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  const up = (el) => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  const tap = (el) => { down(el); up(el); };
+  const btn = document.querySelector('.quickkeys[data-term="claude"] [data-k="enter"]');
+  const out = { present: !!btn, label: btn ? btn.textContent.trim() : '' };
+  tap(btn); await frame();
+  out.sentCR = sent.length === 1 && sent[0] === '\r';
+  claudeConn.sendKeys = realSend;
+  return out;
+});
+ok('quickkeys: "enter" en la barra con label ⏎', enterRun.present && enterRun.label === '⏎');
+ok('quickkeys: tap en "enter" manda CR crudo (\\r)', enterRun.present && enterRun.sentCR);
 
 await browser.close();
 console.log(results.join('\n'));

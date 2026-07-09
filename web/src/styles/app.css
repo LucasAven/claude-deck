@@ -870,9 +870,15 @@ body.composer-open .tabbar { display: none; }
 
 /* rediseño: las teclas se reparten el ancho parejo — con la barra default no
    scrollean (la terminal gana ese aire). flex-basis 40px = mínimo con el que
-   las 7 default entran hasta en un iPhone SE (355px útiles); si configurás más
-   teclas de las que entran, la suma de mínimos desborda y el overflow-x
+   las 8 default (tarea 29 sumó "enter") entran a 390px sin scroll con gap 6px
+   (8x40 + 7x6 = 362 < 370 útiles); en pantallas más angostas como el iPhone SE
+   la suma de mínimos desborda y el overflow-x
    heredado de .quickkeys vuelve como rescate. */
+/* gap 6px (no el 8px de .controlrow): con enter la barra default tiene 8 teclas
+   y a 390px (370 útiles) 8x40 + 7x8 = 376 desbordaba; 8x40 + 7x6 = 362 entra. */
+.controlrow.quickkeys {
+  gap: 6px;
+}
 .controlrow.quickkeys button {
   flex: 1 0 40px;
   padding: 0 6px;

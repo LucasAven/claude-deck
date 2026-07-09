@@ -16,6 +16,10 @@ export const KEYS: Record<string, string> = {
   // salto de línea SIN enviar el prompt: Claude Code trata ESC+CR (alt+enter)
   // como newline suave — verificado contra claude real dentro de tmux
   nl: '\x1b\r',
+  // Enter crudo (CR): envia el prompt / acepta los prompts de Claude Code dentro
+  // de tmux. A diferencia de nl (ESC+CR, salto suave), este SI confirma.
+  // Verificado contra claude real en sesion scratch, igual que se hizo con nl.
+  enter: '\r',
   ctrlr: '\x12',
   ctrld: '\x04',
   ctrlz: '\x1a',
@@ -35,6 +39,7 @@ export const KEYS: Record<string, string> = {
 // entrar en ~44px; el editor sigue mostrando el label largo.
 export const QUICKKEY_CATALOG: { id: string; label: string; title: string; barLabel?: string }[] = [
   { id: 'nl', label: '\\n', title: 'Salto de línea (sin enviar)' },
+  { id: 'enter', label: '⏎', title: 'Enviar / aceptar (Enter)' },
   { id: 'slash', label: '/', title: 'Comando slash' },
   { id: 'esc', label: 'esc', title: 'Escape' },
   { id: 'up', label: '↑', title: 'Flecha arriba' },
@@ -54,7 +59,10 @@ export const QUICKKEY_CATALOG: { id: string; label: string; title: string; barLa
 
 // barra por defecto = la histórica (nl primero, pedido del usuario — ui-test
 // asserta este orden con la config default)
-export const DEFAULT_QUICKKEYS = ['nl', 'slash', 'esc', 'up', 'down', 'tab', 'ctrlc']
+// (tarea 29) enter va segundo, junto a nl: nl hace salto sin enviar, enter
+// envia/acepta. Son 8 teclas: a 390px se reparten sin scroll; en pantallas mas
+// angostas (iPhone SE) el overflow-x de .quickkeys entra como rescate.
+export const DEFAULT_QUICKKEYS = ['nl', 'enter', 'slash', 'esc', 'up', 'down', 'tab', 'ctrlc']
 
 export const QUICKKEYS_LS_KEY = 'deck-quickkeys'
 
