@@ -74,6 +74,7 @@ alias deck='<ruta-al-repo>/scripts/deck'
 ```
 
 - `deck claude [flags]` — lanza Claude Code en una sesión tmux nombrada según el directorio actual, visible al instante en el teléfono. Los flags se pasan a claude (ej. `deck claude --continue`). Las variantes `deck cc` / `deck ccw` requieren tener esos alias propios definidos.
+- `deck attach [nombre]`: seguir en la Mac una sesión que arrancaste desde el celu (dispatch o worktree crean sesiones tmux planas; el nombre es el mismo que ves como chip de sesión en el panel). Con nombre, attachea directo; sin nombre, lista las vivas y elegís por número. Es un atajo de `tmux ls` + `tmux attach -t <nombre>` (desde otro tmux hace `switch-client`, no anida).
 - `deck away` — al irse: verifica todo de punta a punta y desactiva el sueño. Cerrar la tapa **con la Mac enchufada**.
 - `deck back` — al volver: la Mac vuelve a dormir normalmente.
 - `deck status` / `deck log` — diagnóstico.

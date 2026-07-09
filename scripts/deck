@@ -315,6 +315,44 @@ cmd_launch() { # $1 = alias/comando a tipear en el pane (cc | ccw), resto = flag
   exec tmux attach -t "=$name"
 }
 
+# seguir en la Mac una sesión del deck (las que arrancás desde el celu ya existen
+# como sesiones tmux planas: dispatch/worktree hacen `tmux new-session -d`, y el
+# panel attachea con `-A`). `deck attach <nombre>` engancha directo; sin nombre,
+# lista las vivas y elegís. Adentro de otro tmux no se anida un attach: se usa
+# `switch-client`. El nombre es el mismo que ves como chip de sesión en el panel.
+cmd_attach() { # $1 = nombre de sesión tmux (opcional); sin nombre → menú
+  local name="${1:-}"
+  # dentro de tmux no se anida attach: se cambia de sesión del cliente actual
+  local verb='attach'
+  [ -n "${TMUX:-}" ] && verb='switch-client'
+  if [ -z "$name" ]; then
+    local sessions arr=() i=0 s
+    sessions="$(tmux list-sessions -F '#S' 2>/dev/null || true)"
+    [ -n "$sessions" ] || die "no hay sesiones tmux vivas (arrancá una desde el celu, o acá con \`deck cc\`)"
+    info "sesiones tmux vivas:"
+    while IFS= read -r s; do
+      i=$((i + 1)); arr+=("$s")
+      printf '  %d) %s\n' "$i" "$s"
+    done <<< "$sessions"
+    if [ "$i" = 1 ]; then
+      name="${arr[0]}"
+      info "→ una sola: $verb a '$name'"
+    else
+      [ -t 0 ] || die "pasá el nombre: \`deck attach <nombre>\` (sin terminal interactiva no hay menú)"
+      local pick
+      printf 'elegí (número o nombre): '
+      read -r pick || die "cancelado"
+      if printf '%s' "$pick" | grep -Eq '^[0-9]+$' && [ "$pick" -ge 1 ] && [ "$pick" -le "$i" ]; then
+        name="${arr[$((pick - 1))]}"
+      else
+        name="$pick"
+      fi
+    fi
+  fi
+  tmux has-session -t "=$name" 2>/dev/null || die "no existe la sesión '$name' (mirá las vivas con \`deck attach\` a secas, o \`tmux ls\`)"
+  exec tmux "$verb" -t "=$name"
+}
+
 cmd_uninstall() {
   pm_sleep 0 2>/dev/null || true
   launchctl bootout "$GUI/$LABEL" 2>/dev/null || true
@@ -355,6 +393,12 @@ USO DIARIO (lo único que importa):
                     si no tenés cc/ccw definidos).
                     Si la sesión del directorio ya existe, attachea (y si claude
                     no está corriendo ahí, lo relanza).
+  deck attach [nombre]
+                    Seguir en la Mac una sesión que arrancaste desde el celu (o
+                    cualquier sesión tmux del deck). Con nombre, attachea directo;
+                    sin nombre, lista las vivas y elegís. El nombre es el mismo
+                    que ves como chip de sesión en el panel. Adentro de otro tmux
+                    cambia de sesión en vez de anidar (switch-client).
   deck away         "Me voy": chequea que todo ande y deja la Mac despierta.
                     → cerrás la tapa (¡enchufada!) y seguís desde el celu.
   deck back         "Volví": la Mac vuelve a dormir normalmente.
@@ -386,6 +430,7 @@ case "${1:-}" in
   url)            cmd_url ;;
   uninstall)      cmd_uninstall ;;
   cc|ccw|claude)  cmd_launch "$@" ;;
+  attach)         shift; cmd_attach "$@" ;;
   help|--help|-h) usage ;;
   *)              usage; exit 1 ;;
 esac
