@@ -7,7 +7,16 @@ import { useTap } from '../../hooks/useTap'
 // barra de quickkeys, tipo el statusLine de Claude Code. A la izquierda, el % de
 // contexto RESTANTE (Lucas 2026-07-07: prefiere "cuánto queda" sobre "cuánto
 // usé" — se invierte en el display, el endpoint sigue exponiendo el usado) +
-// tokens de input y modelo (el costo se retiró: no le interesa). Color de
+// tokens de input, modelo y esfuerzo (el costo se retiró: no le interesa).
+// El label del ctx es "ctx" a secas (tarea 28: se retiró la palabra
+// "restante"; el número sigue siendo el restante, la semántica no cambió).
+// El esfuerzo (también tarea 28) sale de switchState.effort, señal BLANDA:
+// refleja lo elegido en el SwitchMenu del deck (persistido por sesión en
+// deck-switch:<sesión>), no lo que Claude corre realmente si el effort se
+// cambió por fuera del panel. No hay fuente dura: ni el JSON del hook
+// statusLine ni el transcript lo exponen (verificado 2026-07-09; Lucas aceptó
+// la fuente blanda ese día). Se muestra solo si está definido, colgado del
+// modelo ("Opus 4.8 · high"). Color de
 // alerta cuando queda POCO contexto (ctxLevel: ok/warn/alert); esos segmentos
 // se ocultan si no hay datos (hook inactivo).
 //
@@ -21,6 +30,8 @@ export function Statusline() {
   const hostStatus = useDeckStore((st) => st.hostStatus)
   const level = ctxLevel(s)
   const rem = ctxRemaining(s) // % restante (Lucas lo prefiere sobre el usado)
+  // esfuerzo elegido en el SwitchMenu (fuente blanda, ver cabecera)
+  const effort = useDeckStore((st) => st.switchState.effort)
 
   // el chip de host va con useTap (no onClick): un onClick se dispara con el
   // `click` fantasma que el navegador sintetiza tras un tap táctil, y al cerrar
@@ -38,7 +49,7 @@ export function Statusline() {
       {s && (
         <>
           <span className="sl-ctx">
-            <span className="sl-label">ctx restante</span>{' '}
+            <span className="sl-label">ctx</span>{' '}
             <span id="sl-pct">{rem != null ? `${rem}%` : '—'}</span>
           </span>
           <span className="sl-sep">·</span>
@@ -51,6 +62,14 @@ export function Statusline() {
               <span id="sl-model" className="sl-model">
                 {s.model}
               </span>
+              {effort && (
+                <>
+                  <span className="sl-sep">·</span>
+                  <span id="sl-effort" className="sl-model">
+                    {effort}
+                  </span>
+                </>
+              )}
             </>
           )}
         </>

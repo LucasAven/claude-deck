@@ -1517,8 +1517,9 @@ ok('dispatch: el segundo tap confirma y postea el body correcto (mode auto + mod
   && dispRun.postedBody.mode === 'auto' && dispRun.postedBody.model === 'opus'
   && dispRun.postedBody.effort === 'high' && dispRun.sheetClosedAfterPost);
 
-// 21. statusline del panel (tarea 22): línea fina con % de contexto RESTANTE +
-// tokens (+ modelo; el costo se retiró). El endpoint expone ctxPct = usado; el
+// 21. statusline del panel (tareas 22 y 28): línea fina con % de contexto
+// RESTANTE (label "ctx" a secas desde la 28) + tokens (+ modelo y effort
+// blando del SwitchMenu; el costo se retiró). El endpoint expone ctxPct = usado; el
 // display lo invierte a restante (100 - usado). /api/claude/status mockeado
 // sobre window.fetch; se maneja con refreshClaudeStatus() (puente global, como
 // refreshHost). Se verifica el render del % restante, tokens compactos, y el
@@ -1547,7 +1548,7 @@ const slRun = await page.evaluate(async () => {
     && !!sl.querySelector('#host-chip') && !!sl.querySelector('#conn-claude');
 
   // usado 42% → RESTANTE 58%, ok, tokens compactos + modelo (sin costo);
-  // label "ctx restante"
+  // label "ctx" a secas (tarea 28)
   mock = { status: { model: 'Opus 4.8', modelId: 'claude-opus-4-8', ctxPct: 42, ctxSize: 200000, inputTokens: 84000, outputTokens: 120, costUsd: 1.2345, exceeds200k: false } };
   await window.refreshClaudeStatus(); await frame();
   out.okVisible = !sl.classList.contains('hidden') && sl.classList.contains('sl-ok');
@@ -1572,16 +1573,44 @@ const slRun = await page.evaluate(async () => {
   await window.refreshClaudeStatus(); await frame();
   out.exceedsAlert = sl.classList.contains('sl-alert') && document.querySelector('#sl-pct').textContent === '—';
 
+  // effort (tarea 28): sin elección en el SwitchMenu no hay segmento
+  out.noEffortDefault = !document.querySelector('#sl-effort');
+  // elegir "Alto" en el menú de modelo con sendKeys espiado (que el /effort
+  // no toque la sesión real): la statusline pinta el id ('high') al lado del
+  // modelo. La elección queda en el store hasta recargar (no afecta asserts
+  // posteriores), pero se borra de localStorage para no dejar residuo.
+  const sentKeys = [];
+  const origSendKeys = claudeConn.sendKeys;
+  claudeConn.sendKeys = (d) => { sentKeys.push(d); };
+  const tapEff = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
+  tapEff(document.querySelector('#btn-switch'));
+  await frame();
+  const altoBtn = [...document.querySelectorAll('#switch-menu .mi-efforts button')]
+    .find((b) => b.textContent.trim() === 'Alto');
+  if (altoBtn) tapEff(altoBtn);
+  await new Promise((r) => setTimeout(r, 250)); // el \r del slash sale diferido 150 ms
+  claudeConn.sendKeys = origSendKeys;
+  out.effortShown = document.querySelector('#sl-effort') ? document.querySelector('#sl-effort').textContent : null;
+  out.effortSent = sentKeys.join('');
+  localStorage.removeItem('deck-switch:' + (claudeConn.currentSession() || ''));
+
   window.fetch = realFetch;
   return out;
 });
 ok('statusline: sin datos queda pelada (sin ctx) pero visible, con batería + conexión adentro', slRun.bareWhenNull);
 ok('statusline: usado 42% → restante 58%, ok, label + tokens + modelo (sin costo)',
-  slRun.okVisible && slRun.pct === '58%' && slRun.label === 'ctx restante'
+  slRun.okVisible && slRun.pct === '58%' && slRun.label === 'ctx'
   && slRun.tokens === '84k tok' && slRun.model === 'Opus 4.8' && slRun.noCost);
 ok('statusline: restante 22% (usado 78) → warn (ámbar)', slRun.warn);
 ok('statusline: restante 8% (usado 92) → alert (rojo)', slRun.alert);
 ok('statusline: exceeds200k fuerza alert y % "—"', slRun.exceedsAlert);
+
+ok('statusline: sin effort elegido no hay segmento #sl-effort', slRun.noEffortDefault);
+ok('statusline: elegir Alto en el menú pinta "high" junto al modelo (con /effort espiado)',
+  slRun.effortShown === 'high' && slRun.effortSent === '/effort high\r');
 
 // 22. sheet de ajustes (engranaje #btn-settings, reemplazó a la campana) +
 // opt-in de Web Push (tarea 23): el toggle vive en la fila #set-push-row de
