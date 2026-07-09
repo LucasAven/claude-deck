@@ -201,6 +201,33 @@ function statusForSession(name: string): unknown | null {
   }
 }
 
+// ¿Hay un claude VIVO en el pane de esta sesión? (tarea 34). El status.json lo
+// escribe el hook statusLine y NADIE lo borra al salir claude, así que sobrevive
+// al cierre y la statusline mostraba datos rancios. Señal robusta: el foreground
+// del pane. Con claude corriendo, `pane_current_command` es el título que claude
+// se pone (la versión, p.ej. "2.1.205"); las herramientas Bash que claude ejecuta
+// NO cambian el foreground de la tty (corren por pipes, no la toman), así que el
+// pane muestra claude de punta a punta hasta que claude EXIT → vuelve al shell.
+// Se DESCARTÓ el TTL por mtime (hipótesis 2 del task): medido en vivo, un claude
+// idle-pero-vivo puede no reescribir su status.json por 30+ min (hasta 3.6 h en
+// una sesión observada), así que cualquier umbral corto ocultaría datos válidos;
+// el estado del pane distingue vivo-idle de cerrado sin ese falso negativo.
+// Solo HIDE cuando estamos seguros de que el pane está en un shell (match
+// positivo contra shells conocidos); cualquier otra cosa → asumir vivo (muestra).
+const SHELL_CMD_RE = /^-?(zsh|bash|sh|fish|tcsh|csh|ksh|dash)$/
+async function claudeRunningInSession(name: string): Promise<boolean> {
+  try {
+    // display-message contra un target inexistente devuelve vacío con exit 0
+    // (gotcha 3) → cmd vacío → sesión muerta → no hay claude.
+    const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{pane_current_command}'])
+    const cmd = stdout.trim()
+    if (!cmd) return false
+    return !SHELL_CMD_RE.test(cmd)
+  } catch {
+    return false // sesión muerta / tmux no responde
+  }
+}
+
 // --- transcript de Claude por sesión (tarea 9, fase jsonl) ----------------
 // EXCEPCIÓN DELIBERADA AL PERÍMETRO (solo lectura, documentada en README):
 // los transcripts viven en ~/.claude*/projects, FUERA de WORKSPACES_ROOT.
@@ -916,10 +943,15 @@ app.get('/api/claude/transcript', async (c) => {
 // sesión, como el statusLine de Claude Code. Contrato blando: sesión inválida
 // → 400, pero presente/ausente → 200 con {status:{...}|null} (nunca 404/500),
 // así el poll piggyback no genera ruido cuando el hook aún no escribió nada.
-app.get('/api/claude/status', (c) => {
+app.get('/api/claude/status', async (c) => {
   const session = c.req.query('session') || TMUX_SESSION
   if (!SESSION_RE.test(session)) throw new HttpError(400, 'nombre de sesión inválido')
-  return c.json({ status: statusForSession(session) })
+  const status = statusForSession(session)
+  // Gate de frescura (tarea 34): si hay datos pero NO hay claude corriendo en el
+  // pane, son de un claude ya cerrado/matado → no mostrar la línea rancia. El
+  // check del pane solo se paga cuando existe el archivo (sesión con historia).
+  if (status && !(await claudeRunningInSession(session))) return c.json({ status: null })
+  return c.json({ status })
 })
 
 // Imagen desde el celular → Claude Code de la sesión.

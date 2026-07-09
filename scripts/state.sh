@@ -9,13 +9,14 @@
 #   UserPromptSubmit / PreToolUse      → state.sh working
 #   Notification / PermissionRequest  → state.sh waiting
 #   Stop                               → state.sh idle
+#   SessionEnd                         → state.sh clear   (tarea 34)
 set -u
 
 # Mismo guard que notify.sh: fuera de tmux no hay chip que actualizar.
 [ -z "${TMUX:-}" ] && exit 0
 
 STATE="${1:-}"
-case "$STATE" in working|waiting|idle) ;; *) exit 0 ;; esac
+case "$STATE" in working|waiting|idle|clear) ;; *) exit 0 ;; esac
 
 # Sesión propia del cliente ($TMUX seteado, sin -t). Solo nombres que pasan
 # el SESSION_RE del server: son filename-safe y son los únicos que la UI lista.
@@ -23,6 +24,18 @@ SESSION="$(tmux display-message -p '#S' 2>/dev/null || true)"
 printf '%s' "$SESSION" | grep -qE '^[A-Za-z0-9_-]{1,32}$' || exit 0
 
 DIR="$HOME/.claude-deck/state"
+
+# clear (SessionEnd, tarea 34): claude cerró LIMPIO → borrar el status.json para
+# que la statusline no muestre datos rancios y un claude nuevo en esta misma
+# sesión tmux no herede lo viejo hasta su primer write. Solo el status.json: el
+# semáforo y el transcript son historia legítima de la sesión (el chip y el
+# overlay 📜 siguen sirviendo). Un claude MATADO no emite SessionEnd (mismo
+# agujero que el semáforo); ese caso lo cubre el gate por pane del server.
+if [ "$STATE" = clear ]; then
+  rm -f "$DIR/$SESSION.status.json" 2>/dev/null
+  exit 0
+fi
+
 mkdir -p "$DIR" 2>/dev/null || exit 0
 
 # Escritura atómica (tmp + mv): un lector nunca ve un archivo a medias.

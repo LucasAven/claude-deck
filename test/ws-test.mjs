@@ -654,12 +654,26 @@ ok('POST /api/approve-nonce con token → 404 (ruta retirada)',
 // con {status:{...}|null}, nunca error. El <sesión>.status.json lo escribe el
 // hook statusLine (scripts/statusline.sh); acá se simula escribiéndolo directo
 // (nombre scratch, no una sesión real; se limpia al salir).
-const STATUS_FILE = `${os.homedir()}/.claude-deck/state/wsstat22.status.json`;
+// NUEVO gate (tarea 34): el endpoint solo devuelve el status si HAY un claude
+// vivo en el pane (foreground no-shell); si el claude cerro o lo mataron, el
+// archivo rancio se oculta (status:null). Por eso el caso "presente" corre
+// contra una sesion tmux scratch con un foreground vivo (un `sleep` hace de
+// claude); la simulacion del cierre es matar ese proceso o la sesion. Todo
+// scratch (wsstat34, no una sesion real) y se limpia en el finally.
+const STAT_SESSION = 'wsstat34';
+const STATUS_FILE = `${os.homedir()}/.claude-deck/state/${STAT_SESSION}.status.json`;
 const statusGet = (session) => fetch(`${HTTP}/api/claude/status?session=${session}`, { headers: { 'x-deck-token': TOKEN } });
 try {
   fs.mkdirSync(`${os.homedir()}/.claude-deck/state`, { recursive: true });
   fs.rmSync(STATUS_FILE, { force: true });
-  const absent = await statusGet('wsstat22');
+  try { execFileSync('tmux', ['kill-session', '-t', `=${STAT_SESSION}`], { stdio: 'ignore' }); } catch {}
+  execFileSync('tmux', ['new-session', '-d', '-s', STAT_SESSION]);
+  // foreground no-shell = "claude vivo" para el gate del pane
+  execFileSync('tmux', ['send-keys', '-t', `=${STAT_SESSION}:`, '-l', 'sleep 1000']);
+  execFileSync('tmux', ['send-keys', '-t', `=${STAT_SESSION}:`, 'Enter']);
+  await new Promise((r) => setTimeout(r, 700));
+
+  const absent = await statusGet(STAT_SESSION);
   ok('status ausente → { status: null } 200', absent.status === 200 && (await absent.json()).status === null);
 
   const bad = await statusGet('mal!nombre');
@@ -669,20 +683,36 @@ try {
     model: 'Opus 4.8', modelId: 'claude-opus-4-8', ctxPct: 42, ctxSize: 200000,
     inputTokens: 84000, outputTokens: 120, costUsd: 1.2345, exceeds200k: false,
   }));
-  const present = await statusGet('wsstat22');
+  const present = await statusGet(STAT_SESSION);
   const pj = await present.json();
-  ok('status presente → { status: {...} } 200', present.status === 200
+  ok('status presente + claude vivo en el pane → { status: {...} } 200', present.status === 200
     && pj.status?.ctxPct === 42 && pj.status?.model === 'Opus 4.8'
     && pj.status?.inputTokens === 84000 && pj.status?.exceeds200k === false);
 
+  // gate tarea 34: mismo archivo, pero el "claude" ya no corre (foreground
+  // vuelve al shell), status rancio oculto. Ctrl-C mata el sleep.
+  execFileSync('tmux', ['send-keys', '-t', `=${STAT_SESSION}:`, 'C-c']);
+  await new Promise((r) => setTimeout(r, 500));
+  const stale = await statusGet(STAT_SESSION);
+  ok('status presente pero pane en shell (claude cerrado) → { status: null } 200',
+    stale.status === 200 && (await stale.json()).status === null);
+
+  // gate tarea 34: sesion muerta con archivo presente → null.
+  execFileSync('tmux', ['kill-session', '-t', `=${STAT_SESSION}`], { stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 300));
+  const dead = await statusGet(STAT_SESSION);
+  ok('status presente pero sesión tmux muerta → { status: null } 200',
+    dead.status === 200 && (await dead.json()).status === null);
+
   fs.writeFileSync(STATUS_FILE, 'no es json{');
-  const broken = await statusGet('wsstat22');
+  const broken = await statusGet(STAT_SESSION);
   ok('status JSON roto → { status: null } 200', broken.status === 200 && (await broken.json()).status === null);
 
-  const noauth = await fetch(`${HTTP}/api/claude/status?session=wsstat22`);
+  const noauth = await fetch(`${HTTP}/api/claude/status?session=${STAT_SESSION}`);
   ok('status sin token → 401', noauth.status === 401);
 } finally {
   fs.rmSync(STATUS_FILE, { force: true });
+  try { execFileSync('tmux', ['kill-session', '-t', `=${STAT_SESSION}`], { stdio: 'ignore' }); } catch {}
 }
 
 // 9p. Web Push (tarea 23): /api/push/vapid + subscribe/unsubscribe/send. La
