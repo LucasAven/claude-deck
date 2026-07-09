@@ -29,6 +29,11 @@ export const KEYS: Record<string, string> = {
   ctrle: '\x05',
   ctrll: '\x0c',
   ctrlu: '\x15',
+  // Ctrl+End = scroll:bottom de Claude Code (salta al ultimo mensaje y reactiva
+  // el auto-follow). Secuencia xterm modifyOtherKeys (CSI 1;5F). Verificada
+  // contra un claude real: scrolleado arriba con PageUp, esta lo trajo de vuelta
+  // al final de la conversacion.
+  ctrlend: '\x1b[1;5F',
 }
 
 // Catálogo de quickkeys disponibles para la barra (tarea 11b): label = lo que
@@ -55,6 +60,7 @@ export const QUICKKEY_CATALOG: { id: string; label: string; title: string; barLa
   { id: 'ctrle', label: 'ctrl+e', barLabel: '^E', title: 'Fin de línea' },
   { id: 'ctrll', label: 'ctrl+l', barLabel: '^L', title: 'Limpiar pantalla' },
   { id: 'ctrlu', label: 'ctrl+u', barLabel: '^U', title: 'Borrar la línea' },
+  { id: 'ctrlend', label: 'ctrl+end', barLabel: '^End', title: 'Ir al final de la conversación (scroll)' },
 ]
 
 // barra por defecto = la histórica (nl primero, pedido del usuario — ui-test

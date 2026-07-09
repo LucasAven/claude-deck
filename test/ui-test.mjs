@@ -1904,6 +1904,45 @@ const enterRun = await page.evaluate(async () => {
 ok('quickkeys: "enter" en la barra con label ⏎', enterRun.present && enterRun.label === '⏎');
 ok('quickkeys: tap en "enter" manda CR crudo (\\r)', enterRun.present && enterRun.sentCR);
 
+// 24c. quickkey "ctrl+end" (scroll al final de la conversación de Claude): NO
+// está en la barra default; el catálogo la ofrece con label largo "ctrl+end", y
+// agregada a la barra se muestra compacta como "^End" y manda CSI 1;5F
+// ('\x1b[1;5F'). sendKeys espiado: nada real llega a la sesión deck. localStorage
+// limpio al final.
+const cendRun = await page.evaluate(async () => {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
+  const rowKeys = () => [...document.querySelectorAll('.quickkeys[data-term="claude"] button[data-k]')].map((b) => b.dataset.k);
+  const sent = [];
+  const realSend = claudeConn.sendKeys;
+  claudeConn.sendKeys = (s) => sent.push(s);
+  const down = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  const up = (el) => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  const tap = (el) => { down(el); up(el); };
+  const sheet = document.querySelector('#quickkeys-sheet');
+  tap(document.querySelector('#btn-settings')); await frame();
+  tap(document.querySelector('#set-qk-row')); await frame();
+
+  // el catálogo la ofrece con el label largo (no está en la barra default)
+  const cat = document.querySelector('#qk-catalog [data-qk="ctrlend"]');
+  const out = { offered: !!cat, catLabel: cat ? cat.textContent.trim() : '' };
+  tap(cat); await frame();
+  out.added = rowKeys().at(-1) === 'ctrlend';
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+
+  // en la barra se muestra compacta (^End) y el tap manda CSI 1;5F
+  const btn = document.querySelector('.quickkeys[data-term="claude"] [data-k="ctrlend"]');
+  out.barLabel = btn ? btn.textContent.trim() : '';
+  tap(btn); await frame();
+  out.sentSeq = sent.length === 1 && sent[0] === '\x1b[1;5F';
+
+  claudeConn.sendKeys = realSend;
+  localStorage.removeItem('deck-quickkeys');
+  return out;
+});
+ok('quickkeys: el catálogo ofrece "ctrl+end" (fuera de la barra default)', cendRun.offered && cendRun.catLabel.includes('ctrl+end'));
+ok('quickkeys: "ctrl+end" en la barra se muestra "^End"', cendRun.added && cendRun.barLabel === '^End');
+ok('quickkeys: tap en "ctrl+end" manda CSI 1;5F (\\x1b[1;5F)', cendRun.sentSeq);
+
 await browser.close();
 console.log(results.join('\n'));
 process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);
