@@ -229,6 +229,16 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
       // fuerza el SIGWINCH (mismo camino que abrir el teclado). Si no llega
       // NINGÚN output en 2 s, el socket estaba muerto → reconectar.
       doFit(true)
+      // Espacio muerto al volver del background (tarea 33): #app sigue bien al
+      // --vvh, pero iOS restaura la geometría en varios frames y el fit de acá
+      // arriba puede medir el term-wrap antes de que asiente su alto → xterm
+      // queda con filas de menos y sobra negro abajo (otra cosa que solo el
+      // teclado arreglaba: su visualViewport resize re-dispara fit() con el
+      // layout ya firme). Sin teclado ese evento no llega, así que re-fitteamos
+      // nosotros cuando el layout se asentó; si las filas cambian, sendResize
+      // manda el resize real y tmux redibuja para llenar el hueco.
+      setTimeout(() => doFit(false), 150)
+      setTimeout(() => doFit(false), 450)
       try {
         ws.send(JSON.stringify({ t: 'refresh' }))
       } catch {
