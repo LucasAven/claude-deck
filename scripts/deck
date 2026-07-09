@@ -103,6 +103,84 @@ cmd_url() {
   fi
 }
 
+# --- exponer apps locales al tailnet (tarea 35) -----------------------------
+# `deck expose <puerto>` publica localhost:<puerto> en el tailnet por HTTPS,
+# como una SEGUNDA entrada de `tailscale serve` en un puerto externo igual al
+# local (https://<host>.<tailnet>.ts.net:<puerto>/). Coexiste con la del panel
+# (443 -> 7433) sin tocarla, así que serve_url()/persist_deck_url() (que leen la
+# línea 1) siguen viendo el panel. No es un proxy: tailscale hace el forward, la
+# raíz queda en `/` y no se reescribe ningún path (por eso las SPAs andan). A
+# diferencia del panel, la app NO queda detrás del AUTH_TOKEN: la única frontera
+# es el tailnet (WireGuard). Persistente hasta `deck unexpose <puerto>`.
+
+# tailscale instalado + conectado, sin configurar el serve del panel (expose/
+# unexpose solo agregan o quitan entradas de serve por puerto).
+tailscale_ready() {
+  command -v tailscale >/dev/null 2>&1 || { warn "tailscale no está instalado (https://tailscale.com/download)"; return 1; }
+  tailscale status --json 2>/dev/null | grep -q '"BackendState": "Running"' \
+    || { warn "tailscale no está conectado (abrí la app de Tailscale o: tailscale up)"; return 1; }
+}
+
+valid_port() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
+
+# URLs del status con puerto explícito = las de `deck expose` (la del panel va en
+# 443, sin puerto en la URL). Una por línea: https://<host>:<puerto>
+exposed_urls() {
+  tailscale serve status 2>/dev/null | grep -oE '^https://[^ ]+:[0-9]+'
+}
+
+cmd_expose() {
+  local port="${1:-}"
+  if [ -z "$port" ]; then
+    local urls; urls="$(exposed_urls || true)"
+    if [ -z "$urls" ]; then
+      info "no hay apps expuestas."
+      info "uso: deck expose <puerto>     (p. ej. deck expose 5173)"
+      return 0
+    fi
+    info "apps locales expuestas al tailnet (las ve solo tu tailnet; NO van tras el AUTH_TOKEN):"
+    local u
+    while IFS= read -r u; do info "  $u/"; done <<<"$urls"
+    info ""
+    info "bajar una: deck unexpose <puerto>"
+    return 0
+  fi
+  valid_port "$port" || die "puerto inválido: '$port' (usá 1-65535)"
+  [ "$port" = "$PORT" ] && die "el puerto $port es el del panel (DECK_PORT); ya está publicado con 'deck url'"
+  tailscale_ready || die "sin tailscale conectado no puedo exponer nada"
+  if ! nc -z 127.0.0.1 "$port" 2>/dev/null; then
+    warn "nada escucha en localhost:$port todavía (lo expongo igual: arrancá la app cuando quieras)"
+  fi
+  tailscale serve --bg --https="$port" "localhost:$port" >/dev/null 2>&1 \
+    || die "no pude exponer $port (probá a mano: tailscale serve --bg --https=$port localhost:$port)"
+  local full; full="$(exposed_urls | grep ":$port\$" | head -1 || true)"
+  full="${full:+$full/}"
+  info "✓ localhost:$port expuesto al tailnet, persistente hasta 'deck unexpose $port':"
+  info ""
+  info "  ${full:-https://<tu-host>.ts.net:$port/}"
+  info ""
+  warn "lo ve cualquier dispositivo de tu tailnet y NO está tras el AUTH_TOKEN del panel (WireGuard es la única frontera)."
+  info "   si es un dev server (Vite/Storybook/Next) y entrás por el hostname, habilitá el host-check:"
+  info "     Vite/Storybook →  server.allowedHosts: true   (solo en dev)"
+  if command -v qrencode >/dev/null 2>&1 && [ -n "$full" ]; then
+    info ""
+    qrencode -t ANSIUTF8 "$full"
+  fi
+}
+
+cmd_unexpose() {
+  local port="${1:-}"
+  [ -n "$port" ] || die "uso: deck unexpose <puerto>     ('deck expose' sin args lista los que hay)"
+  valid_port "$port" || die "puerto inválido: '$port' (usá 1-65535)"
+  tailscale_ready || die "sin tailscale no puedo tocar los mapeos"
+  if ! exposed_urls | grep -q ":$port\$"; then
+    warn "el puerto $port no figura expuesto ('deck expose' lista los que hay); igual intento bajarlo"
+  fi
+  tailscale serve --https="$port" off >/dev/null 2>&1 \
+    || die "no pude bajar el puerto $port (probá a mano: tailscale serve --https=$port off)"
+  info "✓ localhost:$port ya no está expuesto al tailnet"
+}
+
 sleep_disabled() { pmset -g 2>/dev/null | awk '/SleepDisabled/ { print $2; found=1 } END { if (!found) print 0 }'; }
 
 on_ac() { pmset -g batt 2>/dev/null | head -1 | grep -q 'AC Power'; }
@@ -403,6 +481,17 @@ USO DIARIO (lo único que importa):
                     → cerrás la tapa (¡enchufada!) y seguís desde el celu.
   deck back         "Volví": la Mac vuelve a dormir normalmente.
 
+ABRIR OTRAS APPS LOCALES EN EL CELU (dev servers, dashboards):
+  deck expose <puerto>
+                  Publica localhost:<puerto> en tu tailnet por HTTPS y te da la
+                  URL (+ QR). Ej: arrancás Vite en 5173 y `deck expose 5173` lo
+                  abre desde el celu. Sin puerto, lista lo que hay expuesto.
+                  Ojo: la app la ve cualquier dispositivo de tu tailnet y NO
+                  queda tras el AUTH_TOKEN del panel (la protege solo el tailnet).
+                  Dev servers (Vite/Storybook): poné allowedHosts: true en dev.
+  deck unexpose <puerto>
+                  Baja ese mapeo (es persistente hasta que lo bajes).
+
 SI ALGO ANDA RARO:
   deck status     ¿Server vivo? ¿agente cargado? ¿tailscale? ¿sueño? ¿batería?
   deck log        Ver el log del server en vivo (attaches, kills, errores).
@@ -428,6 +517,8 @@ case "${1:-}" in
   stop)           cmd_stop ;;
   log)            cmd_log ;;
   url)            cmd_url ;;
+  expose)         shift; cmd_expose "$@" ;;
+  unexpose)       shift; cmd_unexpose "$@" ;;
   uninstall)      cmd_uninstall ;;
   cc|ccw|claude)  cmd_launch "$@" ;;
   attach)         shift; cmd_attach "$@" ;;

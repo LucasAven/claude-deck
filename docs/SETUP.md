@@ -74,6 +74,7 @@ alias deck='<ruta-al-repo>/scripts/deck'
 ```
 
 - `deck claude [flags]` — lanza Claude Code en una sesión tmux nombrada según el directorio actual, visible al instante en el teléfono. Los flags se pasan a claude (ej. `deck claude --continue`). Las variantes `deck cc` / `deck ccw` requieren tener esos alias propios definidos.
+- `deck expose <puerto>` / `deck unexpose <puerto>`: abrir en el celu **otra** app local (un dev server, un Storybook), no el panel. Publica `localhost:<puerto>` en el tailnet por HTTPS y te da la URL + QR; `deck expose` sin puerto lista lo expuesto. Ojo: la app queda visible a todo tu tailnet y **sin** el `AUTH_TOKEN` del panel (ver sección 8). Si es un dev server, activá `server.allowedHosts: true` en la config de dev para que ande por el hostname del tailnet.
 - `deck attach [nombre]`: seguir en la Mac una sesión que arrancaste desde el celu (dispatch o worktree crean sesiones tmux planas; el nombre es el mismo que ves como chip de sesión en el panel). Con nombre, attachea directo; sin nombre, lista las vivas y elegís por número. Es un atajo de `tmux ls` + `tmux attach -t <nombre>` (desde otro tmux hace `switch-client`, no anida).
 - `deck away` — al irse: verifica todo de punta a punta y desactiva el sueño. Cerrar la tapa **con la Mac enchufada**.
 - `deck back` — al volver: la Mac vuelve a dormir normalmente.
@@ -107,3 +108,5 @@ El push lleva la sesión tmux como título y un deep-link relativo que el servic
 ## 8. Seguridad
 
 El server escucha únicamente en `127.0.0.1`; la única exposición es vía `tailscale serve` (HTTPS + WireGuard, visible solo para los dispositivos del tailnet propio). El `AUTH_TOKEN` no se comparte ni se sube al repositorio: `.env` queda fuera del control de versiones.
+
+Una excepción deliberada la abre `deck expose <puerto>` (sección 6): publica **otra** app local (`localhost:<puerto>`) en el tailnet vía `tailscale serve`, **fuera** del `AUTH_TOKEN` del panel y de `WORKSPACES_ROOT`. La protege solo el tailnet (WireGuard); no es un endpoint del server ni un proxy, sino un comando que corrés vos a mano. Exponé solo lo que quieras que vea tu tailnet, y bajá cada mapeo con `deck unexpose <puerto>` al terminar (son persistentes).
