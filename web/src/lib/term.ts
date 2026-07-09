@@ -219,11 +219,15 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
       }
       if (ws.readyState !== WebSocket.OPEN) return // CONNECTING: dejarlo terminar
       // El socket dice OPEN pero después de un freeze de iOS puede ser un
-      // zombie, o el buffer de xterm puede haber quedado corrupto (tarea 11:
+      // zombie, o el buffer de xterm puede haber quedado corrupto (tarea 11/33:
       // texto doblado/mezclado que solo se arreglaba abriendo el teclado,
       // porque el cambio de viewport forzaba un resize → repaint de tmux).
-      // Pedir un repaint completo siempre; si no llega NINGÚN output en 2 s,
-      // el socket estaba muerto → reconectar.
+      // doFit re-fittea por si el contenedor cambió de tamaño mientras estábamos
+      // en background; pero con el viewport intacto el resize es al mismo tamaño
+      // y NO dispara redraw (tarea 33). El repaint completo lo garantiza el
+      // server al recibir {t:'refresh'}: hace un "ghost resize" del pty que
+      // fuerza el SIGWINCH (mismo camino que abrir el teclado). Si no llega
+      // NINGÚN output en 2 s, el socket estaba muerto → reconectar.
       doFit(true)
       try {
         ws.send(JSON.stringify({ t: 'refresh' }))

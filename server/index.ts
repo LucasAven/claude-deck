@@ -1898,9 +1898,28 @@ async function handleTerm(ws: WebSocket, url: URL) {
         try { p.resize(cols, rows) } catch { /* pty ya muerto */ }
       }
     } else if (m.t === 'refresh') {
-      // resume desde el celular: forzar repaint (garantiza al menos un 'out',
-      // que el frontend usa como señal de vida del socket)
-      void tmuxRefreshClients(tmuxName)
+      // resume desde el celular: forzar un repaint COMPLETO del pane. El freeze
+      // de iOS deja el buffer local de xterm corrupto (frames perdidos), y el
+      // único camino que lo arreglaba era abrir el teclado: eso achica el
+      // viewport → cambian los rows → resize REAL del pty → SIGWINCH → tmux
+      // re-emite TODO el grid. Un resize al mismo tamaño (lo que hace doFit al
+      // volver, con el viewport intacto) es no-op y no dispara redraw, y
+      // refresh-client solo redibuja lo que tmux cree sucio. Replicamos el
+      // teclado con un "ghost resize" (una fila menos y de vuelta) que invalida
+      // el modelo de pantalla de tmux y fuerza el redraw completo; de paso
+      // garantiza al menos un 'out' (señal de vida para el watchdog del cliente).
+      const c = p.cols
+      const r = p.rows
+      if (typeof c === 'number' && typeof r === 'number' && c >= 20 && r > 5) {
+        try {
+          p.resize(c, r - 1)
+          setTimeout(() => { try { p.resize(c, r) } catch { /* pty ya muerto */ } }, 50)
+        } catch { void tmuxRefreshClients(tmuxName) }
+      } else {
+        // dims degeneradas (pty recién nacido o tamaño inválido): al menos pedir
+        // el redibujo estándar
+        void tmuxRefreshClients(tmuxName)
+      }
     } else if (m.t === 'statusbar') {
       // toggle en vivo del status bar de tmux desde el sheet de ajustes; el
       // estado inicial ya vino por el query param al attachear

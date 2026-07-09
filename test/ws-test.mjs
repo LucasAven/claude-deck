@@ -72,18 +72,31 @@ const c3 = connect('target=claude&session=deck-2&create=1');
 const r3 = await session(c3);
 ok('sesión deck-2 creada vía ?session=&create=1', r3.meta?.created === true && r3.meta?.session === 'deck-2');
 
-// 5b. {t:'refresh'} fuerza un repaint completo de tmux (fix tarea 11: el
-// frontend lo manda al volver de background; un pane idle no emite nada,
-// así que el 'out' que llega solo puede ser el redraw del refresh-client)
-const gotRepaint = await new Promise((resolve) => {
-  const timer = setTimeout(() => resolve(false), 3000);
+// 5b. {t:'refresh'} fuerza un repaint COMPLETO del pane (fix tarea 11/33: el
+// frontend lo manda al volver de background). El bug de la 33: al volver con el
+// viewport intacto, doFit manda un resize al MISMO tamaño (no-op, no dispara
+// redraw), así que el server ahora responde a {t:'refresh'} con un "ghost
+// resize" del pty (una fila menos y de vuelta) que fuerza el SIGWINCH y re-emite
+// TODO el grid. Regresión: dejamos un marcador único en el pane, mandamos primero
+// un resize al mismo tamaño (el no-op que la 33 no cubría) y luego {t:'refresh'};
+// el burst de 'out' debe RE-EMITIR el marcador (redraw de contenido, no solo
+// cursor). Un pane idle no emite nada por sí solo, así que ese 'out' es el redraw.
+const MARK = 'MARCA-REFRESH-33';
+c3.send(JSON.stringify({ t: 'in', d: `printf '${MARK}\\n'\r` }));
+await new Promise((r) => setTimeout(r, 800));
+const repaint = await new Promise((resolve) => {
+  let acc = '';
+  const timer = setTimeout(() => resolve(acc), 1500);
   c3.on('message', (raw) => {
     const m = JSON.parse(String(raw));
-    if (m.t === 'out') { clearTimeout(timer); resolve(true); }
+    if (m.t === 'out') acc += m.d;
   });
+  // resize al MISMO tamaño que fijó session() (100x30): es el no-op de la 33
+  c3.send(JSON.stringify({ t: 'resize', cols: 100, rows: 30 }));
   c3.send(JSON.stringify({ t: 'refresh' }));
 });
-ok('refresh → tmux repinta (llega out en pane idle)', gotRepaint);
+ok('refresh → tmux repinta (llega out en pane idle)', repaint.length > 0);
+ok('refresh tras resize no-op → redraw COMPLETO (re-emite el marcador, fix 33)', repaint.includes(MARK));
 
 // 5c. attach sin create=1 a una sesión inexistente NO la crea (guard
 // anti-resurrección: el retry de un cliente desactualizado no debe revivir

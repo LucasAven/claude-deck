@@ -43,9 +43,24 @@ export function usePolling() {
     }
     document.addEventListener('visibilitychange', onVis)
 
+    // Red de seguridad para la PWA standalone de iOS: al volver del app switcher
+    // tras un freeze largo, `visibilitychange` no siempre dispara (tarea 33,
+    // hipótesis 3), y sin él resume() no corre y la terminal queda corrupta.
+    // `pageshow` (persisted = restaurada del bfcache) sí llega en ese camino.
+    // resume() es idempotente (con OFF/CONNECTING no hace nada dañino), así que
+    // llamarlo de más al restaurar la página es inocuo.
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return // carga normal: connect() ya se encarga
+      if (document.visibilityState !== 'visible') return
+      window.claudeConn?.sendVis()
+      window.claudeConn?.resume()
+    }
+    window.addEventListener('pageshow', onPageShow)
+
     return () => {
       clearInterval(id)
       document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pageshow', onPageShow)
     }
   }, [])
 }
