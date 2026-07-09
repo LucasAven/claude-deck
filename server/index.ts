@@ -1196,7 +1196,7 @@ async function worktreeSessionName(branch: string): Promise<string> {
 
 app.post('/api/worktree', async (c) => {
   const repo = await resolveGitDir(c.req.query('session'))
-  let body: { branch?: unknown; base?: unknown }
+  let body: { branch?: unknown; base?: unknown; hideStatus?: unknown }
   try {
     body = await c.req.json()
   } catch {
@@ -1204,6 +1204,9 @@ app.post('/api/worktree', async (c) => {
   }
   const branch = checkBranchName(typeof body.branch === 'string' ? body.branch.trim() : '', 'nombre de rama')
   const base = checkBranchName(typeof body.base === 'string' ? body.base.trim() : '', 'rama base')
+  // pref del celu (deck-hide-tmux-status): aplicarla al crear deja la sesión sin
+  // la franja verde ya desde otra vía, no solo cuando el panel se attachea (tarea 32)
+  const hideStatus = body.hideStatus === true
 
   // el destino no existe todavía → no se puede realpathear: se realpathea el
   // PADRE (el dir del repo, que sí existe) y se prefix-checkea el join
@@ -1232,6 +1235,8 @@ app.post('/api/worktree', async (c) => {
     const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
     throw new HttpError(500, `worktree creado en ${wtPath}, pero tmux falló: ${msg}`)
   }
+  // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
+  if (hideStatus) await tmuxSetStatus(session, false)
   console.log(`[deck] ${new Date().toISOString()} worktree ${branch} -> ${wtPath} (sesión ${session})`)
   return c.json({ session, path: wtPath, branch })
 })
@@ -1308,7 +1313,7 @@ function shQuote(s: string): string {
   )
 }
 app.post('/api/dispatch', async (c) => {
-  let body: { dir?: unknown; prompt?: unknown; mode?: unknown; model?: unknown; effort?: unknown }
+  let body: { dir?: unknown; prompt?: unknown; mode?: unknown; model?: unknown; effort?: unknown; hideStatus?: unknown }
   try {
     body = await c.req.json()
   } catch {
@@ -1319,6 +1324,10 @@ app.post('/api/dispatch', async (c) => {
   const mode = typeof body.mode === 'string' ? body.mode : ''
   const model = typeof body.model === 'string' ? body.model : ''
   const effort = typeof body.effort === 'string' ? body.effort : ''
+  // pref del celu (deck-hide-tmux-status): sin esto la sesión nace con el status
+  // global (on) y muestra la franja hasta que el panel se attachee mandando el
+  // param; aplicarla al crear la deja consistente ya desde otra vía (tarea 32)
+  const hideStatus = body.hideStatus === true
 
   if (!DISPATCH_MODES.includes(mode)) throw new HttpError(400, 'modo inválido')
   if (!DISPATCH_MODELS.includes(model)) throw new HttpError(400, 'modelo inválido')
@@ -1353,6 +1362,8 @@ app.post('/api/dispatch', async (c) => {
     const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
     throw new HttpError(500, `tmux falló: ${msg}`)
   }
+  // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
+  if (hideStatus) await tmuxSetStatus(session, false)
 
   // el shell recién nacido tarda un toque en estar listo; luego mandamos la
   // línea literal y, con otro respiro, el Enter (mismo patrón que el prototipo)

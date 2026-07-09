@@ -69,7 +69,7 @@ export async function dispatchAgent(
     const res = await api('/api/dispatch', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dir, prompt, mode, model, effort }),
+      body: JSON.stringify({ dir, prompt, mode, model, effort, hideStatus: useDeckStore.getState().hideTmuxStatus }),
     })
     if (!res.ok) {
       let msg = `HTTP ${res.status}`
@@ -115,7 +115,7 @@ export async function createWorktree(branch: string, base: string): Promise<Work
     const res = await api(`/api/worktree${q ? `?${q}` : ''}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ branch, base }),
+      body: JSON.stringify({ branch, base, hideStatus: useDeckStore.getState().hideTmuxStatus }),
     })
     if (!res.ok) {
       let msg = `HTTP ${res.status}`
