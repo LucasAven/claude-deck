@@ -1281,6 +1281,86 @@ ok('host: toggle manda POST {enabled:false} y se apaga',
 ok('host: tap en el fondo cierra el sheet', hostRun.sheetClosed);
 ok('host: chip ignora el click fantasma (regresión tarea 20)', hostRun.chipIgnoresBareClick);
 
+// 17b. modo away + estado CRD (tarea 36): fila "Acceso remoto (CRD)" en el
+// sheet solo si el host la reporta, y switch "Modo away" que POSTea
+// /api/host/away (pmset + kickstart de CRD server-side). Todo mockeado: jamás
+// se toca el pmset real ni el host CRD real.
+const awayRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const posts = [];
+  let mockStatus = {
+    name: 'MacBook Pro de Lucas',
+    battery: { pct: 81, state: 'charging' },
+    ac: true,
+    sleepDisabled: false,
+    crd: 'stopped',
+    uptime: 3600,
+    alert: { enabled: true, threshold: 30 },
+  };
+  window.fetch = (url, opts) => {
+    const u = String(url);
+    if (u.includes('/api/host/away')) {
+      const body = JSON.parse(opts.body);
+      posts.push(body);
+      mockStatus = { ...mockStatus, sleepDisabled: body.away, crd: body.away ? 'running' : mockStatus.crd };
+      return Promise.resolve(new Response(
+        JSON.stringify({ ok: true, sleepDisabled: mockStatus.sleepDisabled, crd: mockStatus.crd }),
+        { status: 200 },
+      ));
+    }
+    if (u.includes('/api/host/status')) {
+      return Promise.resolve(new Response(JSON.stringify(mockStatus), { status: 200 }));
+    }
+    return realFetch(url, opts);
+  };
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  };
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+  const sheet = document.querySelector('#host-sheet');
+  const out = { posts };
+
+  await refreshHost(); await frame();
+  tap(document.querySelector('#host-chip'));
+  await frame();
+  const rowOf = (label) => [...document.querySelectorAll('#host-rows .host-row')]
+    .find((r) => r.querySelector('.host-label').textContent === label);
+  let crdRow = rowOf('Acceso remoto (CRD)');
+  out.crdRowStopped = !!crdRow && crdRow.querySelector('.host-val').textContent === 'Caído'
+    && crdRow.querySelector('.host-val').classList.contains('warn');
+  out.awaySub = document.querySelector('#host-away .host-alert-sub').textContent.includes('CRD');
+  out.awayOff = !document.querySelector('#host-away-toggle').classList.contains('on');
+
+  // switch → POST {away:true}; la respuesta prende el switch y revive CRD
+  tap(document.querySelector('#host-away-toggle'));
+  await new Promise((r) => setTimeout(r, 150));
+  out.awayOn = document.querySelector('#host-away-toggle').classList.contains('on');
+  out.crdRowRunning = (() => {
+    const r = rowOf('Acceso remoto (CRD)');
+    return !!r && r.querySelector('.host-val').textContent === 'Corriendo'
+      && r.querySelector('.host-val').classList.contains('good');
+  })();
+
+  // sin CRD instalado: la fila desaparece y el sub queda genérico
+  mockStatus = { ...mockStatus, crd: 'absent' };
+  await refreshHost(); await frame();
+  out.absentHidesRow = !rowOf('Acceso remoto (CRD)')
+    && !document.querySelector('#host-away .host-alert-sub').textContent.includes('CRD');
+
+  sheet.click();
+  await frame();
+  window.fetch = realFetch;
+  await refreshHost(); // repintar con el estado real de la Mac
+  return out;
+});
+ok('away: fila CRD "Caído" (warn) con el host parado', awayRun.crdRowStopped);
+ok('away: sub menciona CRD y el switch arranca apagado', awayRun.awaySub && awayRun.awayOff);
+ok('away: el switch POSTea {away:true} y queda prendido',
+  awayRun.awayOn && awayRun.posts.some((p) => p.away === true));
+ok('away: la respuesta revive CRD → fila "Corriendo" (good)', awayRun.crdRowRunning);
+ok('away: crd absent oculta la fila y deja el sub genérico', awayRun.absentHidesRow);
+
 // 18. worktree en un tap (tarea 5): long-press en el + abre el menú CREAR
 // (el tap corto sigue creando sesión — acá NO se tapea corto para no crear una
 // real); "Nuevo worktree…" abre el sheet. /api/git/branches mockeado para

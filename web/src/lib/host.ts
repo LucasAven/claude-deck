@@ -98,6 +98,37 @@ export function toggleHostAlert() {
   if (h) postHostAlert({ enabled: !h.alert.enabled })
 }
 
+// Modo away desde la PWA (tarea 36): POST /api/host/away = lo que hace
+// `deck away` con pmset (sudoers acotado) + kickstart del host CRD si estaba
+// muerto. El switch refleja sleepDisabled, la misma palanca que deck away/back.
+export async function toggleAway() {
+  const h = useDeckStore.getState().hostStatus
+  if (!h) return
+  const away = !h.sleepDisabled
+  try {
+    const res = await api('/api/host/away', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ away }),
+    })
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`
+      try {
+        msg = (await res.json()).error || msg
+      } catch {
+        /* sin body json */
+      }
+      alert(`No se pudo cambiar el modo away: ${msg}`)
+      return
+    }
+    const data = await res.json()
+    const cur = useDeckStore.getState().hostStatus
+    if (cur) useDeckStore.setState({ hostStatus: { ...cur, sleepDisabled: data.sleepDisabled, crd: data.crd } })
+  } catch (e) {
+    if (String((e as Error).message) !== '401') alert('No se pudo cambiar el modo away (error de red)')
+  }
+}
+
 // umbral configurable con el prompt() low-fi de siempre (rename, snippets)
 export function editHostThreshold() {
   const h = useDeckStore.getState().hostStatus

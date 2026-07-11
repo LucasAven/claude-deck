@@ -55,6 +55,9 @@ export interface HostStatus {
   battery: HostBattery | null
   ac: boolean | null
   sleepDisabled: boolean | null
+  // host de Chrome Remote Desktop (tarea 36): 'absent' = no instalado (la fila
+  // y el kickstart del modo away no aplican). Optional: mocks viejos no lo traen.
+  crd?: 'running' | 'stopped' | 'absent'
   uptime: number
   alert: HostAlert
   // pushes sin entrega desde el server (tarea 26): web push es la única vía de

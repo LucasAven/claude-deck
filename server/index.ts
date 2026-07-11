@@ -1737,15 +1737,16 @@ function writeHostAlert(alert: { enabled: boolean; threshold: number }): void {
 }
 
 app.get('/api/host/status', async (c) => {
-  const [name, { battery, ac }, sleepDisabled] = await Promise.all([
+  const [name, { battery, ac }, sleepDisabled, crd] = await Promise.all([
     hostName(),
     readHostBattery(),
     readSleepDisabled(),
+    readCrdState(),
   ])
   // pushMissed viaja acá (y no en un endpoint propio) porque este status ya se
   // pollea cada 8 s + visibilitychange: el aviso de suscripción caída sale gratis
   return c.json({
-    name, battery, ac, sleepDisabled, uptime: Math.round(os.uptime()), alert: readHostAlert(),
+    name, battery, ac, sleepDisabled, crd, uptime: Math.round(os.uptime()), alert: readHostAlert(),
     pushMissed: pushMissed.count > 0 ? pushMissed : null,
   })
 })
@@ -1802,6 +1803,80 @@ setInterval(async () => {
     }
   } catch { /* el watcher jamás tira el server */ }
 }, BATT_WATCH_MS)
+
+// ---------------------------------------------------------------------------
+// CRD (tarea 36): mantener usable el acceso remoto de Chrome Remote Desktop.
+// El host de CRD corre como LaunchAgent (org.chromium.chromoting) con RunAtLoad
+// pero SIN KeepAlive: si el proceso muere (auto-update del host, crash), queda
+// caído hasta el próximo login y la Mac desaparece de CRD justo cuando estás
+// lejos. Medido 2026-07-10: el update de anoche lo dejó muerto; un `launchctl
+// kickstart` lo revive. Dos piezas: un watchdog que lo revive solo (como el de
+// batería: corre sin ningún cliente mirando) y el modo away disparable desde la
+// PWA (POST /api/host/away = lo que hace `deck away` con pmset, + el kickstart).
+// Seguridad: subcomandos fijos (label hardcodeado, args de pmset fijos), sin
+// shell, igual que el resto del server. DECK_CRD_* son overrides SOLO para tests.
+// ---------------------------------------------------------------------------
+const CRD_LABEL = 'org.chromium.chromoting'
+// el instalador de CRD deja este marker cuando el acceso remoto está habilitado;
+// sin él no hay nada que mantener vivo (CRD no instalado o deshabilitado)
+const CRD_ENABLED_FILE = process.env.DECK_CRD_ENABLED_FILE
+  || '/Library/PrivilegedHelperTools/org.chromium.chromoting.me2me_enabled'
+
+type CrdState = 'running' | 'stopped' | 'absent'
+
+async function readCrdState(): Promise<CrdState> {
+  if (!fs.existsSync(CRD_ENABLED_FILE)) return 'absent'
+  try {
+    const out = (await execFileP('launchctl', ['print', `gui/${os.userInfo().uid}/${CRD_LABEL}`])).stdout
+    return /^\s*state = running/m.test(out) ? 'running' : 'stopped'
+  } catch {
+    return 'stopped' // print falla con el agent descargado: instalado pero no corriendo
+  }
+}
+
+// kickstart sin -k: no-op si ya corre, levanta si está muerto (idempotente)
+async function kickstartCrd(): Promise<void> {
+  await execFileP('launchctl', ['kickstart', `gui/${os.userInfo().uid}/${CRD_LABEL}`])
+}
+
+const CRD_WATCH_MS = Math.max(1000, Number(process.env.DECK_CRD_WATCH_MS) || 60_000)
+
+setInterval(async () => {
+  try {
+    if ((await readCrdState()) !== 'stopped') return
+    await kickstartCrd()
+    console.log(`[deck] ${new Date().toISOString()} host CRD muerto → kickstart (${await readCrdState()})`)
+  } catch { /* el watchdog jamás tira el server */ }
+}, CRD_WATCH_MS)
+
+// Modo away desde la PWA: away=true deja la Mac lista para acceso remoto (no
+// dormir + host CRD vivo), away=false restaura el sueño normal (deck back).
+// pmset exige la regla sudoers acotada que instala `deck install`; si falta,
+// error claro (el kickstart de CRD se intenta ANTES para que al menos eso quede).
+app.post('/api/host/away', async (c) => {
+  let body: { away?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  if (typeof body.away !== 'boolean') throw new HttpError(400, 'away debe ser booleano')
+  let crd = await readCrdState()
+  if (body.away && crd === 'stopped') {
+    try {
+      await kickstartCrd()
+      crd = await readCrdState()
+    } catch { /* estado queda como esté: lo reporta la respuesta */ }
+  }
+  try {
+    await execFileP('sudo', ['-n', '/usr/bin/pmset', '-a', 'disablesleep', body.away ? '1' : '0'])
+  } catch {
+    throw new HttpError(500, 'pmset necesita sudo sin password: corré `scripts/deck install` en la Mac (regla sudoers)')
+  }
+  const sleepDisabled = await readSleepDisabled()
+  if (sleepDisabled !== body.away) throw new HttpError(500, 'pmset corrió pero SleepDisabled no quedó aplicado')
+  return c.json({ ok: true, sleepDisabled, crd })
+})
 
 // Estáticos (con auth, servidos desde PUBLIC_DIR: web/dist)
 const MIME: Record<string, string> = {

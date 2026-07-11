@@ -1,6 +1,6 @@
 import { useDeckStore } from '../../store'
 import { useTap } from '../../hooks/useTap'
-import { BATT_STATES, fmtUptime, closeHostSheet, toggleHostAlert, editHostThreshold } from '../../lib/host'
+import { BATT_STATES, fmtUptime, closeHostSheet, toggleHostAlert, editHostThreshold, toggleAway } from '../../lib/host'
 
 // iconos de las filas del sheet (markup 100% estático, como FT_ICONS)
 const svg = (body: React.ReactNode) => (
@@ -22,6 +22,13 @@ const HOST_ICONS = {
     <>
       <circle cx="12" cy="12" r="8.5" />
       <path d="M12 7.5V12l3 2" />
+    </>,
+  ),
+  crd: svg(
+    <>
+      <rect x="3" y="4.5" width="18" height="12" rx="1.8" />
+      <path d="M9 20h6M12 16.5V20" />
+      <path d="M8.5 10.5l2.5 2.5 4.5-4.5" />
     </>,
   ),
 }
@@ -47,6 +54,7 @@ export function HostSheet() {
   // y el ✕ del banner van por click directo (así los cablea el vanilla también)
   const toggleTap = useTap(() => toggleHostAlert())
   const thresholdTap = useTap(() => editHostThreshold())
+  const awayTap = useTap(() => toggleAway())
 
   const b = h?.battery
 
@@ -84,9 +92,34 @@ export function HostSheet() {
                 valueCls={h.sleepDisabled ? 'good' : ''}
               />
               <HostRow icon="uptime" label="Uptime" value={fmtUptime(h.uptime)} />
+              {h.crd && h.crd !== 'absent' && (
+                <HostRow
+                  icon="crd"
+                  label="Acceso remoto (CRD)"
+                  value={h.crd === 'running' ? 'Corriendo' : 'Caído'}
+                  valueCls={h.crd === 'running' ? 'good' : 'warn'}
+                />
+              )}
             </>
           )}
         </div>
+        {h && (
+          <div className="host-alert" id="host-away">
+            <div className="host-alert-info">
+              <div className="host-alert-label">Modo away</div>
+              <div className="host-alert-sub">
+                {h.crd && h.crd !== 'absent' ? 'No dormir + CRD listo (deck away)' : 'La Mac no duerme (deck away)'}
+              </div>
+            </div>
+            <button
+              id="host-away-toggle"
+              className={'switch' + (h.sleepDisabled ? ' on' : '')}
+              role="switch"
+              title="Modo away"
+              {...awayTap}
+            />
+          </div>
+        )}
         <div className="host-alert">
           <div className="host-alert-info">
             <div className="host-alert-label">

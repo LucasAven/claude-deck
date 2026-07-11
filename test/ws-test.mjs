@@ -388,6 +388,23 @@ try {
   else fs.rmSync(ALERT_FILE, { force: true });
 }
 
+// 9g2. crd en host/status + POST /api/host/away (tarea 36). Contra el server
+// REAL solo validación: un POST válido tocaría el pmset de la Mac de verdad
+// (sudoers) y kickstartearía el CRD real; el ciclo completo está cubierto por
+// el test aislado con pmset/sudo/launchctl falsos (sesión de la tarea 36).
+{
+  const hs = await (await fetch(`${HTTP}/api/host/status`, { headers: { 'x-deck-token': TOKEN } })).json();
+  ok("host/status crd ∈ {running, stopped, absent}", ['running', 'stopped', 'absent'].includes(hs.crd));
+  const awayPost = (body, auth = true) => fetch(`${HTTP}/api/host/away`, {
+    method: 'POST',
+    headers: { ...(auth ? { 'x-deck-token': TOKEN } : {}), 'content-type': 'application/json' },
+    body,
+  });
+  ok('host/away sin token → 401', (await awayPost(JSON.stringify({ away: true }), false)).status === 401);
+  ok('host/away body no-JSON → 400', (await awayPost('nope')).status === 400);
+  ok('host/away away no-booleano → 400', (await awayPost(JSON.stringify({ away: 'si' }))).status === 400);
+}
+
 // 9h. GET /api/git/branches + POST /api/worktree (tarea 5): worktree + rama +
 // sesión tmux en un tap. Repo scratch DENTRO de WORKSPACES_ROOT (el hermano
 // ../<repo>-<seg> tiene que caer dentro del perímetro) con sesión tmux propia
