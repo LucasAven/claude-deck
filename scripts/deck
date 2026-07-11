@@ -240,9 +240,14 @@ EOF
 }
 
 install_sudoers() {
-  local tmp
+  local tmp u
   tmp="$(mktemp)"
-  printf '%s ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0\n' "$USER" > "$tmp"
+  # OJO: bajo `sudo deck install`, $USER/id -un son root y la regla quedaría
+  # para root (inútil: root no necesita NOPASSWD y el usuario real queda sin
+  # regla; pasó de verdad, tarea 36). SUDO_USER recupera al usuario que invocó.
+  u="${SUDO_USER:-$(id -un)}"
+  [ "$u" = "root" ] && die "no corras deck install como root de verdad: la regla sudoers debe ser para tu usuario"
+  printf '%s ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0\n' "$u" > "$tmp"
   visudo -cf "$tmp" >/dev/null || { rm -f "$tmp"; die "regla sudoers inválida (bug del script)"; }
   if sudo -n true 2>/dev/null || [ -t 0 ]; then
     sudo install -o root -g wheel -m 0440 "$tmp" "$SUDOERS_FILE"
