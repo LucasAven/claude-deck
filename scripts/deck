@@ -366,12 +366,13 @@ cmd_log() { touch "$LOG"; tail -n 50 -f "$LOG"; }
 
 # nombre de sesión tmux derivado del directorio actual, ajustado a lo que el
 # server acepta (SESSION_RE: [A-Za-z0-9_-]{1,32}, sufijo -shell reservado)
-session_name_for_cwd() {
+session_name_for_dir() { # $1 = directorio; deriva un nombre de sesión válido
   local n
-  n="$(printf '%s' "$(basename "$PWD")" | sed 's/[^A-Za-z0-9_-]/-/g' | cut -c1-32)"
+  n="$(printf '%s' "$(basename "$1")" | sed 's/[^A-Za-z0-9_-]/-/g' | cut -c1-32)"
   case "$n" in *-shell) n="${n%-shell}-s" ;; esac
   printf '%s' "${n:-deck}"
 }
+session_name_for_cwd() { session_name_for_dir "$PWD"; }
 
 cmd_launch() { # $1 = alias/comando a tipear en el pane (cc | ccw), resto = flags
   # dentro de tmux no se anida un attach: ahí el comando se corre directo
@@ -477,6 +478,224 @@ ccw() { __deck_claude ccw "$@"; }
 EOF
 }
 
+# --- adoptar una sesión huérfana (escalón 2 del spike, tarea 37) -------------
+# Una sesión huérfana es un `claude` interactivo vivo FUERA de tmux (típico: la
+# terminal integrada de VS Code): el panel no la ve porque el deck sigue
+# sesiones tmux. `deck adopt` la rescata suave: espera a que termine el turno en
+# curso, cierra limpio el huérfano y relanza `claude --continue` dentro de una
+# sesión tmux del mismo cwd. Se preserva la conversación entera; solo se pierde
+# el turno en vuelo. No se reparenta el proceso vivo: en macOS es imposible
+# (ver docs/SPIKE-adopt.md; glosario en CONTEXT.md: "sesión huérfana", "adoptar").
+DECK_ADOPT_PROC="${DECK_ADOPT_PROC:-claude}"   # comm a cazar; override solo para tests
+DECK_ADOPT_DEBOUNCE="${DECK_ADOPT_DEBOUNCE:-2}" # seg sin escribir el .jsonl para creer "idle"
+
+# ttys ocupadas por panes de tmux, normalizadas a ttysNNN (ps no antepone /dev/)
+_adopt_tmux_ttys() { tmux list-panes -a -F '#{pane_tty}' 2>/dev/null | sed 's#^/dev/##'; }
+
+# cwd (directorio de trabajo) de un pid
+_adopt_pid_cwd() { lsof -a -d cwd -p "$1" -Fn 2>/dev/null | sed -n 's/^n//p' | head -1; }
+
+# cuenta del huérfano: "work" si su entorno trae CLAUDE_CONFIG_DIR=...claude-work
+# (el alias ccw), si no "" (cuenta por defecto). ps -E vuelca el env de procesos
+# propios en macOS.
+_adopt_pid_account() {
+  ps -wwwE -o command= -p "$1" 2>/dev/null | tr ' ' '\n' \
+    | grep -q 'CLAUDE_CONFIG_DIR=[^ ]*claude-work' && printf 'work'
+}
+
+_adopt_acct_label() { case "$1" in work) printf 'ccw' ;; *) printf 'cc' ;; esac; }
+
+# raíz de transcripts según la cuenta ("" = default, "work" = ~/.claude-work)
+_adopt_projects_root() {
+  case "$1" in
+    work) printf '%s/.claude-work/projects' "$HOME" ;;
+    *)    printf '%s/.claude/projects' "$HOME" ;;
+  esac
+}
+
+# slug de proyecto de Claude Code: el cwd con '/' y '.' a '-' (verificado mirando
+# ~/.claude*/projects). El '.cwd' del propio .jsonl confirma el match, así que el
+# slug es solo el camino rápido, no una apuesta.
+_adopt_slug() { printf '%s' "$1" | sed 's#[/.]#-#g'; }
+
+# .jsonl más reciente del cwd/cuenta cuyo campo .cwd confirma el directorio
+_adopt_transcript() { # $1=cwd $2=account → stdout: ruta del .jsonl (o falla)
+  local dir f
+  dir="$(_adopt_projects_root "$2")/$(_adopt_slug "$1")"
+  [ -d "$dir" ] || return 1
+  for f in $(ls -1t "$dir"/*.jsonl 2>/dev/null); do
+    grep -qF "\"cwd\":\"$1\"" "$f" 2>/dev/null && { printf '%s' "$f"; return 0; }
+  done
+  return 1
+}
+
+# estado de un huérfano leyendo su transcript: "idle <edad>" | working | unknown.
+# Señal FIABLE: el último evento portador de turno REAL del .jsonl. assistant con
+# stop_reason distinto de tool_use (y no nulo) = turno terminado = idle; un user,
+# o un assistant tool_use/parcial = working. Filtramos isMeta/isSidechain: los
+# slash commands locales (/rename, etc.) y el modo away dejan eventos de cola
+# (custom-title, system, y un user con isMeta:true) DESPUES del último turno real;
+# sin filtrarlos, ese user meta se leería como el último portador de turno y daría
+# un falso "working" sobre una sesión idle. Además exigimos que el archivo no se
+# haya tocado en los últimos DECK_ADOPT_DEBOUNCE seg (si sigue creciendo hay
+# streaming = working), lo que de paso cubre la carrera de leer una última línea
+# a medio escribir. Se descartó la heurística de proceso (CPU/hijos): da
+# falso-idle cuando claude espera la respuesta del modelo por red (sin CPU ni
+# subprocesos pero trabajando), justo el caso en que adoptar pierde el turno.
+_adopt_state() { # $1=cwd $2=account
+  local f verdict now m age
+  [ -n "$1" ] || { printf 'unknown'; return; }
+  f="$(_adopt_transcript "$1" "$2")" || { printf 'unknown'; return; }
+  verdict="$(jq -rc 'select((.type=="assistant" or .type=="user") and (.isMeta != true) and (.isSidechain != true))
+      | if .type=="user" then "working"
+        elif (.message.stop_reason=="tool_use" or .message.stop_reason==null) then "working"
+        else "idle" end' "$f" 2>/dev/null | tail -1)"
+  [ -n "$verdict" ] || { printf 'unknown'; return; }
+  now="$(date +%s)"; m="$(stat -f %m "$f" 2>/dev/null || echo "$now")"; age=$((now - m))
+  if [ "$verdict" = idle ] && [ "$age" -ge "$DECK_ADOPT_DEBOUNCE" ]; then
+    printf 'idle %ss' "$age"
+  else
+    printf 'working'
+  fi
+}
+
+# huérfanos, "pid|tty|account|cwd" por línea. Huérfano = comm claude, con tty
+# real (no '??' = no daemon/host), cuya tty NO está en ningún pane de tmux.
+_adopt_orphans() {
+  local tmux_ttys p tty
+  tmux_ttys="$(_adopt_tmux_ttys)"
+  for p in $(pgrep -x "$DECK_ADOPT_PROC" 2>/dev/null); do
+    tty="$(ps -o tty= -p "$p" 2>/dev/null | tr -d ' ')"
+    case "$tty" in ''|'?'|'??') continue ;; esac
+    printf '%s\n' "$tmux_ttys" | grep -qxF "$tty" && continue
+    printf '%s|%s|%s|%s\n' "$p" "$tty" "$(_adopt_pid_account "$p")" "$(_adopt_pid_cwd "$p")"
+  done
+}
+
+_adopt_row() { # $1=n $2=pid $3=account $4=cwd $5=state
+  printf '  %d) %s (%s)  pid %s  [%s]\n' "$1" "${4:-<cwd desconocido>}" "$(_adopt_acct_label "$3")" "$2" "$5"
+}
+
+# polea hasta idle mostrando progreso; Ctrl-C aborta (el trap de cmd_adopt limpia)
+_adopt_wait_idle() { # $1=cwd $2=account
+  local st
+  while :; do
+    st="$(_adopt_state "$1" "$2")"
+    case "$st" in
+      idle*)   printf '\n'; info "✓ el turno terminó (idle)"; return 0 ;;
+      unknown) printf '\n'; warn "perdí la señal del transcript; sigo esperando el idle..." ;;
+    esac
+    printf '.'
+    sleep "$DECK_ADOPT_DEBOUNCE"
+  done
+}
+
+# nombre de sesión tmux LIBRE para el cwd. Si el base ya existe (p. ej. ya
+# adoptaste otro claude del mismo repo, o tenés una sesión viva ahí), prueba
+# base-2, base-3, etc. Nunca reusa una sesión existente: cada huérfano adoptado
+# es un claude aparte y tipearlo en la sesión de otro lo rompería. Respeta el
+# SESSION_RE del server ({1,32}): recorta el base para que quepa el sufijo.
+_adopt_free_name() { # $1 = cwd → stdout: nombre de sesión libre
+  local base cand suf n=2
+  base="$(session_name_for_dir "$1")"
+  tmux has-session -t "=$base" 2>/dev/null || { printf '%s' "$base"; return; }
+  while :; do
+    suf="-$n"
+    cand="$(printf '%s' "$base" | cut -c1-$((32 - ${#suf})))$suf"
+    tmux has-session -t "=$cand" 2>/dev/null || { printf '%s' "$cand"; return; }
+    n=$((n + 1))
+  done
+}
+
+# relanza claude --continue en una sesión tmux del cwd (fire-and-forget: no
+# attachea, queda como chip en el celu). Comando crudo (no cc/ccw): no depende de
+# que el usuario tenga esas funciones y adentro de tmux claude directo ya es
+# visible en el panel.
+_adopt_relaunch() { # $1=cwd $2=account
+  local name cmd
+  name="$(_adopt_free_name "$1")"
+  if [ "$2" = work ]; then
+    cmd="CLAUDE_CONFIG_DIR=$HOME/.claude-work claude --continue"
+  else
+    cmd="claude --continue"
+  fi
+  tmux new-session -d -s "$name" -c "$1"
+  tmux send-keys -t "=$name:" "$cmd" Enter
+  info "✓ adoptada: sesión tmux '$name' corriendo '$cmd'"
+  info "  seguila del celu (ya aparece como chip) o en la Mac con: deck attach $name"
+}
+
+cmd_adopt() {
+  command -v lsof >/dev/null 2>&1 || die "necesito lsof para ver el cwd de los huérfanos"
+  local orphans; orphans="$(_adopt_orphans)"
+  if [ -z "$orphans" ]; then
+    info "no hay sesiones huérfanas: todo claude interactivo vivo ya está en tmux (o no hay ninguno)."
+    info "para no crear huérfanos, arrancá con \`deck cc\`/\`deck ccw\` o instalá \`deck shellinit\`."
+    return 0
+  fi
+
+  local pids=() accts=() cwds=() states=() i=0 p tty acct cwd
+  while IFS='|' read -r p tty acct cwd; do
+    [ -n "$p" ] || continue
+    i=$((i + 1))
+    pids+=("$p"); accts+=("$acct"); cwds+=("$cwd")
+    states+=("$(_adopt_state "$cwd" "$acct")")
+  done <<< "$orphans"
+
+  local sel
+  if [ "$i" = 1 ]; then
+    sel=0
+    info "sesión huérfana encontrada:"
+    _adopt_row 1 "${pids[0]}" "${accts[0]}" "${cwds[0]}" "${states[0]}"
+    [ -t 0 ] || die "sin terminal interactiva no confirmo la adopción (corré \`deck adopt\` en tu terminal)"
+    local yn; printf '¿adoptar esta sesión? [s/N] '; read -r yn || die "cancelado"
+    case "$yn" in s|S|si|Si|SI|y|Y) ;; *) info "cancelado, no toqué nada."; return 0 ;; esac
+  else
+    info "sesiones huérfanas (claude interactivo fuera de tmux):"
+    local k
+    for k in $(seq 0 $((i - 1))); do
+      _adopt_row $((k + 1)) "${pids[$k]}" "${accts[$k]}" "${cwds[$k]}" "${states[$k]}"
+    done
+    [ -t 0 ] || die "sin terminal interactiva no hay menú (corré \`deck adopt\` en tu terminal)"
+    local pick; printf 'elegí (número, o Enter para cancelar): '; read -r pick || die "cancelado"
+    [ -n "$pick" ] || { info "cancelado."; return 0; }
+    printf '%s' "$pick" | grep -Eq '^[0-9]+$' && [ "$pick" -ge 1 ] && [ "$pick" -le "$i" ] \
+      || die "elección inválida: '$pick'"
+    sel=$((pick - 1))
+  fi
+
+  local pid="${pids[$sel]}" account="${accts[$sel]}" cwddir="${cwds[$sel]}" state="${states[$sel]}"
+  [ -n "$cwddir" ] || die "no pude resolver el cwd del pid $pid (¿lsof sin permiso?): no adopto a ciegas"
+
+  # Ctrl-C durante la espera aborta sin haber tocado nada todavía
+  trap 'printf "\n"; info "cancelado (no se tocó ninguna sesión)."; exit 130' INT
+
+  case "$state" in
+    idle*) : ;;
+    working)
+      info "la sesión está trabajando: espero a que termine el turno (Ctrl-C para cancelar)..."
+      _adopt_wait_idle "$cwddir" "$account" ;;
+    *)
+      warn "no pude leer el estado (idle/working) de esta sesión desde su transcript."
+      local yn2; printf '¿adoptar igual? PUEDE perder el turno en curso [s/N] '
+      read -r yn2 || die "cancelado"
+      case "$yn2" in s|S|si|Si|SI|y|Y) ;; *) info "cancelado."; return 0 ;; esac ;;
+  esac
+
+  trap - INT
+
+  # cerrar limpio el huérfano ANTES de relanzar: nunca dos claude sobre el mismo history
+  info "cerrando el huérfano (pid $pid) limpio..."
+  kill -TERM "$pid" 2>/dev/null || true
+  local g
+  for g in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+  kill -0 "$pid" 2>/dev/null \
+    && die "el huérfano (pid $pid) no cerró tras SIGTERM; no relanzo para no duplicar sesión: cerralo a mano y reintentá"
+
+  _adopt_relaunch "$cwddir" "$account"
+}
+# --- fin adoptar -------------------------------------------------------------
+
 cmd_uninstall() {
   pm_sleep 0 2>/dev/null || true
   launchctl bootout "$GUI/$LABEL" 2>/dev/null || true
@@ -523,6 +742,15 @@ USO DIARIO (lo único que importa):
                     sin nombre, lista las vivas y elegís. El nombre es el mismo
                     que ves como chip de sesión en el panel. Adentro de otro tmux
                     cambia de sesión en vez de anidar (switch-client).
+  deck adopt        Rescata una sesión huérfana: un claude interactivo que quedó
+                    fuera de tmux (p. ej. arrancado a secas en la terminal de VS
+                    Code) y por eso el panel no ve. Lista los huérfanos con su
+                    cwd y estado; con uno solo confirma sí/no (nunca mata sin
+                    confirmar). Si está trabajando espera a que termine el turno
+                    (Ctrl-C cancela), lo cierra limpio y relanza claude
+                    --continue en una sesión tmux del mismo directorio: se
+                    conserva la conversación entera, solo se pierde el turno en
+                    vuelo. Mejor no crear huérfanos: mirá deck shellinit.
   deck away         "Me voy": chequea que todo ande y deja la Mac despierta.
                     Cerrás la tapa (¡enchufada!) y seguís desde el celu.
   deck back         "Volví": la Mac vuelve a dormir normalmente.
@@ -576,6 +804,7 @@ case "${1:-}" in
   uninstall)      cmd_uninstall ;;
   cc|ccw|claude)  cmd_launch "$@" ;;
   attach)         shift; cmd_attach "$@" ;;
+  adopt)          cmd_adopt ;;
   shellinit)      cmd_shellinit ;;
   help|--help|-h) usage ;;
   *)              usage; exit 1 ;;
