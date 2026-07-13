@@ -32,3 +32,15 @@ Postura de exposición donde la única frontera es la membresía del tailnet
 **Exponer**:
 Publicar un puerto local de la Mac en el tailnet (`deck expose <puerto>`).
 _Avoid_: abrir el puerto (sugiere router/internet, que jamás)
+
+**Sesión huérfana**:
+Un Claude Code vivo que corre fuera de tmux (p. ej. lanzado con `claude` a secas
+en una terminal). Invisible para el panel: no es una sesión hasta que se adopta.
+_Avoid_: sesión perdida, sesión rota (está sana, solo que el panel no la ve)
+
+**Adoptar**:
+Llevar una sesión huérfana adentro de una sesión tmux para que el panel pueda
+seguirla, sin perder la conversación. Dos grados: adopción real (mover el proceso
+vivo) y rescate suave (relanzarla continuando la conversación, esperando a que
+termine el turno en curso).
+_Avoid_: migrar, resucitar

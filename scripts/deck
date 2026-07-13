@@ -436,6 +436,47 @@ cmd_attach() { # $1 = nombre de sesión tmux (opcional); sin nombre → menú
   exec tmux "$verb" -t "=$name"
 }
 
+# escalón 3 del spike de adopción (tarea 37): que `cc`/`ccw` NUNCA queden
+# huérfanos de tmux. Imprime funciones de shell para sourcear con
+#   eval "$(deck shellinit)"
+# en el ~/.zshrc (reemplazan a los aliases `cc`/`ccw`). La lógica vive acá, en
+# el repo, así el zshrc solo la sourcea y los clonadores la heredan. La función
+# corre claude directo cuando NO tiene sentido envolver (ya adentro de tmux, uso
+# no interactivo por pipe/script, o `-p`/`--print`), y si no delega a `deck
+# cc`/`deck ccw`, que crean/attachean la sesión tmux del cwd. Sin recursión: el
+# `deck cc` tipea `cc` en el pane, que ya está en tmux, cae a claude directo.
+cmd_shellinit() {
+  # ruta absoluta del propio deck: el `deck` del usuario suele ser un alias (no
+  # está en PATH), así que la función no puede usar `command deck`.
+  printf '# claude-deck: cc/ccw siempre adentro de tmux (tarea 37). Generado por `deck shellinit`.\n'
+  printf '__DECK_BIN=%q\n' "$REPO/scripts/deck"
+  cat <<'EOF'
+__deck_is_print() {
+  local a
+  for a in "$@"; do
+    case "$a" in -p|--print) return 0 ;; esac
+  done
+  return 1
+}
+__deck_claude() { # $1 = perfil (cc|ccw), resto = flags de claude
+  local prof="$1"; shift
+  if [ -n "${TMUX:-}" ] || [ ! -t 0 ] || [ ! -t 1 ] || __deck_is_print "$@"; then
+    # no tiene sentido envolver: claude directo, respetando la cuenta del perfil
+    if [ "$prof" = ccw ]; then
+      CLAUDE_CONFIG_DIR="$HOME/.claude-work" command claude "$@"
+    else
+      command claude "$@"
+    fi
+  else
+    # interactivo y fuera de tmux: que nazca adentro de tmux (visible en el celu)
+    "$__DECK_BIN" "$prof" "$@"
+  fi
+}
+cc()  { __deck_claude cc  "$@"; }
+ccw() { __deck_claude ccw "$@"; }
+EOF
+}
+
 cmd_uninstall() {
   pm_sleep 0 2>/dev/null || true
   launchctl bootout "$GUI/$LABEL" 2>/dev/null || true
@@ -483,8 +524,16 @@ USO DIARIO (lo único que importa):
                     que ves como chip de sesión en el panel. Adentro de otro tmux
                     cambia de sesión en vez de anidar (switch-client).
   deck away         "Me voy": chequea que todo ande y deja la Mac despierta.
-                    → cerrás la tapa (¡enchufada!) y seguís desde el celu.
+                    Cerrás la tapa (¡enchufada!) y seguís desde el celu.
   deck back         "Volví": la Mac vuelve a dormir normalmente.
+
+  deck shellinit    Imprime funciones cc/ccw que SIEMPRE arrancan en tmux (para
+                    seguirlas del celu sin que queden huérfanas). Sourcealo una
+                    vez en tu ~/.zshrc, reemplazando los aliases cc/ccw:
+                        eval "$(deck shellinit)"
+                    Adentro de tmux, en pipes/scripts o con -p/--print corre
+                    claude directo; interactivo y fuera de tmux, lo mete en una
+                    sesión tmux del directorio actual.
 
 ABRIR OTRAS APPS LOCALES EN EL CELU (dev servers, dashboards):
   deck expose <puerto>
@@ -527,6 +576,7 @@ case "${1:-}" in
   uninstall)      cmd_uninstall ;;
   cc|ccw|claude)  cmd_launch "$@" ;;
   attach)         shift; cmd_attach "$@" ;;
+  shellinit)      cmd_shellinit ;;
   help|--help|-h) usage ;;
   *)              usage; exit 1 ;;
 esac

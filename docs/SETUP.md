@@ -74,6 +74,18 @@ alias deck='<ruta-al-repo>/scripts/deck'
 ```
 
 - `deck claude [flags]` — lanza Claude Code en una sesión tmux nombrada según el directorio actual, visible al instante en el teléfono. Los flags se pasan a claude (ej. `deck claude --continue`). Las variantes `deck cc` / `deck ccw` requieren tener esos alias propios definidos.
+- `deck shellinit`: para que tus `cc`/`ccw` **nunca queden fuera de tmux** (una sesión de Claude fuera de tmux no se puede seguir desde el celu). Agregá una línea a tu `~/.zshrc`, reemplazando los aliases `cc`/`ccw`:
+  ```bash
+  eval "$(deck shellinit)"
+  ```
+  Convierte `cc`/`ccw` en funciones: interactivo y fuera de tmux, la sesión nace en tmux (la ves de una en el celu); ya adentro de tmux, en pipes/scripts o con `-p`/`--print`, corren claude directo sin envolver. Preservan la cuenta de cada alias (`ccw` = `CLAUDE_CONFIG_DIR=~/.claude-work`). Para volver atrás, comentá el `eval` y devolvé los aliases.
+  - **Atajo opcional de VS Code** (para quien clone y viva en la terminal integrada): un `.vscode/tasks.json` en el proyecto con una task que abra una terminal ya corriendo `deck cc`, disparable desde la Command Palette (`Tasks: Run Task`) o con un keybinding. No viene en el repo; snippet base:
+    ```json
+    { "version": "2.0.0", "tasks": [ {
+        "label": "Claude en tmux (deck)", "type": "shell",
+        "command": "deck cc", "presentation": { "reveal": "always", "panel": "dedicated" },
+        "problemMatcher": [] } ] }
+    ```
 - `deck expose <puerto>` / `deck unexpose <puerto>`: abrir en el celu **otra** app local (un dev server, un Storybook), no el panel. Publica `localhost:<puerto>` en el tailnet por HTTPS y te da la URL + QR; `deck expose` sin puerto lista lo expuesto. Ojo: la app queda visible a todo tu tailnet y **sin** el `AUTH_TOKEN` del panel (ver sección 8). Si es un dev server, activá `server.allowedHosts: true` en la config de dev para que ande por el hostname del tailnet.
 - `deck attach [nombre]`: seguir en la Mac una sesión que arrancaste desde el celu (dispatch o worktree crean sesiones tmux planas; el nombre es el mismo que ves como chip de sesión en el panel). Con nombre, attachea directo; sin nombre, lista las vivas y elegís por número. Es un atajo de `tmux ls` + `tmux attach -t <nombre>` (desde otro tmux hace `switch-client`, no anida).
 - `deck away` — al irse: verifica todo de punta a punta y desactiva el sueño. Cerrar la tapa **con la Mac enchufada**. Lo mismo se puede disparar **desde la PWA**: chip 🔋 → switch "Modo away" (además revive el host de Chrome Remote Desktop si estaba caído).
