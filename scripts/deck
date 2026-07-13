@@ -365,20 +365,25 @@ cmd_log() { touch "$LOG"; tail -n 50 -f "$LOG"; }
 # --- lanzar Claude Code adentro de una sesión tmux visible en el panel -------
 
 # nombre de sesión tmux derivado del directorio actual, ajustado a lo que el
-# server acepta (SESSION_RE: [A-Za-z0-9_-]{1,32}, sufijo -shell reservado)
-session_name_for_dir() { # $1 = directorio; deriva un nombre de sesión válido
-  local n
-  n="$(printf '%s' "$(basename "$1")" | sed 's/[^A-Za-z0-9_-]/-/g' | cut -c1-32)"
+# server acepta (SESSION_RE: [A-Za-z0-9_-]{1,32}, sufijo -shell reservado). La
+# cuenta de trabajo (ccw) suma sufijo -work para NO colisionar con la default
+# (cc) en el mismo repo: sin eso, correr ccw donde ya vive una sesión cc solo
+# attacheaba a la de cc en vez de abrir la de trabajo aparte.
+session_name_for_dir() { # $1 = directorio, $2 = cuenta (work | vacío) → nombre válido
+  local n suf=''
+  [ "${2:-}" = work ] && suf='-work'
+  n="$(printf '%s' "$(basename "$1")" | sed 's/[^A-Za-z0-9_-]/-/g' | cut -c1-$((32 - ${#suf})))"
   case "$n" in *-shell) n="${n%-shell}-s" ;; esac
-  printf '%s' "${n:-deck}"
+  printf '%s' "${n:-deck}$suf"
 }
-session_name_for_cwd() { session_name_for_dir "$PWD"; }
+session_name_for_cwd() { session_name_for_dir "$PWD" "${1:-}"; }
 
 cmd_launch() { # $1 = alias/comando a tipear en el pane (cc | ccw), resto = flags
   # dentro de tmux no se anida un attach: ahí el comando se corre directo
   [ -n "${TMUX:-}" ] && die "ya estás adentro de una sesión tmux — corré '$*' directo"
-  local name
-  name="$(session_name_for_cwd)"
+  local name acct=''
+  [ "$1" = ccw ] && acct=work   # ccw = cuenta de trabajo: sesión aparte de cc
+  name="$(session_name_for_cwd "$acct")"
   if ! tmux has-session -t "=$name" 2>/dev/null; then
     tmux new-session -d -s "$name" -c "$PWD"
     info "✓ sesión tmux '$name' creada — ya aparece como chip en el panel del celu"
@@ -595,9 +600,9 @@ _adopt_wait_idle() { # $1=cwd $2=account
 # base-2, base-3, etc. Nunca reusa una sesión existente: cada huérfano adoptado
 # es un claude aparte y tipearlo en la sesión de otro lo rompería. Respeta el
 # SESSION_RE del server ({1,32}): recorta el base para que quepa el sufijo.
-_adopt_free_name() { # $1 = cwd → stdout: nombre de sesión libre
+_adopt_free_name() { # $1 = cwd, $2 = cuenta (work|vacío) → stdout: nombre de sesión libre
   local base cand suf n=2
-  base="$(session_name_for_dir "$1")"
+  base="$(session_name_for_dir "$1" "${2:-}")"
   tmux has-session -t "=$base" 2>/dev/null || { printf '%s' "$base"; return; }
   while :; do
     suf="-$n"
@@ -613,7 +618,7 @@ _adopt_free_name() { # $1 = cwd → stdout: nombre de sesión libre
 # visible en el panel.
 _adopt_relaunch() { # $1=cwd $2=account
   local name cmd
-  name="$(_adopt_free_name "$1")"
+  name="$(_adopt_free_name "$1" "$2")"
   if [ "$2" = work ]; then
     cmd="CLAUDE_CONFIG_DIR=$HOME/.claude-work claude --continue"
   else
