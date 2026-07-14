@@ -92,6 +92,77 @@ export async function newSession(path: string): Promise<NewSessionResult> {
   }
 }
 
+// Pins + recientes (tarea 42), fuente de las secciones PINNEADOS/RECIENTES.
+// El server ya filtra rutas que dejaron de existir o de estar dentro de la
+// unión (dirStillValid en GET /api/dirs).
+export interface DirsResp {
+  pins: string[]
+  recent: string[]
+}
+
+export async function fetchDirs(): Promise<DirsResp> {
+  const res = await api('/api/dirs')
+  if (!res.ok) throw new Error(`dirs ${res.status}`)
+  return (await res.json()) as DirsResp
+}
+
+export type PinResult = { ok: true } | { ok: false; error: string }
+
+// Reemplaza la lista completa de pins (PUT /api/dirs, todo o nada: el server
+// valida cada ruta y devuelve 400 si alguna no cierra).
+export async function setPins(pins: string[]): Promise<PinResult> {
+  try {
+    const res = await api('/api/dirs', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pins }),
+    })
+    if (!res.ok) return { ok: false, error: await errMsg(res) }
+    return { ok: true }
+  } catch (e) {
+    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
+    return { ok: false, error: 'error de red' }
+  }
+}
+
+// pin/unpin (estrella de una carpeta, tarea 42): GET la lista actual, agrega o
+// saca el dir, PUT la lista entera. No hay endpoint incremental: el server solo
+// expone el reemplazo completo (mismo patrón que snippets).
+export async function pin(dir: string): Promise<PinResult> {
+  try {
+    const current = await fetchDirs()
+    if (current.pins.includes(dir)) return { ok: true }
+    return await setPins([...current.pins, dir])
+  } catch (e) {
+    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
+    return { ok: false, error: 'error de red' }
+  }
+}
+
+export async function unpin(dir: string): Promise<PinResult> {
+  try {
+    const current = await fetchDirs()
+    return await setPins(current.pins.filter((p) => p !== dir))
+  } catch (e) {
+    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
+    return { ok: false, error: 'error de red' }
+  }
+}
+
+interface BrowseResp {
+  path: string
+  dirs: string[]
+}
+
+// Subdirectorios inmediatos de un path absoluto dentro de la unión (tarea 42,
+// árbol shallow lazy de EXPLORAR): solo nombres, el caller arma el join.
+export async function browseDir(path: string): Promise<string[]> {
+  const res = await api(`/api/dirs/browse?path=${encodeURIComponent(path)}`)
+  if (!res.ok) throw new Error(`browse ${res.status}`)
+  const data = (await res.json()) as BrowseResp
+  return data.dirs
+}
+
 // name del proyecto = basename del dir del pane.
 export function projName(dir: string): string {
   if (!dir) return '(sin directorio)'
