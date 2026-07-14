@@ -740,9 +740,7 @@ const proj = await page.evaluate(async () => {
       name: s.dataset.name,
       dot: s.querySelector('.proj-dot')?.className,
       status: s.querySelector('.proj-session-status')?.textContent,
-      cdDisabled: !!s.querySelector('.proj-session-cd')?.disabled,
-      hasLock: !!s.querySelector('.proj-lock'),
-      cdReason: s.querySelector('.proj-cd-reason')?.textContent || null,
+      hasCd: !!s.querySelector('.proj-session-cd'), // FIXUP tarea 42: ya no debe existir
       hasOpen: !!s.querySelector('.proj-session-open'),
       hasKill: !!s.querySelector('.proj-session-kill'),
     })),
@@ -775,14 +773,183 @@ ok('proyectos: dot ÁMBAR (shell) y estado "shell" en la sesión sin claude',
   proj.shellHit && proj.shellHit.s.dot === 'proj-dot shell' && proj.shellHit.s.status === 'shell');
 ok('proyectos: dot VERDE (run) y estado "claude corriendo" en la sesión con claude',
   proj.claudeHit && proj.claudeHit.s.dot === 'proj-dot run' && proj.claudeHit.s.status === 'claude corriendo');
-ok('proyectos: [cd] HABILITADO en shell, DESHABILITADO (candado + razón) con claude corriendo',
-  proj.shellHit && proj.shellHit.s.cdDisabled === false
-  && proj.claudeHit && proj.claudeHit.s.cdDisabled === true && proj.claudeHit.s.hasLock
-  && /claude corriendo/.test(proj.claudeHit.s.cdReason || ''));
 ok('proyectos: [abrir] y [kill] por sesión, [+ nueva sesion aca] por proyecto',
   proj.shellHit && proj.shellHit.s.hasOpen && proj.shellHit.s.hasKill && proj.shellHit.g.hasNew);
 ok('proyectos: [kill] cableado (DELETE a /api/tmux/sessions/<name>)',
   proj.killWired && proj.deletes.includes('zz-shell'));
+ok('proyectos FIXUP tarea 42: el [cd] por-sesión de PROYECTOS CON SESIONES ya no existe (era un no-op, cd al dir del propio pane)',
+  proj.shellHit && proj.shellHit.s.hasCd === false && proj.claudeHit && proj.claudeHit.s.hasCd === false);
+
+// 42. tab Proyectos, andamios de arriba (tarea 42): PINNEADOS / RECIENTES /
+// EXPLORAR, todos alimentados por /api/dirs (pins+recent) y /api/workspaces
+// (raíces del árbol lazy). Se mockea también /api/dirs/browse (subdirs por
+// nivel, no recursivo), /api/dirs PUT (guarda el pin/unpin en una variable de
+// closure, como si fuera el server) y /api/session/cd (captura la llamada sin
+// pegarle a tmux real). [nueva sesión] NUNCA se clickea acá (dispararía
+// selectSession + reconnect del WS real, como ya evita el bloque de la tarea
+// 41 con [abrir]): solo se asertan presencia/clase. [cd] de tier SÍ se
+// clickea: no toca selectSession/WS, solo pega el POST mockeado.
+const proj42 = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const sessions = [
+    { name: 'zz-shell', attached: false, dir: '/tmp/zzroot/proj-a', state: null, claudeRunning: false },
+    { name: 'zz-claude', attached: false, dir: '/tmp/zzroot/proj-b', state: 'working', claudeRunning: true },
+  ];
+  // dos raíces con un homónimo ("proj-a" en ambas): la etiqueta de raíz tiene
+  // que distinguirlas en el árbol de EXPLORAR
+  const workspaces = {
+    roots: [
+      { root: '/tmp/zzroot', dirs: ['proj-a', 'proj-b'] },
+      { root: '/tmp/zzroot2', dirs: ['proj-a'] },
+    ],
+    root: '/tmp/zzroot',
+    dirs: ['proj-a', 'proj-b'],
+  };
+  const browseMap = {
+    '/tmp/zzroot': ['proj-a', 'proj-b'],
+    '/tmp/zzroot2': ['proj-a'],
+    '/tmp/zzroot/proj-a': ['sub1'],
+  };
+  let pinsState = [];
+  let recentState = ['/tmp/zzroot/proj-b'];
+  const putCalls = [];
+  const cdCalls = [];
+  window.fetch = (url, opts) => {
+    const u = String(url);
+    if (u.includes('/api/dirs/browse')) {
+      const p = new URL(u, location.origin).searchParams.get('path');
+      return Promise.resolve(new Response(JSON.stringify({ path: p, dirs: browseMap[p] || [] }), { status: 200 }));
+    }
+    if (u.includes('/api/dirs') && opts && opts.method === 'PUT') {
+      const body = JSON.parse(opts.body);
+      pinsState = body.pins;
+      putCalls.push(body.pins.slice());
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    }
+    if (u.includes('/api/dirs')) {
+      return Promise.resolve(new Response(JSON.stringify({ pins: pinsState, recent: recentState }), { status: 200 }));
+    }
+    if (u.includes('/api/session/cd') && opts && opts.method === 'POST') {
+      cdCalls.push(JSON.parse(opts.body));
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    }
+    if (u.includes('/api/tmux/sessions')) return Promise.resolve(new Response(JSON.stringify(sessions), { status: 200 }));
+    if (u.includes('/api/workspaces')) return Promise.resolve(new Response(JSON.stringify(workspaces), { status: 200 }));
+    return realFetch(url, opts);
+  };
+
+  const tap = (el) => {
+    if (!el) return false;
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 11, clientX: 10, clientY: 10 }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 11, clientX: 10, clientY: 10 }));
+    return true;
+  };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  await window.refreshProjects();
+  await wait(50);
+
+  // PINNEADOS vacío al arrancar (hint), RECIENTES con la entrada seed
+  const pinsEmptyHint = document.querySelector('.proj-section[data-tier="pins"] .proj-empty')?.textContent || '';
+  const recentRowsBefore = [...document.querySelectorAll('.proj-section[data-tier="recent"] .proj-dir')].map((el) => el.dataset.dir);
+  const recentHasPinBtn = !!document.querySelector('.proj-section[data-tier="recent"] .proj-dir[data-dir="/tmp/zzroot/proj-b"] .proj-pin');
+
+  // pin desde RECIENTES → debe aparecer en PINNEADOS
+  tap(document.querySelector('.proj-section[data-tier="recent"] .proj-dir[data-dir="/tmp/zzroot/proj-b"] .proj-pin'));
+  await wait(250);
+  const pinsAfterPin = [...document.querySelectorAll('.proj-section[data-tier="pins"] .proj-dir')].map((el) => el.dataset.dir);
+
+  // unpin desde PINNEADOS → vuelve a vaciarse
+  tap(document.querySelector('.proj-section[data-tier="pins"] .proj-dir[data-dir="/tmp/zzroot/proj-b"] .proj-unpin'));
+  await wait(250);
+  const pinsAfterUnpin = [...document.querySelectorAll('.proj-section[data-tier="pins"] .proj-dir')].map((el) => el.dataset.dir);
+
+  // EXPLORAR: expandir zzroot, descender a proj-a, expandir zzroot2 (homónimo)
+  tap(document.querySelector('.proj-section[data-tier="explore"] > .proj-tree-node[data-dir="/tmp/zzroot"] > .proj-tree-row .proj-tree-caret'));
+  await wait(200);
+  const zzrootChildren = [...document.querySelectorAll(
+    '.proj-tree-node[data-dir="/tmp/zzroot"] > .proj-tree-children > .proj-tree-child > .proj-tree-node',
+  )].map((el) => el.dataset.dir);
+
+  tap(document.querySelector('.proj-tree-node[data-dir="/tmp/zzroot/proj-a"] > .proj-tree-row .proj-tree-caret'));
+  await wait(200);
+  const projAChildren = [...document.querySelectorAll(
+    '.proj-tree-node[data-dir="/tmp/zzroot/proj-a"] > .proj-tree-children > .proj-tree-child > .proj-tree-node',
+  )].map((el) => el.dataset.dir);
+
+  const projANode = document.querySelector('.proj-tree-node[data-dir="/tmp/zzroot/proj-a"]');
+  const projAActions = {
+    hasNew: !!projANode?.querySelector(':scope > .proj-tree-row .proj-dir-new'),
+    hasCd: !!projANode?.querySelector(':scope > .proj-tree-row .proj-dir-cd'),
+    hasPin: !!projANode?.querySelector(':scope > .proj-tree-row .proj-pin-toggle'),
+  };
+
+  tap(document.querySelector('.proj-section[data-tier="explore"] > .proj-tree-node[data-dir="/tmp/zzroot2"] > .proj-tree-row .proj-tree-caret'));
+  await wait(200);
+  const homonymNodes = [...document.querySelectorAll('.proj-tree-node[data-dir$="/proj-a"]')].map((el) => ({
+    dir: el.dataset.dir,
+    root: el.querySelector(':scope > .proj-tree-row .proj-dir-root')?.textContent || '',
+  }));
+
+  // GATE [cd] de tier, caso 1: sin sesión "deck" en la lista → deshabilitado,
+  // "no hay una sesión activa en un shell" (la sesión real activa no está en
+  // la lista mockeada de sesiones vivas)
+  const recentCdNoActive = document.querySelector('.proj-section[data-tier="recent"] .proj-dir-cd');
+  const gateNoActive = {
+    disabled: !!recentCdNoActive?.disabled,
+    reason: recentCdNoActive?.querySelector('.proj-cd-reason')?.textContent || '',
+  };
+
+  // GATE caso 2: "deck" (la sesión real activa) en shell puro → habilitado
+  sessions.push({ name: 'deck', attached: true, dir: '/tmp/zzroot', state: null, claudeRunning: false });
+  await window.refreshProjects();
+  await wait(100);
+  const recentCdEnabled = document.querySelector('.proj-section[data-tier="recent"] .proj-dir-cd');
+  const gateEnabledDisabled = !!recentCdEnabled?.disabled;
+  tap(recentCdEnabled);
+  await wait(200);
+
+  // GATE caso 3: "deck" con claude corriendo → deshabilitado con la otra razón
+  sessions[sessions.length - 1].claudeRunning = true;
+  await window.refreshProjects();
+  await wait(100);
+  const recentCdClaude = document.querySelector('.proj-section[data-tier="recent"] .proj-dir-cd');
+  const gateClaudeRunning = {
+    disabled: !!recentCdClaude?.disabled,
+    reason: recentCdClaude?.querySelector('.proj-cd-reason')?.textContent || '',
+  };
+
+  window.fetch = realFetch;
+  await window.refreshProjects(); // repinta con pins/recientes/sesiones reales
+  return {
+    pinsEmptyHint, recentRowsBefore, recentHasPinBtn, pinsAfterPin, pinsAfterUnpin, putCalls,
+    zzrootChildren, projAChildren, projAActions, homonymNodes,
+    gateNoActive, gateEnabledDisabled, gateClaudeRunning, cdCalls,
+  };
+});
+
+ok('proyectos/pins: hint vacío hasta pinnear algo', /estrella/.test(proj42.pinsEmptyHint));
+ok('proyectos/recientes: entrada seed listada con botón [+] de pin', proj42.recentHasPinBtn);
+ok('proyectos/pins: pinnear desde RECIENTES lo agrega a PINNEADOS (persistido vía PUT /api/dirs)',
+  proj42.pinsAfterPin.includes('/tmp/zzroot/proj-b'));
+ok('proyectos/pins: despinnear desde PINNEADOS lo saca (segunda PUT con la lista sin ese dir)',
+  proj42.pinsAfterUnpin.length === 0 && proj42.putCalls.length === 2);
+ok('proyectos/explorar: expandir una raíz lista sus subdirs (lazy, vía /api/dirs/browse)',
+  JSON.stringify(proj42.zzrootChildren) === JSON.stringify(['/tmp/zzroot/proj-a', '/tmp/zzroot/proj-b']));
+ok('proyectos/explorar: descender a un subdir carga sus hijos (otro nivel lazy)',
+  JSON.stringify(proj42.projAChildren) === JSON.stringify(['/tmp/zzroot/proj-a/sub1']));
+ok('proyectos/explorar: cada nodo ofrece [nueva sesión]/[cd]/[pin]',
+  proj42.projAActions.hasNew && proj42.projAActions.hasCd && proj42.projAActions.hasPin);
+ok('proyectos/explorar: homónimo "proj-a" en dos raíces, distinguible por etiqueta de raíz',
+  proj42.homonymNodes.length === 2 && proj42.homonymNodes[0].root !== proj42.homonymNodes[1].root
+  && proj42.homonymNodes.every((n) => n.root));
+ok('proyectos/[cd] de tier: deshabilitado sin sesión activa viva en la lista ("no hay ... shell")',
+  proj42.gateNoActive.disabled && /shell/.test(proj42.gateNoActive.reason));
+ok('proyectos/[cd] de tier: habilitado con la sesión activa en shell puro, y cablea sessionCd(activa, dir)',
+  proj42.gateEnabledDisabled === false
+  && proj42.cdCalls.some((c) => c.session === 'deck' && c.path === '/tmp/zzroot/proj-b'));
+ok('proyectos/[cd] de tier: deshabilitado con la sesión activa corriendo claude ("claude corriendo")',
+  proj42.gateClaudeRunning.disabled && /claude corriendo/.test(proj42.gateClaudeRunning.reason));
 
 // volver a la tab Claude para las secciones siguientes (composer vive ahí)
 await page.click('.tab[data-tab="claude"]');
