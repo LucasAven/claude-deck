@@ -242,6 +242,26 @@ async function claudeRunningInSession(name: string): Promise<boolean> {
   }
 }
 
+// ¿El pane está parado en un prompt de shell PELADO? (tarea 40, gate de
+// /api/session/cd). A diferencia de claudeRunningInSession (que asume "vivo"
+// salvo match positivo contra un shell conocido), acá el positivo es
+// obligatorio en el otro sentido: !claudeRunningInSession NO alcanza, porque
+// también da true para una sesión MUERTA (display-message contra un target
+// inexistente devuelve vacío con exit 0, gotcha 3: cmd vacío no matchea
+// SHELL_CMD_RE, así que "no hay claude" sería true igual que con un shell
+// real). Acá se exige el match POSITIVO y explícito: sesión viva, comando no
+// vacío, Y matchea SHELL_CMD_RE. Sesión muerta o con claude corriendo → false.
+async function paneAtShellPrompt(name: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{pane_current_command}'])
+    const cmd = stdout.trim()
+    if (!cmd) return false // sesión muerta / target inexistente (gotcha 3)
+    return SHELL_CMD_RE.test(cmd)
+  } catch {
+    return false // sesión muerta / tmux no responde
+  }
+}
+
 // --- transcript de Claude por sesión (tarea 9, fase jsonl) ----------------
 // EXCEPCIÓN DELIBERADA AL PERÍMETRO (solo lectura, documentada en README):
 // los transcripts viven en ~/.claude*/projects, FUERA del perímetro (WORKSPACES_ROOTS).
@@ -1521,6 +1541,57 @@ app.post('/api/dispatch', async (c) => {
   }
   console.log(`[deck] ${new Date().toISOString()} dispatch ${dirName} (modo ${mode}${model ? `, modelo ${model}` : ''}${effort ? `, effort ${effort}` : ''}) -> sesión ${session}`)
   return c.json({ session, dir, mode, model, effort })
+})
+
+// "cd acá" a un shell existente (tarea 40): manda `cd <path> && clear` al pane
+// de una sesión que ya está en un shell pelado (gateado con paneAtShellPrompt,
+// nunca si hay claude corriendo ahí adentro). Mismo patrón de send-keys que
+// /api/dispatch (línea literal con -l, después Enter aparte) y mismo quoting
+// (shQuote, ANSI-C). Fire-and-forget: valida todo ANTES de tocar tmux y
+// devuelve rápido; el envío en sí es best-effort como el dispatch.
+app.post('/api/session/cd', async (c) => {
+  let body: { session?: unknown; path?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const session = typeof body.session === 'string' ? body.session : ''
+  if (!SESSION_RE.test(session)) throw new HttpError(400, 'nombre de sesión inválido')
+  const pathIn = typeof body.path === 'string' ? body.path : ''
+  if (!pathIn) throw new HttpError(400, 'path requerido')
+
+  let dir: string
+  try {
+    dir = checkInsideWorkspaces(pathIn) // 403 fuera de la unión; ENOENT -> 404 abajo
+  } catch (e) {
+    if (e instanceof HttpError) throw e
+    throw new HttpError(404, 'directorio no encontrado')
+  }
+  if (!fs.statSync(dir).isDirectory()) throw new HttpError(400, 'no es un directorio')
+
+  // gate: solo si el pane está VIVO y parado en un shell pelado (nunca con
+  // claude corriendo, nunca sobre una sesión muerta)
+  if (!(await paneAtShellPrompt(session))) {
+    throw new HttpError(409, 'hay claude corriendo o la sesión no está en un shell')
+  }
+
+  const line = `cd ${shQuote(dir)} && clear`
+  try {
+    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, '-l', line])
+    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, 'Enter'])
+  } catch (e: any) {
+    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    throw new HttpError(500, `cd falló: ${msg}`)
+  }
+  // MRU (tarea 39): best-effort, no aborta la respuesta si falla la escritura
+  try {
+    recordRecentDir(dir)
+  } catch {
+    /* no crítico */
+  }
+  console.log(`[deck] ${new Date().toISOString()} cd ${dir} -> sesión ${session}`)
+  return c.json({ ok: true })
 })
 
 // File browser (solo lectura). ?path= relativo a la raíz de la sesión;
