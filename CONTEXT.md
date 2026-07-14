@@ -44,3 +44,22 @@ seguirla, sin perder la conversación. Dos grados: adopción real (mover el proc
 vivo) y rescate suave (relanzarla continuando la conversación, esperando a que
 termine el turno en curso).
 _Avoid_: migrar, resucitar
+
+**Proyecto**:
+Un directorio (a cualquier profundidad) dentro del perímetro al que una sesión
+queda atada: donde nace y sobre el que operan sus vistas de git y archivos. La
+pestaña Proyectos agrupa las sesiones por proyecto.
+_Avoid_: carpeta, workspace, repo (un proyecto puede no ser un repo git)
+
+**Raíz de workspaces**:
+Cada directorio tope configurado en `WORKSPACES_ROOTS` que contiene proyectos. El
+perímetro de filesystem es la union de todas las raíces.
+_Avoid_: WORKSPACES_ROOT (era una sola; el plural es la forma canónica ahora)
+
+**Perímetro de filesystem**:
+La union de las raíces de workspaces. Es la frontera de blast-radius de los
+endpoints estructurados de git/fs (ninguno lee ni opera fuera de ella), NO una
+frontera de confinamiento del usuario: la terminal tmux da un shell sin
+restricciones, asi que el perímetro acota el alcance de un bug en los lectores,
+no lo que el usuario autenticado puede hacer.
+_Avoid_: jaula, sandbox, confinamiento
