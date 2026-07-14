@@ -44,12 +44,16 @@ try {
 // entorno sin UTF-8. Defaultear acá cubre al proceso y a todo lo que spawnea.
 if (!process.env.LANG) process.env.LANG = 'en_US.UTF-8'
 
-// WORKSPACES_ROOT es el perímetro de seguridad: el server no lee ni opera git
-// fuera de esta ruta, sin importar a dónde haga cd una sesión tmux.
+// WORKSPACES_ROOTS es el perímetro de blast-radius de los endpoints estructurados
+// (git/fs/dispatch/worktree): el server no lee ni opera git fuera de la UNION de
+// estas raíces, sin importar a dónde haga cd una sesión tmux. No es confinamiento
+// del usuario (la terminal tmux da un shell libre), sino la frontera de alcance de
+// un bug en los lectores no-shell. Ver docs/adr/0002. Se parsea como PATH (rutas
+// separadas por ":"). WORKSPACES_ROOT (singular) sigue como alias de compat de una
+// sola raíz: si WORKSPACES_ROOTS no está seteada, se usa el singular.
 // DEFAULT_DIR es solo el "home" del panel: dónde nacen las sesiones tmux nuevas
 // y sobre qué operan los endpoints sin ?session=. Debe caer dentro del perímetro.
-const WORKSPACES_ROOT = process.env.WORKSPACES_ROOT || ''
-const DEFAULT_DIR = process.env.DEFAULT_DIR || WORKSPACES_ROOT
+const WORKSPACES_ROOTS_RAW = process.env.WORKSPACES_ROOTS || process.env.WORKSPACES_ROOT || ''
 const AUTH_TOKEN = process.env.AUTH_TOKEN || ''
 const TMUX_SESSION = process.env.TMUX_SESSION || 'deck'
 const PORT = Number(process.env.DECK_PORT || 7433)
@@ -59,11 +63,21 @@ function die(msg: string): never {
   process.exit(1)
 }
 
-if (!WORKSPACES_ROOT) die('falta la variable WORKSPACES_ROOT (raíz que contiene tus proyectos; el server no accede a nada fuera de ella)')
-if (!fs.existsSync(WORKSPACES_ROOT) || !fs.statSync(WORKSPACES_ROOT).isDirectory()) die(`WORKSPACES_ROOT no existe o no es un directorio: ${WORKSPACES_ROOT}`)
+if (!WORKSPACES_ROOTS_RAW) die('falta WORKSPACES_ROOTS (o el alias de compat WORKSPACES_ROOT): lista de raíces separadas por ":" que contienen tus proyectos; el server no accede a nada fuera de la union de ellas')
+// Cada raíz: existe, es dir, realpath-eada y deduplicada. El perímetro es su union.
+const WORKSPACES_ROOTS: string[] = []
+for (const raw of WORKSPACES_ROOTS_RAW.split(':').map((s) => s.trim()).filter(Boolean)) {
+  if (!fs.existsSync(raw) || !fs.statSync(raw).isDirectory()) die(`raíz de WORKSPACES_ROOTS no existe o no es un directorio: ${raw}`)
+  const real = fs.realpathSync(raw)
+  if (!WORKSPACES_ROOTS.includes(real)) WORKSPACES_ROOTS.push(real)
+}
+if (WORKSPACES_ROOTS.length === 0) die('WORKSPACES_ROOTS quedó vacío tras el parseo (solo separadores ":" o espacios)')
+// Sin DEFAULT_DIR explícito: la primera raíz (mismo default que el singular viejo).
+const DEFAULT_DIR = process.env.DEFAULT_DIR || WORKSPACES_ROOTS[0]
+
 if (!fs.existsSync(DEFAULT_DIR) || !fs.statSync(DEFAULT_DIR).isDirectory()) die(`DEFAULT_DIR no existe o no es un directorio: ${DEFAULT_DIR}`)
-if (!insideDir(fs.realpathSync(DEFAULT_DIR), fs.realpathSync(WORKSPACES_ROOT)))
-  die(`DEFAULT_DIR debe estar dentro de WORKSPACES_ROOT: ${DEFAULT_DIR} ⊄ ${WORKSPACES_ROOT}`)
+if (!WORKSPACES_ROOTS.some((root) => insideDir(fs.realpathSync(DEFAULT_DIR), root)))
+  die(`DEFAULT_DIR debe estar dentro de alguna raíz del perímetro: ${DEFAULT_DIR} ⊄ union{${WORKSPACES_ROOTS.join(', ')}}`)
 if (!AUTH_TOKEN) die('falta AUTH_TOKEN — el servidor no arranca sin token (ver README, sección Seguridad)')
 if (AUTH_TOKEN.length < 32) die('AUTH_TOKEN demasiado corto: debe tener al menos 32 caracteres (probá: openssl rand -hex 32)')
 
@@ -230,7 +244,7 @@ async function claudeRunningInSession(name: string): Promise<boolean> {
 
 // --- transcript de Claude por sesión (tarea 9, fase jsonl) ----------------
 // EXCEPCIÓN DELIBERADA AL PERÍMETRO (solo lectura, documentada en README):
-// los transcripts viven en ~/.claude*/projects, FUERA de WORKSPACES_ROOT.
+// los transcripts viven en ~/.claude*/projects, FUERA del perímetro (WORKSPACES_ROOTS).
 // El matching sesión↔jsonl no se adivina: scripts/state.sh anota el
 // transcript_path que traen los hooks en ~/.claude-deck/state/<sesión>.transcript,
 // y acá solo se acepta ese path si realpath-resuelve a un *.jsonl dentro de
@@ -376,19 +390,18 @@ async function resolvePaneDir(session: string): Promise<string> {
   return dir
 }
 
-/** Realpath validado contra WORKSPACES_ROOT (el perímetro de todo acceso git/fs). */
+/** Realpath validado contra la UNION de WORKSPACES_ROOTS (perímetro git/fs). */
 function checkInsideWorkspaces(p: string): string {
   const real = fs.realpathSync(p)
-  const realRoot = fs.realpathSync(WORKSPACES_ROOT)
-  if (!insideDir(real, realRoot)) throw new HttpError(403, 'directorio fuera de WORKSPACES_ROOT')
-  return real
+  for (const root of WORKSPACES_ROOTS) if (insideDir(real, root)) return real
+  throw new HttpError(403, 'directorio fuera del perímetro (union de WORKSPACES_ROOTS)')
 }
 
 /**
  * Resuelve el directorio git sobre el que operar.
  * Sin `session` → DEFAULT_DIR. Con `session` → directorio actual del pane de
- * esa sesión tmux. En ambos casos, validado como repo git dentro de
- * WORKSPACES_ROOT.
+ * esa sesión tmux. En ambos casos, validado como repo git dentro del perímetro
+ * (union de WORKSPACES_ROOTS).
  */
 async function resolveGitDir(session: string | undefined): Promise<string> {
   const dir = session ? await resolvePaneDir(session) : DEFAULT_DIR
@@ -1184,8 +1197,8 @@ app.get('/api/git/branches', async (c) => {
 // Worktree en un tap (tarea 5): git worktree add + rama nueva + sesión tmux en
 // una sola llamada. El path del worktree es HERMANO del repo
 // (../<repo>-<último-segmento-de-la-rama>): queda fuera del repo pero tiene que
-// seguir dentro de WORKSPACES_ROOT (si el repo ES la raíz, el hermano cae
-// afuera → 400).
+// seguir dentro del perímetro (alguna raíz de WORKSPACES_ROOTS; si el repo ES una
+// raíz, el hermano cae afuera → 400).
 //
 // La rama NO valida con SESSION_RE (feat/composer lleva "/"): regex propia.
 // Los "/" y los ".." se controlan acá porque el último segmento se joinea a un
@@ -1245,8 +1258,8 @@ app.post('/api/worktree', async (c) => {
   const parent = fs.realpathSync(path.dirname(repo))
   const lastSeg = branch.split('/').pop() as string
   const wtPath = path.join(parent, `${path.basename(repo)}-${lastSeg}`)
-  if (!insideDir(wtPath, fs.realpathSync(WORKSPACES_ROOT))) {
-    throw new HttpError(400, `el worktree caería fuera de WORKSPACES_ROOT: ${wtPath}`)
+  if (!WORKSPACES_ROOTS.some((root) => insideDir(wtPath, root))) {
+    throw new HttpError(400, `el worktree caería fuera del perímetro (union de WORKSPACES_ROOTS): ${wtPath}`)
   }
   if (fs.existsSync(wtPath)) throw new HttpError(409, `ya existe ${wtPath}`)
 
@@ -1274,28 +1287,36 @@ app.post('/api/worktree', async (c) => {
 })
 
 // Directorios candidatos para despachar (tarea 6): subdirectorios de PRIMER
-// nivel de WORKSPACES_ROOT, solo dirs, NO recursivo. /api/fs/list no sirve para
-// esto: sin session cae a DEFAULT_DIR (que suele ser un repo → devuelve su
-// toplevel, no la raíz) y mezcla archivos. Acá listamos la raíz misma.
+// nivel de CADA raíz del perímetro, solo dirs, NO recursivo. /api/fs/list no
+// sirve para esto: sin session cae a DEFAULT_DIR (que suele ser un repo → devuelve
+// su toplevel, no la raíz) y mezcla archivos. Acá listamos cada raíz misma.
+//
+// Shape (superset de compat): `roots` es la lista canónica agrupada (una entrada
+// por raíz, en orden de configuración, cada una con su `root` realpath-eado y sus
+// `dirs`), que consumen las tareas 39/41/42; `root`/`dirs` top-level espejan la
+// PRIMERA raíz tal cual antes, para que el consumidor viejo (sheet de despacho)
+// siga andando sin tocar web/src.
 app.get('/api/workspaces', (c) => {
-  const root = fs.realpathSync(WORKSPACES_ROOT)
-  const dirs: string[] = []
-  for (const d of fs.readdirSync(root, { withFileTypes: true })) {
-    if (d.name.startsWith('.')) continue // .git, dotdirs
-    const target = path.join(root, d.name)
-    try {
-      const s = fs.statSync(target) // sigue symlinks
-      if (s.isDirectory() && insideDir(fs.realpathSync(target), root)) dirs.push(d.name)
-    } catch {
-      continue // symlink roto / sin permisos
+  const roots = WORKSPACES_ROOTS.map((root) => {
+    const dirs: string[] = []
+    for (const d of fs.readdirSync(root, { withFileTypes: true })) {
+      if (d.name.startsWith('.')) continue // .git, dotdirs
+      const target = path.join(root, d.name)
+      try {
+        const s = fs.statSync(target) // sigue symlinks
+        if (s.isDirectory() && insideDir(fs.realpathSync(target), root)) dirs.push(d.name)
+      } catch {
+        continue // symlink roto / sin permisos
+      }
     }
-  }
-  dirs.sort((a, b) => a.localeCompare(b))
-  return c.json({ root, dirs })
+    dirs.sort((a, b) => a.localeCompare(b))
+    return { root, dirs }
+  })
+  return c.json({ roots, root: roots[0].root, dirs: roots[0].dirs })
 })
 
 // Despachar un agente (tarea 6, design-refs/task06-dispatch-sheet.png): crea una
-// sesión tmux nueva en un dir de WORKSPACES_ROOT y lanza `claude` con un prompt
+// sesión tmux nueva en un dir del perímetro (WORKSPACES_ROOTS) y lanza `claude` con un prompt
 // inicial + permission-mode. Fire-and-forget desde el celu; se sigue como un
 // chip normal (con dot de estado de la tarea 4).
 //
@@ -1370,7 +1391,9 @@ app.post('/api/dispatch', async (c) => {
   if (!dirName || dirName.includes('/') || dirName.includes(path.sep) || dirName === '.' || dirName === '..') {
     throw new HttpError(400, 'directorio inválido')
   }
-  const root = fs.realpathSync(WORKSPACES_ROOT)
+  // Tarea 38: minimal, contra la PRIMERA raíz (comportamiento actual sin cambios);
+  // la tarea 39 relaja el dispatch a cualquier raíz / profundidad.
+  const root = WORKSPACES_ROOTS[0]
   let dir: string
   try {
     dir = fs.realpathSync(path.join(root, dirName))
@@ -1379,7 +1402,7 @@ app.post('/api/dispatch', async (c) => {
   }
   // hijo DIRECTO de la raíz (no un nieto tras seguir un symlink) y un dir real
   if (path.dirname(dir) !== root || !fs.statSync(dir).isDirectory()) {
-    throw new HttpError(400, 'el directorio debe ser hijo directo de WORKSPACES_ROOT')
+    throw new HttpError(400, 'el directorio debe ser hijo directo de la raíz')
   }
 
   // decisión de Lucas (a): un dir que ya tiene sesión → 409, nunca <nombre>-2
@@ -1450,7 +1473,7 @@ app.get('/api/fs/raw', async (c) => {
 // Snippets (tarea 10): lista GLOBAL de frases para la paleta del frontend.
 // Server-side a pedido de Lucas para que sincronice celu ↔ desktop — única
 // escritura de "datos de la app": un JSON propio en ~/.claude-deck (fuera del
-// perímetro WORKSPACES_ROOT a propósito: no es contenido de repos).
+// perímetro WORKSPACES_ROOTS a propósito: no es contenido de repos).
 const SNIPPETS_FILE = path.join(os.homedir(), '.claude-deck', 'snippets.json')
 // presets del mockup (design-refs/task10-snippets.png): se sirven mientras no
 // exista el archivo; el primer PUT los materializa (editados o no)
