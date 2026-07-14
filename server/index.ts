@@ -1365,6 +1365,67 @@ function shQuote(s: string): string {
     "'"
   )
 }
+
+/**
+ * Nombre de sesión para el dispatch, con desambiguación de homónimos (tarea
+ * 39, decisión de Lucas). `dir` ya llega realpath-eado y validado dentro de
+ * la unión.
+ *
+ * Regla:
+ *  1. Preferido: sanitizeToSession(basename(dir)). Compat con el caso de un
+ *     solo nivel (el de antes de esta tarea): "~/proyectos/claude-deck" sigue
+ *     dando la sesión "claude-deck".
+ *  2. Si el preferido (o su acompañante "-shell") está tomado por una sesión
+ *     cuyo pane dir resuelve al MISMO `dir`, es un 409 "ya hay una sesión
+ *     ahí" (decisión (a) de la tarea 6: nunca doblar sesión sobre el mismo
+ *     directorio con un sufijo numérico).
+ *  3. Si está tomado pero el pane dir es OTRO directorio (homónimo real, ej.
+ *     dos carpetas "web" en raíces distintas), NO es un 409 espurio: se
+ *     desambigua a sanitizeToSession("<basename del padre>-<basename>"). Si
+ *     ESE nombre también choca con un dir distinto, sufijo numérico como
+ *     worktreeSessionName (-2, -3, ...).
+ *  4. Si no se puede resolver el pane dir de una sesión tomada (murió entre
+ *     el check y el resolve, o quedó rara), se trata como colisión: se
+ *     desambigua igual, nunca se asume "mismo dir" a ciegas ni se 409-ea sin
+ *     evidencia.
+ *
+ * Asimetría documentada a propósito: el PRIMER homónimo despachado se queda
+ * con el nombre pelado; los que vienen después cargan el prefijo del padre.
+ * Es la regla elegida (desambiguar recién en la colisión), no un bug.
+ */
+async function dispatchSessionName(dir: string): Promise<{ name: string; sameDir: boolean }> {
+  async function status(name: string): Promise<'free' | 'same' | 'other'> {
+    const nameExists = await tmuxHasSession(name)
+    const shellExists = await tmuxHasSession(`${name}-shell`)
+    if (!nameExists && !shellExists) return 'free'
+    const probe = nameExists ? name : `${name}-shell`
+    try {
+      const existingDir = fs.realpathSync(await resolvePaneDir(probe))
+      return existingDir === dir ? 'same' : 'other'
+    } catch {
+      return 'other' // no se pudo resolver: tratar como colisión, desambiguar
+    }
+  }
+
+  const base = sanitizeToSession(path.basename(dir), 'sess')
+  const baseStatus = await status(base)
+  if (baseStatus === 'free') return { name: base, sameDir: false }
+  if (baseStatus === 'same') return { name: base, sameDir: true }
+
+  const parent = path.basename(path.dirname(dir))
+  const prefixed = sanitizeToSession(`${parent}-${path.basename(dir)}`, 'sess')
+  const prefixedStatus = await status(prefixed)
+  if (prefixedStatus === 'free') return { name: prefixed, sameDir: false }
+  if (prefixedStatus === 'same') return { name: prefixed, sameDir: true }
+
+  for (let n = 2; ; n++) {
+    const candidate = `${prefixed.slice(0, 32 - 1 - String(n).length)}-${n}`
+    const st = await status(candidate)
+    if (st === 'free') return { name: candidate, sameDir: false }
+    if (st === 'same') return { name: candidate, sameDir: true }
+  }
+}
+
 app.post('/api/dispatch', async (c) => {
   let body: { dir?: unknown; prompt?: unknown; mode?: unknown; model?: unknown; effort?: unknown; hideStatus?: unknown }
   try {
@@ -1387,35 +1448,58 @@ app.post('/api/dispatch', async (c) => {
   if (!DISPATCH_EFFORTS.includes(effort)) throw new HttpError(400, 'effort inválido')
   if (!prompt) throw new HttpError(400, 'prompt vacío')
   if (prompt.length > 10000) throw new HttpError(400, 'prompt demasiado largo (máx 10000)')
-  // dir es un basename de primer nivel: sin separadores ni "." especiales
-  if (!dirName || dirName.includes('/') || dirName.includes(path.sep) || dirName === '.' || dirName === '..') {
-    throw new HttpError(400, 'directorio inválido')
-  }
-  // Tarea 38: minimal, contra la PRIMERA raíz (comportamiento actual sin cambios);
-  // la tarea 39 relaja el dispatch a cualquier raíz / profundidad.
-  const root = WORKSPACES_ROOTS[0]
+  if (!dirName || dirName === '.' || dirName === '..') throw new HttpError(400, 'directorio inválido')
+
+  // Tarea 39: relaja el dispatch a cualquier raíz/profundidad. Dos formas
+  // aceptadas en `dir` (documentado, ver README):
+  //  (a) ruta ABSOLUTA dentro de la unión, a cualquier profundidad (la que
+  //      van a mandar las tareas 41/42 desde pins/recent/browse).
+  //  (b) basename SIN separadores (compat con el sheet viejo de la tarea 6,
+  //      que solo conoce basenames de primer nivel de `data.dirs`): se
+  //      resuelve como antes, hijo directo de la PRIMERA raíz.
   let dir: string
-  try {
-    dir = fs.realpathSync(path.join(root, dirName))
-  } catch {
-    throw new HttpError(404, 'directorio no encontrado')
-  }
-  // hijo DIRECTO de la raíz (no un nieto tras seguir un symlink) y un dir real
-  if (path.dirname(dir) !== root || !fs.statSync(dir).isDirectory()) {
-    throw new HttpError(400, 'el directorio debe ser hijo directo de la raíz')
+  if (path.isAbsolute(dirName)) {
+    if (dirName.includes('\0')) throw new HttpError(400, 'directorio inválido')
+    let real: string
+    try {
+      real = fs.realpathSync(dirName)
+    } catch {
+      throw new HttpError(404, 'directorio no encontrado')
+    }
+    dir = checkInsideWorkspaces(real) // 403 si cae fuera de la unión
+    if (!fs.statSync(dir).isDirectory()) throw new HttpError(400, 'no es un directorio')
+  } else {
+    if (dirName.includes('/') || dirName.includes(path.sep)) throw new HttpError(400, 'directorio inválido')
+    const root = WORKSPACES_ROOTS[0]
+    try {
+      dir = fs.realpathSync(path.join(root, dirName))
+    } catch {
+      throw new HttpError(404, 'directorio no encontrado')
+    }
+    // hijo DIRECTO de la raíz (no un nieto tras seguir un symlink) y un dir real
+    if (path.dirname(dir) !== root || !fs.statSync(dir).isDirectory()) {
+      throw new HttpError(400, 'el directorio debe ser hijo directo de la raíz')
+    }
   }
 
-  // decisión de Lucas (a): un dir que ya tiene sesión → 409, nunca <nombre>-2
-  const session = sanitizeToSession(path.basename(dir), 'sess')
-  if ((await tmuxHasSession(session)) || (await tmuxHasSession(`${session}-shell`))) {
-    throw new HttpError(409, 'ya hay una sesión ahí')
-  }
+  // decisión de Lucas (a): un dir que YA tiene sesión (el mismo dir) → 409,
+  // nunca <nombre>-2; un homónimo en OTRO dir se desambigua en vez de 409-ear
+  // (ver dispatchSessionName)
+  const { name: session, sameDir } = await dispatchSessionName(dir)
+  if (sameDir) throw new HttpError(409, 'ya hay una sesión ahí')
 
   try {
     await execFileP('tmux', ['new-session', '-d', '-s', session, '-c', dir])
   } catch (e: any) {
     const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
     throw new HttpError(500, `tmux falló: ${msg}`)
+  }
+  // sesión ya nacida: registrar el MRU (tarea 39). Best-effort, no aborta el
+  // dispatch si por lo que sea falla la escritura del store de dirs.
+  try {
+    recordRecentDir(dir)
+  } catch {
+    /* no crítico: el dispatch ya creó la sesión */
   }
   // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
   if (hideStatus) await tmuxSetStatus(session, false)
@@ -1514,6 +1598,159 @@ app.put('/api/snippets', async (c) => {
   fs.writeFileSync(tmp, JSON.stringify(list, null, 2) + '\n')
   fs.renameSync(tmp, SNIPPETS_FILE)
   return c.json({ ok: true })
+})
+
+// ---------------------------------------------------------------------------
+// Directorios: pins + MRU (tarea 39). Mismo patrón EXACTO que snippets arriba
+// (server-side para que sincronice celu ↔ desktop; JSON propio en
+// ~/.claude-deck, fuera del perímetro WORKSPACES_ROOTS a propósito: es
+// app-data de la app, no contenido de un repo). Shape: `pins` (curada a mano
+// vía PUT) + `recent` (MRU que el propio server va escribiendo). Las rutas
+// se guardan siempre realpath-eadas.
+//
+// Semillas (decisión de Lucas): a diferencia de los snippets, los pins NO se
+// siembran con nada, arrancan vacíos. El array vacío sigue siendo la
+// "seed" en el sentido de "lo que se sirve si el archivo no existe todavía".
+const DIRS_FILE = path.join(os.homedir(), '.claude-deck', 'dirs.json')
+const DIRS_SEEDS: { pins: string[]; recent: string[] } = { pins: [], recent: [] }
+const DIRS_PINS_MAX = 50
+const DIR_PATH_LEN_MAX = 1024
+// MRU: más nueva primera, dedup por ruta realpath-eada, tope 10 (decisión de Lucas).
+const RECENT_DIRS_MAX = 10
+
+function readDirs(): { pins: string[]; recent: string[] } {
+  try {
+    const raw = JSON.parse(fs.readFileSync(DIRS_FILE, 'utf8'))
+    const pins = Array.isArray(raw?.pins) ? raw.pins.filter((s: unknown): s is string => typeof s === 'string') : []
+    const recent = Array.isArray(raw?.recent) ? raw.recent.filter((s: unknown): s is string => typeof s === 'string') : []
+    return { pins, recent }
+  } catch {
+    /* sin archivo todavía (primera vez) o JSON roto: seeds (pins vacíos) */
+    return { pins: [...DIRS_SEEDS.pins], recent: [...DIRS_SEEDS.recent] }
+  }
+}
+
+function writeDirs(data: { pins: string[]; recent: string[] }): void {
+  fs.mkdirSync(path.dirname(DIRS_FILE), { recursive: true })
+  // escritura atómica (tmp + rename), igual que snippets
+  const tmp = `${DIRS_FILE}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n')
+  fs.renameSync(tmp, DIRS_FILE)
+}
+
+/** ¿Sigue siendo un dir válido? (existe, es directorio, cae dentro de la unión). */
+function dirStillValid(p: string): boolean {
+  try {
+    const real = fs.realpathSync(p)
+    return fs.statSync(real).isDirectory() && WORKSPACES_ROOTS.some((root) => insideDir(real, root))
+  } catch {
+    return false
+  }
+}
+
+// GET filtra EN LECTURA (no persiste el filtrado): si un pin/recent dejó de
+// existir o quedó fuera de la unión (repo borrado, perímetro reconfigurado),
+// no se muestra, pero el archivo en disco no se toca acá.
+app.get('/api/dirs', (c) => {
+  const stored = readDirs()
+  return c.json({
+    pins: stored.pins.filter(dirStillValid),
+    recent: stored.recent.filter(dirStillValid),
+  })
+})
+
+// Reemplaza la lista completa de pins (como snippets): valida cada ruta
+// (realpath + existe + es directorio + dentro de la unión) y el cap de
+// cantidad/longitud, todo o nada (un solo 400 si algo no cierra).
+app.put('/api/dirs', async (c) => {
+  let body: { pins?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const list = body.pins
+  if (!Array.isArray(list) || list.length > DIRS_PINS_MAX
+    || !list.every((s) => typeof s === 'string' && s.trim().length > 0 && s.length <= DIR_PATH_LEN_MAX)) {
+    throw new HttpError(400, `pins: lista de hasta ${DIRS_PINS_MAX} rutas no vacías (máx ${DIR_PATH_LEN_MAX} caracteres)`)
+  }
+  const resolved: string[] = []
+  for (const p of list as string[]) {
+    let real: string
+    try {
+      real = fs.realpathSync(p)
+    } catch {
+      throw new HttpError(400, `ruta inexistente: ${p}`)
+    }
+    if (!fs.statSync(real).isDirectory()) throw new HttpError(400, `no es un directorio: ${p}`)
+    if (!WORKSPACES_ROOTS.some((root) => insideDir(real, root))) {
+      throw new HttpError(400, `fuera del perímetro (unión de WORKSPACES_ROOTS): ${p}`)
+    }
+    resolved.push(real)
+  }
+  const current = readDirs()
+  writeDirs({ pins: resolved, recent: current.recent })
+  return c.json({ ok: true })
+})
+
+// MRU: la llama el dispatch (esta tarea) al nacer una sesión, y la tarea 40 la
+// va a llamar también desde /api/session/cd, por eso vive acá como helper de
+// módulo reusable y no inline en la ruta. Guarda SIEMPRE la ruta realpath-eada;
+// una ruta fuera de la unión no se registra (guard silencioso, no revienta el
+// caller: esto corre fire-and-forget después de que la sesión ya existe).
+function recordRecentDir(dir: string): void {
+  let real: string
+  try {
+    real = fs.realpathSync(dir)
+  } catch {
+    return // no debería pasar (la sesión ya se creó ahí), pero por las dudas
+  }
+  if (!WORKSPACES_ROOTS.some((root) => insideDir(real, root))) return
+  const current = readDirs()
+  const recent = [real, ...current.recent.filter((p) => p !== real)].slice(0, RECENT_DIRS_MAX)
+  writeDirs({ pins: current.pins, recent })
+}
+
+// Browse (tarea 39): /api/fs/list está anclado a la raíz de una SESIÓN
+// (checkRepoPath), no puede navegar una ruta absoluta arbitraria de OTRA raíz
+// de la unión. Este endpoint chico sí: lista subdirectorios inmediatos de
+// cualquier `path` absoluto dentro de la unión (NO recursivo, solo dirs, sin
+// dotdirs), lo que van a consumir las tareas 41/42 para el árbol de picker.
+// Shape: `{ path: <abs realpath-eado>, dirs: string[] }` (nombres, no rutas
+// completas: el cliente arma el join). Fuera de la unión: 403 (mismo criterio
+// que resolveGitDir/resolveFsDir, es una resolución de ruta como esas, a
+// diferencia de /api/dirs PUT que valida un body y devuelve 400).
+app.get('/api/dirs/browse', (c) => {
+  const raw = c.req.query('path') || ''
+  if (!raw || !path.isAbsolute(raw)) throw new HttpError(400, 'path debe ser una ruta absoluta')
+  let abs: string
+  try {
+    abs = checkInsideWorkspaces(raw) // 403 si cae fuera de la unión
+  } catch (e) {
+    if (e instanceof HttpError) throw e
+    throw new HttpError(404, 'directorio no encontrado') // ENOENT del realpath interno
+  }
+  let st: fs.Stats
+  try {
+    st = fs.statSync(abs)
+  } catch {
+    throw new HttpError(404, 'directorio no encontrado')
+  }
+  if (!st.isDirectory()) throw new HttpError(400, 'no es un directorio')
+  const dirs: string[] = []
+  for (const d of fs.readdirSync(abs, { withFileTypes: true })) {
+    if (d.name.startsWith('.')) continue // .git, dotdirs
+    const target = path.join(abs, d.name)
+    try {
+      const s = fs.statSync(target) // sigue symlinks
+      // symlink que escapa de la unión: no se lista (mismo guard que fsList)
+      if (s.isDirectory() && checkInsideWorkspaces(target)) dirs.push(d.name)
+    } catch {
+      continue // symlink roto/fuera de la unión, o sin permisos
+    }
+  }
+  dirs.sort((a, b) => a.localeCompare(b))
+  return c.json({ path: abs, dirs })
 })
 
 // ---------------------------------------------------------------------------
