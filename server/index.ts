@@ -367,7 +367,7 @@ function parseTranscriptTurns(text: string): TranscriptTurn[] {
   return turns
 }
 
-async function tmuxListSessions(): Promise<Array<{ name: string; attached: boolean; dir: string; state: SessionState | null }>> {
+async function tmuxListSessions(): Promise<Array<{ name: string; attached: boolean; dir: string; state: SessionState | null; claudeRunning: boolean }>> {
   let stdout = ''
   try {
     // separador: ESPACIO, nunca \t — sin LANG en el entorno (launchd), tmux
@@ -379,7 +379,7 @@ async function tmuxListSessions(): Promise<Array<{ name: string; attached: boole
   } catch {
     return [] // no hay servidor tmux corriendo
   }
-  const out: Array<{ name: string; attached: boolean; dir: string; state: SessionState | null }> = []
+  const out: Array<{ name: string; attached: boolean; dir: string; state: SessionState | null; claudeRunning: boolean }> = []
   for (const line of stdout.split('\n')) {
     if (!line.trim()) continue
     const [name, attached] = line.split(' ')
@@ -390,7 +390,13 @@ async function tmuxListSessions(): Promise<Array<{ name: string; attached: boole
     } catch {
       /* la sesión pudo morir entre medio */
     }
-    out.push({ name, attached: Number(attached) > 0, dir, state: sessionState(name) })
+    // claudeRunning (tarea 41): mismo criterio que claudeRunningInSession
+    // (pane_current_command no matchea un shell conocido). Alimenta el punto
+    // verde/ámbar de la tab Proyectos y el gate visual del [cd] (deshabilitado
+    // mientras haya claude corriendo). Una llamada extra de display-message por
+    // sesión por poll: aceptable para el puñado de sesiones en juego.
+    const claudeRunning = await claudeRunningInSession(name)
+    out.push({ name, attached: Number(attached) > 0, dir, state: sessionState(name), claudeRunning })
   }
   return out
 }
@@ -1541,6 +1547,55 @@ app.post('/api/dispatch', async (c) => {
   }
   console.log(`[deck] ${new Date().toISOString()} dispatch ${dirName} (modo ${mode}${model ? `, modelo ${model}` : ''}${effort ? `, effort ${effort}` : ''}) -> sesión ${session}`)
   return c.json({ session, dir, mode, model, effort })
+})
+
+// "[+ nueva sesion aca]" (tarea 41): crea una sesion tmux PELADA (un shell, sin
+// lanzar claude) enraizada en un dir del perimetro. Es el primo del dispatch sin
+// prompt/modelo/effort: reusa el mismo naming desambiguado (dispatchSessionName,
+// con su 409 sobre el mismo dir), la misma pref hideStatus y el mismo registro
+// de MRU (recordRecentDir, tarea 39). Fire-and-forget: valida ANTES de tocar
+// tmux; el frontend selecciona la sesion devuelta y salta a la tab Claude.
+app.post('/api/session/new', async (c) => {
+  let body: { path?: unknown; hideStatus?: unknown }
+  try {
+    body = await c.req.json()
+  } catch {
+    throw new HttpError(400, 'body JSON requerido')
+  }
+  const pathIn = typeof body.path === 'string' ? body.path : ''
+  if (!pathIn) throw new HttpError(400, 'path requerido')
+  const hideStatus = body.hideStatus === true
+
+  let dir: string
+  try {
+    dir = checkInsideWorkspaces(pathIn) // 403 fuera de la union; ENOENT -> 404 abajo
+  } catch (e) {
+    if (e instanceof HttpError) throw e
+    throw new HttpError(404, 'directorio no encontrado')
+  }
+  if (!fs.statSync(dir).isDirectory()) throw new HttpError(400, 'no es un directorio')
+
+  // mismo naming que el dispatch: 409 si YA hay una sesion en ESE mismo dir,
+  // homonimos en otras raices se desambiguan (ver dispatchSessionName)
+  const { name: session, sameDir } = await dispatchSessionName(dir)
+  if (sameDir) throw new HttpError(409, 'ya hay una sesión ahí')
+
+  try {
+    await execFileP('tmux', ['new-session', '-d', '-s', session, '-c', dir])
+  } catch (e: any) {
+    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    throw new HttpError(500, `tmux falló: ${msg}`)
+  }
+  // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
+  if (hideStatus) await tmuxSetStatus(session, false)
+  // MRU (tarea 39): best-effort, la sesion ya existe aunque falle la escritura
+  try {
+    recordRecentDir(dir)
+  } catch {
+    /* no crítico */
+  }
+  console.log(`[deck] ${new Date().toISOString()} nueva sesión pelada en ${dir} -> sesión ${session}`)
+  return c.json({ session, dir })
 })
 
 // "cd acá" a un shell existente (tarea 40): manda `cd <path> && clear` al pane

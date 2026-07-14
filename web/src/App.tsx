@@ -8,6 +8,7 @@ import { SnipTip } from './components/SnipTip'
 import { ClaudeView } from './components/claude/ClaudeView'
 import { ChangesView } from './components/changes/ChangesView'
 import { FilesView } from './components/files/FilesView'
+import { ProjectsView } from './components/projects/ProjectsView'
 import { HostSheet } from './components/claude/HostSheet'
 import { WorktreeSheet } from './components/claude/WorktreeSheet'
 import { DispatchSheet } from './components/claude/DispatchSheet'
@@ -111,6 +112,11 @@ export function App() {
         {/* Pestaña Archivos — árbol + vista de archivo */}
         <section id="view-files" className={cls('files')}>
           <FilesView />
+        </section>
+
+        {/* Pestaña Proyectos: sesiones agrupadas por proyecto (tarea 41/42) */}
+        <section id="view-projects" className={cls('projects')}>
+          <ProjectsView />
         </section>
 
         {/* overlays globales siempre montados: host-sheet (Fase 4), worktree-sheet (tarea 5), snip-tip */}

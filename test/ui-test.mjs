@@ -696,6 +696,98 @@ ok('reorden: el orden guardado manda y las sesiones nuevas van al final',
   JSON.stringify(chipOrder.domNames) === JSON.stringify(['zz-c', 'zz-a', 'deck', 'zz-b']));
 ok('cada chip lleva data-name (hit-test del drag)', chipOrder.allHaveDataName);
 
+// 41. tab Proyectos (tarea 41): 4a pestaña que agrupa las sesiones vivas por el
+// dir de su pane. Se mockea /api/tmux/sessions (con dir + claudeRunning que
+// agrega tmuxListSessions) y /api/workspaces (raíces para la etiqueta), se
+// fuerza el repintado con window.refreshProjects() y se leen los grupos. El
+// semáforo verde/ámbar, el [cd] deshabilitado con candado cuando hay claude
+// corriendo, y el cableado del [kill] se asertan sin tocar sesiones reales
+// (window.confirm forzado a true y el DELETE interceptado por el mock).
+ok('4a tab "Proyectos" con data-tab', (await page.$('.tab[data-tab="projects"]')) !== null);
+await page.click('.tab[data-tab="projects"]');
+await new Promise((r) => setTimeout(r, 300));
+ok('tab Proyectos activa toggla #view-projects.active y la vista Claude sigue montada',
+  (await page.$eval('#view-projects', (el) => el.classList.contains('active')))
+  && (await page.$('#term-claude')) !== null);
+
+const proj = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const realConfirm = window.confirm;
+  const deletes = [];
+  const sessions = [
+    { name: 'zz-shell', attached: false, dir: '/tmp/zzroot/proj-a', state: null, claudeRunning: false },
+    { name: 'zz-claude', attached: false, dir: '/tmp/zzroot/proj-b', state: 'working', claudeRunning: true },
+  ];
+  const workspaces = { roots: [{ root: '/tmp/zzroot', dirs: ['proj-a', 'proj-b'] }], root: '/tmp/zzroot', dirs: ['proj-a', 'proj-b'] };
+  window.fetch = (url, opts) => {
+    const u = String(url);
+    if (u.includes('/api/tmux/sessions/') && opts && opts.method === 'DELETE') {
+      deletes.push(decodeURIComponent(u.split('/api/tmux/sessions/')[1]));
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    }
+    if (u.includes('/api/tmux/sessions')) return Promise.resolve(new Response(JSON.stringify(sessions), { status: 200 }));
+    if (u.includes('/api/workspaces')) return Promise.resolve(new Response(JSON.stringify(workspaces), { status: 200 }));
+    return realFetch(url, opts);
+  };
+  await window.refreshProjects();
+  // leer la estructura agrupada
+  const groups = [...document.querySelectorAll('.proj-group')].map((g) => ({
+    dir: g.dataset.dir,
+    name: g.querySelector('.proj-group-name')?.textContent,
+    root: g.querySelector('.proj-group-root')?.textContent,
+    hasNew: !!g.querySelector('.proj-new-session'),
+    sessions: [...g.querySelectorAll('.proj-session')].map((s) => ({
+      name: s.dataset.name,
+      dot: s.querySelector('.proj-dot')?.className,
+      status: s.querySelector('.proj-session-status')?.textContent,
+      cdDisabled: !!s.querySelector('.proj-session-cd')?.disabled,
+      hasLock: !!s.querySelector('.proj-lock'),
+      cdReason: s.querySelector('.proj-cd-reason')?.textContent || null,
+      hasOpen: !!s.querySelector('.proj-session-open'),
+      hasKill: !!s.querySelector('.proj-session-kill'),
+    })),
+  }));
+  const findS = (n) => { for (const g of groups) { const s = g.sessions.find((x) => x.name === n); if (s) return { g, s }; } return null; };
+  const shellHit = findS('zz-shell');
+  const claudeHit = findS('zz-claude');
+
+  // cablear el [kill] sin matar nada real: confirm forzado, DELETE mockeado
+  window.confirm = () => true;
+  const killBtn = document.querySelector('.proj-session[data-name="zz-shell"] .proj-session-kill');
+  if (killBtn) {
+    killBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 5, clientX: 20, clientY: 20 }));
+    killBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 5, clientX: 20, clientY: 20 }));
+  }
+  await new Promise((r) => setTimeout(r, 250));
+
+  window.fetch = realFetch;
+  window.confirm = realConfirm;
+  await window.refreshProjects(); // repinta con las sesiones reales
+  return { groups, shellHit, claudeHit, deletes, killWired: !!killBtn };
+});
+
+ok('proyectos: dos grupos (uno por dir de pane)', proj.groups.filter((g) => g.dir && g.dir.startsWith('/tmp/zzroot')).length === 2);
+ok('proyectos: sesión shell agrupada bajo su proyecto (basename del dir)',
+  proj.shellHit && proj.shellHit.g.name === 'proj-a' && proj.shellHit.g.dir === '/tmp/zzroot/proj-a');
+ok('proyectos: sesión claude agrupada bajo su proyecto', proj.claudeHit && proj.claudeHit.g.name === 'proj-b');
+ok('proyectos: etiqueta de raíz junto al nombre (distingue homónimos)', proj.shellHit && proj.shellHit.g.root === '/tmp/zzroot');
+ok('proyectos: dot ÁMBAR (shell) y estado "shell" en la sesión sin claude',
+  proj.shellHit && proj.shellHit.s.dot === 'proj-dot shell' && proj.shellHit.s.status === 'shell');
+ok('proyectos: dot VERDE (run) y estado "claude corriendo" en la sesión con claude',
+  proj.claudeHit && proj.claudeHit.s.dot === 'proj-dot run' && proj.claudeHit.s.status === 'claude corriendo');
+ok('proyectos: [cd] HABILITADO en shell, DESHABILITADO (candado + razón) con claude corriendo',
+  proj.shellHit && proj.shellHit.s.cdDisabled === false
+  && proj.claudeHit && proj.claudeHit.s.cdDisabled === true && proj.claudeHit.s.hasLock
+  && /claude corriendo/.test(proj.claudeHit.s.cdReason || ''));
+ok('proyectos: [abrir] y [kill] por sesión, [+ nueva sesion aca] por proyecto',
+  proj.shellHit && proj.shellHit.s.hasOpen && proj.shellHit.s.hasKill && proj.shellHit.g.hasNew);
+ok('proyectos: [kill] cableado (DELETE a /api/tmux/sessions/<name>)',
+  proj.killWired && proj.deletes.includes('zz-shell'));
+
+// volver a la tab Claude para las secciones siguientes (composer vive ahí)
+await page.click('.tab[data-tab="claude"]');
+await new Promise((r) => setTimeout(r, 300));
+
 // 14. composer de prompts (tarea 7): el ✎ abre un sheet a media pantalla con
 // textarea nativo; enviar = term.paste + \r diferido (espiados: nada llega a
 // la sesión real); borrador por sesión en localStorage (draft:<sesión>).

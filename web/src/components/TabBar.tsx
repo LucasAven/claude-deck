@@ -36,6 +36,14 @@ export function TabBar() {
         <span className="tab-icon">&#9636;</span>
         <span>Archivos</span>
       </button>
+      <button
+        className={'tab' + (activeTab === 'projects' ? ' active' : '')}
+        data-tab="projects"
+        onClick={() => setActiveTab('projects')}
+      >
+        <span className="tab-icon">&#9707;</span>
+        <span>Proyectos</span>
+      </button>
     </nav>
   )
 }

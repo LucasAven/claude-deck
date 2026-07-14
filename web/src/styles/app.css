@@ -1745,6 +1745,152 @@ body.kb-open .tabbar { display: none; }
   text-align: center;
 }
 
+/* ---------- tab Proyectos (tarea 41/42) ---------- */
+/* la vista es scrolleable: arriba pins/recientes/explorar (tarea 42), un
+   divisor, y abajo las sesiones vivas agrupadas por proyecto (tarea 41) */
+#projects-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 12px 20px;
+}
+.proj-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 2px 10px;
+}
+.proj-title {
+  font-size: 15px;
+  color: var(--text);
+  font-weight: 700;
+}
+.proj-section { margin-bottom: 10px; }
+.proj-section-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 6px 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proj-tier-placeholder {
+  font-size: 12px;
+  padding: 2px 4px 6px;
+}
+.proj-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 10px 0 12px;
+}
+.proj-bottom-label { margin-top: 2px; }
+.proj-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+.proj-empty { padding: 8px 4px; font-size: 13px; }
+
+/* un proyecto: header con nombre + raiz, sus sesiones, y el boton de parir */
+.proj-group {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.proj-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 2px 2px 6px;
+}
+.proj-group-name {
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 600;
+}
+.proj-group-root {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* una sesion: punto de estado + nombre + estado textual + acciones */
+.proj-session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 2px;
+  border-top: 1px solid var(--border);
+}
+.proj-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.proj-dot.run { background: #8fbe6b; }   /* verde: claude corriendo */
+.proj-dot.shell { background: var(--accent); } /* ambar: shell en el prompt */
+.proj-session-name {
+  font-size: 13px;
+  color: var(--text);
+}
+.proj-session-status {
+  font-size: 11px;
+  color: var(--muted);
+}
+.proj-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.proj-session-open,
+.proj-session-cd,
+.proj-session-kill,
+.proj-new-session {
+  min-height: 34px;
+  padding: 4px 12px;
+  border-radius: 17px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+.proj-session-open { color: var(--accent); border-color: var(--accent-dim); }
+.proj-session-kill { color: var(--muted); }
+.proj-session-cd.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  color: var(--muted);
+}
+.proj-lock { font-size: 11px; }
+.proj-cd-reason { color: var(--muted); font-size: 11px; }
+.proj-new-session {
+  margin-top: 8px;
+  width: 100%;
+  color: var(--muted);
+  border-style: dashed;
+}
+
 /* overlay 401 */
 #auth-error {
   position: fixed;
