@@ -22,6 +22,9 @@ interface Window {
   refreshSessions?: () => Promise<void>
   refreshHost?: () => Promise<void>
   refreshClaudeStatus?: () => Promise<void>
+  // puente para ui-test.mjs (tarea 41): repinta la lista agrupada de la tab
+  // Proyectos tras mockear /api/tmux/sessions
+  refreshProjects?: () => Promise<void>
   // puente para ui-test.mjs (tarea 23): setear el estado del opt-in de Web Push
   // y disparar el toggle sin depender de las APIs reales (SW/PushManager)
   __deckPush?: {

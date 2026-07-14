@@ -9,7 +9,7 @@ import { orderNames } from './lib/chiporder'
 // Estado global (zustand): el módulo de terminal/WS lo lee fuera de React con
 // useDeckStore.getState() y dispara updates sin prop-drilling.
 
-export type Tab = 'claude' | 'changes' | 'files'
+export type Tab = 'claude' | 'changes' | 'files' | 'projects'
 export type SwitchMenuKind = 'model' | 'attach' | 'snippets' | null
 
 export interface GitFile {
