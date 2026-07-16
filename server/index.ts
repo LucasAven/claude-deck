@@ -115,11 +115,67 @@ function insideDir(child: string, parent: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Seam de spawn: runGit / runTmux
+//
+// TODO lo que el server ejecuta de git y de tmux pasa por estos dos wrappers
+// (nunca execFileP directo): un único punto de spawn, sustituible en tests, y
+// un único formateador del error visible (firstErrLine). Los demás binarios
+// (pmset, launchctl, osascript, sips, gh, scutil, sudo, tailscale) siguen con
+// execFileP directo a propósito: no son parte de este seam.
+//
+// Gotchas de tmux, documentados UNA vez acá (los call sites solo los
+// referencian como "gotcha 3", el número histórico del HANDOFF):
+//  - Targets de sesión SIEMPRE con prefijo `=` (match exacto: sin él tmux
+//    hace prefix-matching y "deck" matchearía "deck-2"). Además, has-session/
+//    kill-session aceptan `=nombre` pelado, pero los subcomandos de pane
+//    (send-keys, capture-pane, display-message, set-option) exigen
+//    `=nombre:` (con los dos puntos al final).
+//  - Target INEXISTENTE: display-message y afines devuelven salida VACÍA con
+//    exit 0, NO un error. Quien necesite distinguir "sesión muerta" tiene que
+//    chequear el output vacío además del catch (así lo hacen
+//    claudeRunningInSession, paneAtShellPrompt y resolvePaneDir).
+// ---------------------------------------------------------------------------
+type ExecOpts = { maxBuffer?: number; timeout?: number }
+
+// Punto de inyección para tests futuros: pisar execImpl con un fake redirige
+// TODO git/tmux del server sin tocar ningún caller. Default: el execFileP real.
+let execImpl: (cmd: string, args: string[], opts?: ExecOpts) => Promise<{ stdout: string; stderr: string }> =
+  (cmd, args, opts = {}) => execFileP(cmd, args, opts)
+
+/**
+ * `git -C <dir> <args>`. Devuelve el stdout crudo. Los errores se relanzan
+ * TAL CUAL (el error de execFile trae code/stdout/stderr): los callers
+ * tolerantes conservan su try/catch de siempre, y gitDiff necesita el objeto
+ * entero para el exit 1 legítimo de `--no-index`. El mensaje que sube al
+ * cliente sale de firstErrLine.
+ */
+async function runGit(dir: string, args: string[], opts?: ExecOpts): Promise<string> {
+  return (await execImpl('git', ['-C', dir, ...args], opts)).stdout
+}
+
+/** `tmux <args>`. Mismo contrato que runGit (stdout crudo, error tal cual).
+ *  Los gotchas de targets están en el comentario de esta sección. */
+async function runTmux(args: string[], opts?: ExecOpts): Promise<string> {
+  return (await execImpl('tmux', args, opts)).stdout
+}
+
+/**
+ * Primer renglón no vacío del stderr de un execFile fallido (fallback: el
+ * message del error, o 'error'): el formato canónico con el que los fallos de
+ * git/tmux suben al cliente. Antes estaba copiado a mano en ~7 endpoints; los
+ * mensajes por endpoint (prefijo y status) siguen viviendo en cada caller.
+ */
+function firstErrLine(e: unknown): string {
+  const err = e as { stderr?: unknown; message?: unknown } | null
+  return String(err?.stderr || err?.message || e).split('\n').filter(Boolean)[0] || 'error'
+}
+
+// ---------------------------------------------------------------------------
 // tmux
 // ---------------------------------------------------------------------------
 async function tmuxHasSession(name: string): Promise<boolean> {
   try {
-    await execFileP('tmux', ['has-session', '-t', `=${name}`])
+    await runTmux(['has-session', '-t', `=${name}`])
     return true
   } catch {
     return false
@@ -129,7 +185,7 @@ async function tmuxHasSession(name: string): Promise<boolean> {
 async function tmuxKillSession(name: string): Promise<boolean> {
   if (!(await tmuxHasSession(name))) return false
   try {
-    await execFileP('tmux', ['kill-session', '-t', `=${name}`])
+    await runTmux(['kill-session', '-t', `=${name}`])
     return true
   } catch {
     return false
@@ -137,14 +193,16 @@ async function tmuxKillSession(name: string): Promise<boolean> {
 }
 
 async function tmuxRenameSession(oldName: string, newName: string): Promise<void> {
-  await execFileP('tmux', ['rename-session', '-t', `=${oldName}`, newName])
+  await runTmux(['rename-session', '-t', `=${oldName}`, newName])
 }
 
-// send-keys a un pane. target `=sesion:` — send-keys no acepta `=sesion`
-// pelado (gotcha 3), igual que tmuxPaneDir/capture-pane. Los args van tal cual:
-// nombres de tecla (`C-v`, `Escape`) o `-l <literal>` para texto crudo.
+// send-keys a un pane (target `=sesion:` por el gotcha 3, documentado en el
+// seam de spawn). Los args van tal cual: nombres de tecla (`C-v`, `Escape`)
+// o `-l <literal>` para texto crudo. Es el ÚNICO camino de send-keys del
+// server: dispatch y session/cd mandan por acá su patrón "línea literal con
+// -l, después Enter aparte".
 async function tmuxSendKeys(session: string, ...keys: string[]): Promise<void> {
-  await execFileP('tmux', ['send-keys', '-t', `=${session}:`, ...keys])
+  await runTmux(['send-keys', '-t', `=${session}:`, ...keys])
 }
 
 // status bar de tmux (la franja verde con [sesión]/hora): es una opción POR
@@ -155,7 +213,7 @@ async function tmuxSendKeys(session: string, ...keys: string[]): Promise<void> {
 // el mensaje WS {t:'statusbar'}. Fire-and-forget: un fallo no debe tirar nada.
 async function tmuxSetStatus(name: string, on: boolean): Promise<void> {
   try {
-    await execFileP('tmux', ['set-option', '-t', `=${name}:`, 'status', on ? 'on' : 'off'])
+    await runTmux(['set-option', '-t', `=${name}:`, 'status', on ? 'on' : 'off'])
   } catch { /* sesión muerta o sin permisos: sin efecto */ }
 }
 
@@ -165,17 +223,16 @@ async function tmuxRefreshClients(name: string): Promise<void> {
   // dejar el buffer de xterm corrupto y, si el viewport no cambió, ningún
   // resize va a forzar el repaint (tarea 11).
   try {
-    const { stdout } = await execFileP('tmux', ['list-clients', '-t', `=${name}`, '-F', '#{client_tty}'])
+    const stdout = await runTmux(['list-clients', '-t', `=${name}`, '-F', '#{client_tty}'])
     const ttys = stdout.split('\n').map((l) => l.trim()).filter(Boolean)
-    await Promise.all(ttys.map((tty) => execFileP('tmux', ['refresh-client', '-t', tty]).catch(() => {})))
+    await Promise.all(ttys.map((tty) => runTmux(['refresh-client', '-t', tty]).catch(() => {})))
   } catch {
     /* sesión sin clientes o muerta: nada que refrescar */
   }
 }
 
 async function tmuxPaneDir(name: string): Promise<string> {
-  const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{pane_current_path}'])
-  return stdout.trim()
+  return (await runTmux(['display-message', '-p', '-t', `=${name}:`, '#{pane_current_path}'])).trim()
 }
 
 /**
@@ -193,8 +250,7 @@ async function tmuxPaneDir(name: string): Promise<string> {
  * justo lo que el naming quiere saber (de qué dir nació esta sesión).
  */
 async function tmuxSessionPath(name: string): Promise<string> {
-  const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{session_path}'])
-  return stdout.trim()
+  return (await runTmux(['display-message', '-p', '-t', `=${name}:`, '#{session_path}'])).trim()
 }
 
 // --- estado por sesión (semáforo de chips, tarea 4) -------------------------
@@ -257,8 +313,7 @@ async function claudeRunningInSession(name: string): Promise<boolean> {
   try {
     // display-message contra un target inexistente devuelve vacío con exit 0
     // (gotcha 3) → cmd vacío → sesión muerta → no hay claude.
-    const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{pane_current_command}'])
-    const cmd = stdout.trim()
+    const cmd = (await runTmux(['display-message', '-p', '-t', `=${name}:`, '#{pane_current_command}'])).trim()
     if (!cmd) return false
     return !SHELL_CMD_RE.test(cmd)
   } catch {
@@ -277,8 +332,7 @@ async function claudeRunningInSession(name: string): Promise<boolean> {
 // vacío, Y matchea SHELL_CMD_RE. Sesión muerta o con claude corriendo → false.
 async function paneAtShellPrompt(name: string): Promise<boolean> {
   try {
-    const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{pane_current_command}'])
-    const cmd = stdout.trim()
+    const cmd = (await runTmux(['display-message', '-p', '-t', `=${name}:`, '#{pane_current_command}'])).trim()
     if (!cmd) return false // sesión muerta / target inexistente (gotcha 3)
     return SHELL_CMD_RE.test(cmd)
   } catch {
@@ -399,7 +453,7 @@ async function tmuxListSessions(): Promise<Array<{ name: string; attached: boole
     // fusionando nombre y flag en "deck_0"; la UI listaba esos nombres
     // fantasma y attach-or-create los CREABA. El espacio es imprimible en
     // cualquier locale y SESSION_RE garantiza que un nombre no lo contiene.
-    stdout = (await execFileP('tmux', ['list-sessions', '-F', '#{session_name} #{session_attached}'])).stdout
+    stdout = await runTmux(['list-sessions', '-F', '#{session_name} #{session_attached}'])
   } catch {
     return [] // no hay servidor tmux corriendo
   }
@@ -458,7 +512,7 @@ async function resolveGitDir(session: string | undefined): Promise<string> {
   const dir = session ? await resolvePaneDir(session) : defaultDirEffective()
   let toplevel: string
   try {
-    toplevel = (await execFileP('git', ['-C', dir, 'rev-parse', '--show-toplevel'])).stdout.trim()
+    toplevel = (await runGit(dir, ['rev-parse', '--show-toplevel'])).trim()
   } catch {
     throw new HttpError(400, `el directorio de la sesión no es un repo git: ${dir}`)
   }
@@ -474,7 +528,7 @@ async function resolveFsDir(session: string | undefined): Promise<string> {
   const dir = session ? await resolvePaneDir(session) : defaultDirEffective()
   let top = dir
   try {
-    top = (await execFileP('git', ['-C', dir, 'rev-parse', '--show-toplevel'])).stdout.trim() || dir
+    top = (await runGit(dir, ['rev-parse', '--show-toplevel'])).trim() || dir
   } catch {
     /* no es un repo: se lista el directorio del pane */
   }
@@ -492,8 +546,7 @@ interface GitFile {
 }
 
 async function gitSummary(dir: string) {
-  const { stdout } = await execFileP('git', [
-    '-C', dir,
+  const stdout = await runGit(dir, [
     'status', '--porcelain=v2', '--branch', '--untracked-files=all',
   ], { maxBuffer: 10 * 1024 * 1024 })
 
@@ -564,7 +617,7 @@ async function gitDiff(dir: string, rel: string, staged: boolean): Promise<strin
   // ¿Untracked? (no está en el index pero existe en disco)
   let untracked = false
   try {
-    await execFileP('git', ['-C', dir, 'ls-files', '--error-unmatch', '--', rel])
+    await runGit(dir, ['ls-files', '--error-unmatch', '--', rel])
   } catch {
     untracked = fs.existsSync(abs)
   }
@@ -574,16 +627,16 @@ async function gitDiff(dir: string, rel: string, staged: boolean): Promise<strin
   if (untracked) {
     // Diff de archivo nuevo; exit code 1 es normal en --no-index con diferencias.
     try {
-      out = (await execFileP('git', ['-C', dir, 'diff', '--no-color', '--no-index', '--', '/dev/null', rel], opts)).stdout
+      out = await runGit(dir, ['diff', '--no-color', '--no-index', '--', '/dev/null', rel], opts)
     } catch (e: any) {
       if (e && typeof e.code === 'number' && e.code === 1 && typeof e.stdout === 'string') out = e.stdout
       else throw e
     }
   } else {
     const args = staged
-      ? ['-C', dir, 'diff', '--cached', '--no-color', '--', rel]
-      : ['-C', dir, 'diff', '--no-color', '--', rel]
-    out = (await execFileP('git', args, opts)).stdout
+      ? ['diff', '--cached', '--no-color', '--', rel]
+      : ['diff', '--no-color', '--', rel]
+    out = await runGit(dir, args, opts)
   }
 
   if (Buffer.byteLength(out) > DIFF_LIMIT) {
@@ -596,21 +649,20 @@ async function gitStage(dir: string, rel: string, action: 'stage' | 'unstage'): 
   checkRepoPath(dir, rel)
   try {
     if (action === 'stage') {
-      await execFileP('git', ['-C', dir, 'add', '--', rel])
+      await runGit(dir, ['add', '--', rel])
     } else {
       // repo sin commits: no hay HEAD contra el que restaurar → sacar del index
       let hasHead = true
       try {
-        await execFileP('git', ['-C', dir, 'rev-parse', '--verify', 'HEAD'])
+        await runGit(dir, ['rev-parse', '--verify', 'HEAD'])
       } catch {
         hasHead = false
       }
-      if (hasHead) await execFileP('git', ['-C', dir, 'restore', '--staged', '--', rel])
-      else await execFileP('git', ['-C', dir, 'rm', '-r', '--cached', '--', rel])
+      if (hasHead) await runGit(dir, ['restore', '--staged', '--', rel])
+      else await runGit(dir, ['rm', '-r', '--cached', '--', rel])
     }
-  } catch (e: any) {
-    const msg = String(e?.stderr || e?.message || e).split('\n')[0]
-    throw new HttpError(400, `git ${action === 'stage' ? 'add' : 'restore --staged'} falló: ${msg}`)
+  } catch (e) {
+    throw new HttpError(400, `git ${action === 'stage' ? 'add' : 'restore --staged'} falló: ${firstErrLine(e)}`)
   }
 }
 
@@ -620,13 +672,14 @@ async function gitStage(dir: string, rel: string, action: 'stage' | 'unstage'): 
 // cual (no seteamos user/email/trailer: los commits parecen de Lucas).
 async function gitCommit(dir: string, message: string): Promise<string> {
   try {
-    await execFileP('git', ['-C', dir, 'commit', '-m', message])
+    await runGit(dir, ['commit', '-m', message])
   } catch (e: any) {
+    // NO firstErrLine a propósito: git commit reporta "nothing to commit" por
+    // STDOUT, así que la cadena incluye stdout y el fallback es más específico
     const msg = String(e?.stderr || e?.stdout || e?.message || e).split('\n').filter(Boolean)[0] || 'git commit falló'
     throw new HttpError(400, msg)
   }
-  const { stdout } = await execFileP('git', ['-C', dir, 'rev-parse', '--short', 'HEAD'])
-  return stdout.trim()
+  return (await runGit(dir, ['rev-parse', '--short', 'HEAD'])).trim()
 }
 
 // Push sin flags del cliente; --force/-f NO existen acá. Si la rama no tiene
@@ -635,20 +688,20 @@ async function gitCommit(dir: string, message: string): Promise<string> {
 async function gitPush(dir: string): Promise<void> {
   let hasUpstream = true
   try {
-    await execFileP('git', ['-C', dir, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
+    await runGit(dir, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
   } catch {
     hasUpstream = false
   }
-  let args = ['-C', dir, 'push']
+  let args = ['push']
   if (!hasUpstream) {
-    const branch = (await execFileP('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
+    const branch = (await runGit(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
     // detached / sin commits → push a secas: git tira el error correcto y sube al cliente
-    if (branch && branch !== 'HEAD') args = ['-C', dir, 'push', '-u', 'origin', branch]
+    if (branch && branch !== 'HEAD') args = ['push', '-u', 'origin', branch]
   }
   try {
-    await execFileP('git', args, { timeout: 60000 })
+    await runGit(dir, args, { timeout: 60000 })
   } catch (e: any) {
-    // errores de auth son verbosos: hasta ~500 chars, multilínea OK
+    // NO firstErrLine a propósito: errores de auth son verbosos, multilínea OK
     const raw = String(e?.stderr || e?.stdout || e?.message || e).trim()
     throw new HttpError(400, raw.slice(0, 500) || 'git push falló')
   }
@@ -669,9 +722,9 @@ interface Commit {
 }
 async function gitLog(dir: string, n: number): Promise<Commit[]> {
   try {
-    const { stdout } = await execFileP(
-      'git',
-      ['-C', dir, 'log', '--no-color', '-n', String(n), '--format=%x01%h%x00%s%x00%an%x00%ct', '--numstat'],
+    const stdout = await runGit(
+      dir,
+      ['log', '--no-color', '-n', String(n), '--format=%x01%h%x00%s%x00%an%x00%ct', '--numstat'],
       { maxBuffer: 10 * 1024 * 1024 },
     )
     const commits: Commit[] = []
@@ -699,7 +752,7 @@ async function gitLog(dir: string, n: number): Promise<Commit[]> {
 async function gitShow(dir: string, hash: string): Promise<string> {
   let out = ''
   try {
-    out = (await execFileP('git', ['-C', dir, 'show', '--no-color', hash], { maxBuffer: 10 * 1024 * 1024 })).stdout
+    out = await runGit(dir, ['show', '--no-color', hash], { maxBuffer: 10 * 1024 * 1024 })
   } catch {
     throw new HttpError(404, 'commit no encontrado')
   }
@@ -965,8 +1018,7 @@ app.get('/api/tmux/scrollback', async (c) => {
   lines = Math.min(Math.max(lines, 1), SCROLLBACK_MAX)
   // target `=sesion:` — capture-pane no acepta `=sesion` pelado (gotcha 3);
   // maxBuffer holgado: 5000 líneas anchas superan el mega default de execFile
-  const { stdout } = await execFileP(
-    'tmux',
+  const stdout = await runTmux(
     ['capture-pane', '-p', '-t', `=${session}:`, '-S', `-${lines}`],
     { maxBuffer: 8 * 1024 * 1024 },
   )
@@ -1230,14 +1282,14 @@ app.get('/api/git/branches', async (c) => {
   const dir = await resolveGitDir(c.req.query('session'))
   let current = ''
   try {
-    current = (await execFileP('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim()
+    current = (await runGit(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
   } catch {
     /* repo sin commits: sin HEAD */
   }
   if (current === 'HEAD') current = '' // detached: nada que preseleccionar
   let branches: string[] = []
   try {
-    branches = (await execFileP('git', ['-C', dir, 'branch', '--format=%(refname:short)'])).stdout
+    branches = (await runGit(dir, ['branch', '--format=%(refname:short)']))
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean)
@@ -1317,20 +1369,20 @@ app.post('/api/worktree', async (c) => {
   if (fs.existsSync(wtPath)) throw new HttpError(409, `ya existe ${wtPath}`)
 
   try {
-    await execFileP('git', ['-C', repo, 'worktree', 'add', wtPath, '-b', branch, base])
+    await runGit(repo, ['worktree', 'add', wtPath, '-b', branch, base])
   } catch (e: any) {
     // rama existente, base inexistente, etc. — el primer renglón de git alcanza
-    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    const msg = firstErrLine(e)
     throw new HttpError(400, `git worktree add falló: ${msg}`)
   }
 
   const session = await worktreeSessionName(branch)
   try {
-    await execFileP('tmux', ['new-session', '-d', '-s', session, '-c', wtPath])
+    await runTmux(['new-session', '-d', '-s', session, '-c', wtPath])
   } catch (e: any) {
     // el worktree quedó creado pero sin sesión: avisar sin inventar rollback
     // (borrar un worktree recién pedido sería peor que dejarlo attacheable)
-    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    const msg = firstErrLine(e)
     throw new HttpError(500, `worktree creado en ${wtPath}, pero tmux falló: ${msg}`)
   }
   // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
@@ -1553,9 +1605,9 @@ app.post('/api/dispatch', async (c) => {
   const session = await dispatchSessionName(dir)
 
   try {
-    await execFileP('tmux', ['new-session', '-d', '-s', session, '-c', dir])
+    await runTmux(['new-session', '-d', '-s', session, '-c', dir])
   } catch (e: any) {
-    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    const msg = firstErrLine(e)
     throw new HttpError(500, `tmux falló: ${msg}`)
   }
   // sesión ya nacida: registrar el MRU (tarea 39). Best-effort, no aborta el
@@ -1576,11 +1628,11 @@ app.post('/api/dispatch', async (c) => {
   const line = `${CLAUDE_BIN} ${shQuote(prompt)} --permission-mode ${mode}${modelFlag}${effortFlag}`
   await new Promise((r) => setTimeout(r, 250))
   try {
-    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, '-l', line])
+    await tmuxSendKeys(session, '-l', line)
     await new Promise((r) => setTimeout(r, 150))
-    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, 'Enter'])
+    await tmuxSendKeys(session, 'Enter')
   } catch (e: any) {
-    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    const msg = firstErrLine(e)
     throw new HttpError(500, `sesión ${session} creada, pero el envío del prompt falló: ${msg}`)
   }
   console.log(`[deck] ${new Date().toISOString()} dispatch ${dirName} (modo ${mode}${model ? `, modelo ${model}` : ''}${effort ? `, effort ${effort}` : ''}) -> sesión ${session}`)
@@ -1621,9 +1673,9 @@ app.post('/api/session/new', async (c) => {
   const session = await dispatchSessionName(dir)
 
   try {
-    await execFileP('tmux', ['new-session', '-d', '-s', session, '-c', dir])
+    await runTmux(['new-session', '-d', '-s', session, '-c', dir])
   } catch (e: any) {
-    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    const msg = firstErrLine(e)
     throw new HttpError(500, `tmux falló: ${msg}`)
   }
   // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
@@ -1673,10 +1725,10 @@ app.post('/api/session/cd', async (c) => {
 
   const line = `cd ${shQuote(dir)} && clear`
   try {
-    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, '-l', line])
-    await execFileP('tmux', ['send-keys', '-t', `=${session}:`, 'Enter'])
+    await tmuxSendKeys(session, '-l', line)
+    await tmuxSendKeys(session, 'Enter')
   } catch (e: any) {
-    const msg = String(e?.stderr || e?.message || e).split('\n').filter(Boolean)[0] || 'error'
+    const msg = firstErrLine(e)
     throw new HttpError(500, `cd falló: ${msg}`)
   }
   // MRU (tarea 39): best-effort, no aborta la respuesta si falla la escritura
