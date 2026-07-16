@@ -124,14 +124,17 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
     }
     wantedSession = getSession()
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    // create=1 solo cuando ESTE cliente pidió crear (botón +); la default la
-    // permite el server. Un retry/resume nunca crea: si la sesión murió en
-    // otro lado, el server contesta meta gone y caemos a una viva.
-    const create = wantedSession === useDeckStore.getState().expectCreate ? '&create=1' : ''
+    // La PWA NUNCA manda create=1 (tarea 43): todo nacimiento pedido por el
+    // usuario pasa por HTTP (/api/session/new, con dir explícito), así que acá
+    // solo attacheamos. La default sigue siendo creable server-side (la exime
+    // handleTerm). Un retry/resume tampoco crea: si la sesión murió en otro
+    // lado, el server contesta meta gone y caemos a una viva. El server mantiene
+    // el param create=1 en su contrato (lo cubre ws-test), simplemente el panel
+    // ya no lo usa.
     // statusbar=off aplica la pref (ocultar la franja verde de tmux) YA en el
     // attach, sin race: el server la chainea al new-session (ver handleTerm)
     const statusbar = useDeckStore.getState().hideTmuxStatus ? '&statusbar=off' : ''
-    const url = `${proto}://${location.host}/ws/term?session=${encodeURIComponent(wantedSession ?? '')}${create}${statusbar}`
+    const url = `${proto}://${location.host}/ws/term?session=${encodeURIComponent(wantedSession ?? '')}${statusbar}`
     const sock = new WebSocket(url)
     ws = sock
 
@@ -165,16 +168,19 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
           // la sesión ya no existe (matada en otro tab/dispositivo, o reboot
           // de la Mac): no insistir con retries — caer a una sesión viva
           store.fallbackToLiveSession()
-        } else if (m.created && m.session !== store.defaultSession && m.session !== store.expectCreate) {
-          // Este cliente no pidió crear nada: la sesión fue matada en otro
-          // tab/dispositivo y este reconnect la acaba de resucitar (attach-or-
-          // create). Sin este guard, "borrar" una sesión la respawnea al toque
-          // mientras haya otro cliente mirándola. Matarla de vuelta y caer a
-          // una viva; la default queda exenta (recrearla siempre es deseado).
+        } else if (m.created && m.session !== store.defaultSession) {
+          // Este cliente no pidió crear nada (la PWA no manda create=1 desde la
+          // tarea 43): la sesión fue matada en otro tab/dispositivo y este
+          // reconnect la acaba de resucitar (attach-or-create). Sin este guard,
+          // "borrar" una sesión la respawnea al toque mientras haya otro cliente
+          // mirándola. Matarla de vuelta y caer a una viva; la default queda
+          // exenta (recrearla siempre es deseado).
           api(`/api/tmux/sessions/${encodeURIComponent(m.session)}`, { method: 'DELETE' }).catch(() => {})
           store.fallbackToLiveSession()
         } else {
-          useDeckStore.setState({ expectCreate: null })
+          // meta.created acá solo puede ser la default recreándose sola; las
+          // sesiones del "+" nacen por HTTP y llegan a este attach ya existiendo
+          // (created=false), con el hint disparado por createSession
           if (m.created) store.showHint()
           // (RE)ENVIAR EL RESIZE AL RECIBIR meta (tarea 33): el resize del onopen
           // puede perderse porque el server registra su handler de mensajes tras

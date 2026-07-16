@@ -53,8 +53,8 @@ export function WorktreeSheet() {
     }
     closeWorktreeSheet()
     setBranch('')
-    // la sesión ya existe server-side: selectSession pelado (sin expectCreate /
-    // create=1) y el guard anti-resurrección ve una sesión viva
+    // la sesión ya existe server-side: selectSession pelado y el guard
+    // anti-resurrección ve una sesión viva (created=false)
     selectSession(res.session)
   }
 

@@ -1923,6 +1923,7 @@ body.kb-open .tabbar { display: none; }
 }
 .proj-dir-new,
 .proj-dir-cd,
+.proj-make-default,
 .proj-pin,
 .proj-unpin,
 .proj-pin-toggle {
@@ -1954,6 +1955,28 @@ body.kb-open .tabbar { display: none; }
   color: var(--muted);
 }
 .proj-pin-toggle.pinned { color: var(--accent); border-color: var(--accent-dim); }
+
+/* "hacer default" / badge "default" (tarea 43): el home del panel, donde el "+"
+   de los chips pare las sesiones. El badge NO es un boton (no hay desfijar: el
+   default siempre es alguno), por eso no lleva los estilos tocables de arriba. */
+.proj-make-default {
+  min-height: 28px;
+  padding: 2px 8px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.proj-default-badge {
+  padding: 2px 8px;
+  border-radius: 17px;
+  border: 1px solid var(--accent-dim);
+  background: var(--panel-2);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
 
 /* arbol de EXPLORAR: nodo shallow lazy, indentado por anidamiento de .proj-tree-child */
 .proj-tree-node { padding: 2px 0; }

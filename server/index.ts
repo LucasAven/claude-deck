@@ -73,11 +73,16 @@ for (const raw of WORKSPACES_ROOTS_RAW.split(':').map((s) => s.trim()).filter(Bo
 }
 if (WORKSPACES_ROOTS.length === 0) die('WORKSPACES_ROOTS quedó vacío tras el parseo (solo separadores ":" o espacios)')
 // Sin DEFAULT_DIR explícito: la primera raíz (mismo default que el singular viejo).
-const DEFAULT_DIR = process.env.DEFAULT_DIR || WORKSPACES_ROOTS[0]
-
-if (!fs.existsSync(DEFAULT_DIR) || !fs.statSync(DEFAULT_DIR).isDirectory()) die(`DEFAULT_DIR no existe o no es un directorio: ${DEFAULT_DIR}`)
-if (!WORKSPACES_ROOTS.some((root) => insideDir(fs.realpathSync(DEFAULT_DIR), root)))
-  die(`DEFAULT_DIR debe estar dentro de alguna raíz del perímetro: ${DEFAULT_DIR} ⊄ union{${WORKSPACES_ROOTS.join(', ')}}`)
+// Es solo el FALLBACK del home: el default vivo lo manda defaultDirEffective()
+// (el elegido desde la PWA gana, tarea 43).
+const DEFAULT_DIR_RAW = process.env.DEFAULT_DIR || WORKSPACES_ROOTS[0]
+if (!fs.existsSync(DEFAULT_DIR_RAW) || !fs.statSync(DEFAULT_DIR_RAW).isDirectory()) die(`DEFAULT_DIR no existe o no es un directorio: ${DEFAULT_DIR_RAW}`)
+// realpath-eado como las raíces (tarea 43): el frontend compara esta ruta contra
+// las de pins/recientes/browse (todas realpath-eadas) para pintar el badge de
+// default; sin normalizar, un symlink o una barra final darían un falso negativo.
+const DEFAULT_DIR = fs.realpathSync(DEFAULT_DIR_RAW)
+if (!WORKSPACES_ROOTS.some((root) => insideDir(DEFAULT_DIR, root)))
+  die(`DEFAULT_DIR debe estar dentro de alguna raíz del perímetro: ${DEFAULT_DIR_RAW} ⊄ union{${WORKSPACES_ROOTS.join(', ')}}`)
 if (!AUTH_TOKEN) die('falta AUTH_TOKEN — el servidor no arranca sin token (ver README, sección Seguridad)')
 if (AUTH_TOKEN.length < 32) die('AUTH_TOKEN demasiado corto: debe tener al menos 32 caracteres (probá: openssl rand -hex 32)')
 
@@ -170,6 +175,25 @@ async function tmuxRefreshClients(name: string): Promise<void> {
 
 async function tmuxPaneDir(name: string): Promise<string> {
   const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{pane_current_path}'])
+  return stdout.trim()
+}
+
+/**
+ * Directorio de NACIMIENTO de una sesión (el `-c` del new-session). A diferencia
+ * de tmuxPaneDir NO sigue el cwd vivo del shell, y por eso es la señal del
+ * naming (dispatchSessionName), no del resto.
+ *
+ * Por qué (medido 2026-07-15, tarea 43): `pane_current_path` es INESTABLE en los
+ * primeros ~50 ms de vida de la sesión, porque refleja el cwd del shell mientras
+ * corre su rc y zsh se mete en `~/.oh-my-zsh` de paso. Leerlo en esa ventana
+ * hacía que una segunda sesión sobre el MISMO dir leyera "/Users/lucas/.oh-my-zsh"
+ * como dir de la primera, la tomara por un homónimo de otro proyecto y se llevara
+ * el prefijo del padre: `a-claude-deck` en vez de `claude-deck-2`. `session_path`
+ * queda clavado en el `-c` y no sufre ni el arranque ni un `cd` posterior, que es
+ * justo lo que el naming quiere saber (de qué dir nació esta sesión).
+ */
+async function tmuxSessionPath(name: string): Promise<string> {
+  const { stdout } = await execFileP('tmux', ['display-message', '-p', '-t', `=${name}:`, '#{session_path}'])
   return stdout.trim()
 }
 
@@ -425,12 +449,13 @@ function checkInsideWorkspaces(p: string): string {
 
 /**
  * Resuelve el directorio git sobre el que operar.
- * Sin `session` → DEFAULT_DIR. Con `session` → directorio actual del pane de
- * esa sesión tmux. En ambos casos, validado como repo git dentro del perímetro
- * (union de WORKSPACES_ROOTS).
+ * Sin `session` → el home efectivo del panel (defaultDirEffective, tarea 43).
+ * Con `session` → directorio actual del pane de esa sesión tmux. En ambos
+ * casos, validado como repo git dentro del perímetro (union de
+ * WORKSPACES_ROOTS).
  */
 async function resolveGitDir(session: string | undefined): Promise<string> {
-  const dir = session ? await resolvePaneDir(session) : DEFAULT_DIR
+  const dir = session ? await resolvePaneDir(session) : defaultDirEffective()
   let toplevel: string
   try {
     toplevel = (await execFileP('git', ['-C', dir, 'rev-parse', '--show-toplevel'])).stdout.trim()
@@ -446,7 +471,7 @@ async function resolveGitDir(session: string | undefined): Promise<string> {
  * estable aunque el shell haya hecho cd), si no, el directorio del pane.
  */
 async function resolveFsDir(session: string | undefined): Promise<string> {
-  const dir = session ? await resolvePaneDir(session) : DEFAULT_DIR
+  const dir = session ? await resolvePaneDir(session) : defaultDirEffective()
   let top = dir
   try {
     top = (await execFileP('git', ['-C', dir, 'rev-parse', '--show-toplevel'])).stdout.trim() || dir
@@ -893,7 +918,9 @@ app.onError((err, c) => {
   return c.json({ error: 'internal error' }, 500)
 })
 
-app.get('/api/config', (c) => c.json({ session: TMUX_SESSION, defaultDir: DEFAULT_DIR }))
+// `defaultDir` sale EFECTIVO (el elegido desde la PWA o el fallback del .env,
+// tarea 43): es el dir donde el "+" de la fila de chips pare la sesión.
+app.get('/api/config', (c) => c.json({ session: TMUX_SESSION, defaultDir: defaultDirEffective() }))
 
 app.get('/api/tmux/sessions', async (c) => c.json(await tmuxListSessions()))
 
@@ -1393,41 +1420,54 @@ function shQuote(s: string): string {
 }
 
 /**
- * Nombre de sesión para el dispatch, con desambiguación de homónimos (tarea
- * 39, decisión de Lucas). `dir` ya llega realpath-eado y validado dentro de
- * la unión.
+ * Nombre de sesión para el dispatch y para "+ nueva sesión acá", con
+ * desambiguación de homónimos (tarea 39). `dir` ya llega realpath-eado y
+ * validado dentro de la unión. Siempre devuelve un nombre LIBRE: varias
+ * sesiones sobre el mismo dir son legítimas (decisión de Lucas 2026-07-15,
+ * ver abajo), así que ningún caso aborta.
  *
  * Regla:
  *  1. Preferido: sanitizeToSession(basename(dir)). Compat con el caso de un
- *     solo nivel (el de antes de esta tarea): "~/proyectos/claude-deck" sigue
- *     dando la sesión "claude-deck".
+ *     solo nivel: "~/proyectos/claude-deck" sigue dando la sesión
+ *     "claude-deck".
  *  2. Si el preferido (o su acompañante "-shell") está tomado por una sesión
- *     cuyo pane dir resuelve al MISMO `dir`, es un 409 "ya hay una sesión
- *     ahí" (decisión (a) de la tarea 6: nunca doblar sesión sobre el mismo
- *     directorio con un sufijo numérico).
+ *     cuyo pane dir resuelve al MISMO `dir`, se apila con sufijo numérico
+ *     sobre el BASE: claude-deck-2, claude-deck-3. El prefijo del padre NO
+ *     aplica acá: no hay homonimia que aclarar, es el mismo proyecto y el
+ *     número es lo que distingue.
  *  3. Si está tomado pero el pane dir es OTRO directorio (homónimo real, ej.
- *     dos carpetas "web" en raíces distintas), NO es un 409 espurio: se
- *     desambigua a sanitizeToSession("<basename del padre>-<basename>"). Si
- *     ESE nombre también choca con un dir distinto, sufijo numérico como
- *     worktreeSessionName (-2, -3, ...).
+ *     dos carpetas "web" en raíces distintas), se desambigua a
+ *     sanitizeToSession("<basename del padre>-<basename>"), que dice ALGO del
+ *     dir. Si ESE nombre también está tomado (por el mismo dir o por otro),
+ *     sufijo numérico sobre el prefijado.
  *  4. Si no se puede resolver el pane dir de una sesión tomada (murió entre
- *     el check y el resolve, o quedó rara), se trata como colisión: se
- *     desambigua igual, nunca se asume "mismo dir" a ciegas ni se 409-ea sin
- *     evidencia.
+ *     el check y el resolve, o quedó rara), se trata como homónimo: se
+ *     desambigua igual, nunca se asume "mismo dir" a ciegas.
  *
  * Asimetría documentada a propósito: el PRIMER homónimo despachado se queda
  * con el nombre pelado; los que vienen después cargan el prefijo del padre.
  * Es la regla elegida (desambiguar recién en la colisión), no un bug.
+ *
+ * Historia: hasta 2026-07-15 el caso 2 era un 409 "ya hay una sesión ahí"
+ * (decisión (a) de la tarea 6: nunca doblar sesión sobre el mismo dir). Lucas
+ * lo revirtió: querer DOS claude sobre el mismo path (uno laburando, otro para
+ * preguntar) es un caso real, y el 409 solo lo estorbaba. Nunca fue una
+ * invariante de seguridad, y tmux no impone nada. Contrapartida asumida: el
+ * panel ya no avisa si despachás un segundo agente sobre el mismo working tree
+ * (para trabajo paralelo aislado está el worktree en un tap, tarea 5).
  */
-async function dispatchSessionName(dir: string): Promise<{ name: string; sameDir: boolean }> {
+async function dispatchSessionName(dir: string): Promise<string> {
   async function status(name: string): Promise<'free' | 'same' | 'other'> {
     const nameExists = await tmuxHasSession(name)
     const shellExists = await tmuxHasSession(`${name}-shell`)
     if (!nameExists && !shellExists) return 'free'
     const probe = nameExists ? name : `${name}-shell`
     try {
-      const existingDir = fs.realpathSync(await resolvePaneDir(probe))
-      return existingDir === dir ? 'same' : 'other'
+      // session_path, NO pane_current_path: ver tmuxSessionPath (el cwd vivo es
+      // basura durante el arranque del shell y ensuciaba el nombre)
+      const born = await tmuxSessionPath(probe)
+      if (!born || !path.isAbsolute(born)) return 'other'
+      return fs.realpathSync(born) === dir ? 'same' : 'other'
     } catch {
       return 'other' // no se pudo resolver: tratar como colisión, desambiguar
     }
@@ -1435,20 +1475,20 @@ async function dispatchSessionName(dir: string): Promise<{ name: string; sameDir
 
   const base = sanitizeToSession(path.basename(dir), 'sess')
   const baseStatus = await status(base)
-  if (baseStatus === 'free') return { name: base, sameDir: false }
-  if (baseStatus === 'same') return { name: base, sameDir: true }
+  if (baseStatus === 'free') return base
 
-  const parent = path.basename(path.dirname(dir))
-  const prefixed = sanitizeToSession(`${parent}-${path.basename(dir)}`, 'sess')
-  const prefixedStatus = await status(prefixed)
-  if (prefixedStatus === 'free') return { name: prefixed, sameDir: false }
-  if (prefixedStatus === 'same') return { name: prefixed, sameDir: true }
+  // mismo dir -> apilar sobre el base; homónimo en otro dir -> prefijo del padre
+  let stem = base
+  if (baseStatus === 'other') {
+    const parent = path.basename(path.dirname(dir))
+    const prefixed = sanitizeToSession(`${parent}-${path.basename(dir)}`, 'sess')
+    if ((await status(prefixed)) === 'free') return prefixed
+    stem = prefixed
+  }
 
   for (let n = 2; ; n++) {
-    const candidate = `${prefixed.slice(0, 32 - 1 - String(n).length)}-${n}`
-    const st = await status(candidate)
-    if (st === 'free') return { name: candidate, sameDir: false }
-    if (st === 'same') return { name: candidate, sameDir: true }
+    const candidate = `${stem.slice(0, 32 - 1 - String(n).length)}-${n}`
+    if ((await status(candidate)) === 'free') return candidate
   }
 }
 
@@ -1508,11 +1548,9 @@ app.post('/api/dispatch', async (c) => {
     }
   }
 
-  // decisión de Lucas (a): un dir que YA tiene sesión (el mismo dir) → 409,
-  // nunca <nombre>-2; un homónimo en OTRO dir se desambigua en vez de 409-ear
-  // (ver dispatchSessionName)
-  const { name: session, sameDir } = await dispatchSessionName(dir)
-  if (sameDir) throw new HttpError(409, 'ya hay una sesión ahí')
+  // un dir que ya tiene sesión NO es un error: se apila (<nombre>-2), igual que
+  // un homónimo en otro dir se desambigua (ver dispatchSessionName)
+  const session = await dispatchSessionName(dir)
 
   try {
     await execFileP('tmux', ['new-session', '-d', '-s', session, '-c', dir])
@@ -1549,12 +1587,14 @@ app.post('/api/dispatch', async (c) => {
   return c.json({ session, dir, mode, model, effort })
 })
 
-// "[+ nueva sesion aca]" (tarea 41): crea una sesion tmux PELADA (un shell, sin
-// lanzar claude) enraizada en un dir del perimetro. Es el primo del dispatch sin
-// prompt/modelo/effort: reusa el mismo naming desambiguado (dispatchSessionName,
-// con su 409 sobre el mismo dir), la misma pref hideStatus y el mismo registro
-// de MRU (recordRecentDir, tarea 39). Fire-and-forget: valida ANTES de tocar
-// tmux; el frontend selecciona la sesion devuelta y salta a la tab Claude.
+// "[+ nueva sesion aca]" (tarea 41) y el "+" de la fila de chips (tarea 43):
+// crea una sesion tmux PELADA (un shell, sin lanzar claude) enraizada en un dir
+// del perimetro. Es el primo del dispatch sin prompt/modelo/effort: reusa el
+// mismo naming desambiguado (dispatchSessionName), la misma pref hideStatus y el
+// mismo registro de MRU (recordRecentDir, tarea 39). Fire-and-forget: valida
+// ANTES de tocar tmux; el frontend selecciona la sesion devuelta y salta a la
+// tab Claude. Es el UNICO camino de creacion del panel por HTTP: el "+" pasa por
+// aca con el default efectivo (defaultDirEffective), no por el WS.
 app.post('/api/session/new', async (c) => {
   let body: { path?: unknown; hideStatus?: unknown }
   try {
@@ -1575,10 +1615,10 @@ app.post('/api/session/new', async (c) => {
   }
   if (!fs.statSync(dir).isDirectory()) throw new HttpError(400, 'no es un directorio')
 
-  // mismo naming que el dispatch: 409 si YA hay una sesion en ESE mismo dir,
-  // homonimos en otras raices se desambiguan (ver dispatchSessionName)
-  const { name: session, sameDir } = await dispatchSessionName(dir)
-  if (sameDir) throw new HttpError(409, 'ya hay una sesión ahí')
+  // mismo naming que el dispatch: varias sesiones sobre un mismo dir se apilan
+  // (<nombre>-2) y los homonimos de otras raices se desambiguan por el padre
+  // (ver dispatchSessionName)
+  const session = await dispatchSessionName(dir)
 
   try {
     await execFileP('tmux', ['new-session', '-d', '-s', session, '-c', dir])
@@ -1727,36 +1767,40 @@ app.put('/api/snippets', async (c) => {
 })
 
 // ---------------------------------------------------------------------------
-// Directorios: pins + MRU (tarea 39). Mismo patrón EXACTO que snippets arriba
-// (server-side para que sincronice celu ↔ desktop; JSON propio en
-// ~/.claude-deck, fuera del perímetro WORKSPACES_ROOTS a propósito: es
+// Directorios: pins + MRU + default (tareas 39 y 43). Mismo patrón EXACTO que
+// snippets arriba (server-side para que sincronice celu ↔ desktop; JSON propio
+// en ~/.claude-deck, fuera del perímetro WORKSPACES_ROOTS a propósito: es
 // app-data de la app, no contenido de un repo). Shape: `pins` (curada a mano
-// vía PUT) + `recent` (MRU que el propio server va escribiendo). Las rutas
+// vía PUT) + `recent` (MRU que el propio server va escribiendo) + `defaultDir`
+// (dónde nacen las sesiones del "+", elegido desde la PWA, tarea 43). Las rutas
 // se guardan siempre realpath-eadas.
 //
 // Semillas (decisión de Lucas): a diferencia de los snippets, los pins NO se
 // siembran con nada, arrancan vacíos. El array vacío sigue siendo la
 // "seed" en el sentido de "lo que se sirve si el archivo no existe todavía".
+// `defaultDir` arranca en null = "usá el DEFAULT_DIR del .env".
 const DIRS_FILE = path.join(os.homedir(), '.claude-deck', 'dirs.json')
-const DIRS_SEEDS: { pins: string[]; recent: string[] } = { pins: [], recent: [] }
+type DirsStore = { pins: string[]; recent: string[]; defaultDir: string | null }
+const DIRS_SEEDS: DirsStore = { pins: [], recent: [], defaultDir: null }
 const DIRS_PINS_MAX = 50
 const DIR_PATH_LEN_MAX = 1024
 // MRU: más nueva primera, dedup por ruta realpath-eada, tope 10 (decisión de Lucas).
 const RECENT_DIRS_MAX = 10
 
-function readDirs(): { pins: string[]; recent: string[] } {
+function readDirs(): DirsStore {
   try {
     const raw = JSON.parse(fs.readFileSync(DIRS_FILE, 'utf8'))
     const pins = Array.isArray(raw?.pins) ? raw.pins.filter((s: unknown): s is string => typeof s === 'string') : []
     const recent = Array.isArray(raw?.recent) ? raw.recent.filter((s: unknown): s is string => typeof s === 'string') : []
-    return { pins, recent }
+    const defaultDir = typeof raw?.defaultDir === 'string' && raw.defaultDir.length > 0 ? raw.defaultDir : null
+    return { pins, recent, defaultDir }
   } catch {
     /* sin archivo todavía (primera vez) o JSON roto: seeds (pins vacíos) */
-    return { pins: [...DIRS_SEEDS.pins], recent: [...DIRS_SEEDS.recent] }
+    return { ...DIRS_SEEDS, pins: [...DIRS_SEEDS.pins], recent: [...DIRS_SEEDS.recent] }
   }
 }
 
-function writeDirs(data: { pins: string[]; recent: string[] }): void {
+function writeDirs(data: DirsStore): void {
   fs.mkdirSync(path.dirname(DIRS_FILE), { recursive: true })
   // escritura atómica (tmp + rename), igual que snippets
   const tmp = `${DIRS_FILE}.tmp`
@@ -1774,49 +1818,94 @@ function dirStillValid(p: string): boolean {
   }
 }
 
+/**
+ * Valida una ruta para guardarla en el store (pin o default): realpath, existe,
+ * es directorio y cae dentro de la unión. Devuelve la realpath-eada o tira 400.
+ */
+function resolveStorableDir(p: string): string {
+  let real: string
+  try {
+    real = fs.realpathSync(p)
+  } catch {
+    throw new HttpError(400, `ruta inexistente: ${p}`)
+  }
+  if (!fs.statSync(real).isDirectory()) throw new HttpError(400, `no es un directorio: ${p}`)
+  if (!WORKSPACES_ROOTS.some((root) => insideDir(real, root))) {
+    throw new HttpError(400, `fuera del perímetro (unión de WORKSPACES_ROOTS): ${p}`)
+  }
+  return real
+}
+
+/**
+ * El "home" efectivo del panel (tarea 43): dónde nacen las sesiones nuevas y
+ * sobre qué operan los endpoints sin `?session=`. Gana el default elegido desde
+ * la PWA; si no hay ninguno, o el guardado dejó de ser válido (repo borrado,
+ * perímetro reconfigurado), cae al `DEFAULT_DIR` del `.env`, que siempre es
+ * válido porque se valida al boot. Se lee en cada uso (no se cachea): el store
+ * puede cambiar en cualquier momento desde el celu, y son microsegundos.
+ */
+function defaultDirEffective(): string {
+  const stored = readDirs().defaultDir
+  if (stored && dirStillValid(stored)) return fs.realpathSync(stored)
+  return DEFAULT_DIR
+}
+
 // GET filtra EN LECTURA (no persiste el filtrado): si un pin/recent dejó de
 // existir o quedó fuera de la unión (repo borrado, perímetro reconfigurado),
-// no se muestra, pero el archivo en disco no se toca acá.
+// no se muestra, pero el archivo en disco no se toca acá. `defaultDir` sale
+// EFECTIVO (nunca null): es la ruta donde el "+" va a parir la sesión, sea la
+// elegida o el fallback del .env, así el frontend pinta el badge sin recalcular.
 app.get('/api/dirs', (c) => {
   const stored = readDirs()
   return c.json({
     pins: stored.pins.filter(dirStillValid),
     recent: stored.recent.filter(dirStillValid),
+    defaultDir: defaultDirEffective(),
   })
 })
 
-// Reemplaza la lista completa de pins (como snippets): valida cada ruta
-// (realpath + existe + es directorio + dentro de la unión) y el cap de
-// cantidad/longitud, todo o nada (un solo 400 si algo no cierra).
+// Reemplaza POR CLAVE PRESENTE: `pins` reemplaza la lista completa (como
+// snippets), `defaultDir` setea el home del panel (null = volver al .env). Una
+// clave ausente NO se toca: así el pin/unpin del frontend (que manda solo
+// `pins`) no pisa el default, y "hacer default" (que manda solo `defaultDir`)
+// no pisa los pins. Valida todo ANTES de escribir: todo o nada.
 app.put('/api/dirs', async (c) => {
-  let body: { pins?: unknown }
+  let body: { pins?: unknown; defaultDir?: unknown }
   try {
     body = await c.req.json()
   } catch {
     throw new HttpError(400, 'body JSON requerido')
   }
-  const list = body.pins
-  if (!Array.isArray(list) || list.length > DIRS_PINS_MAX
-    || !list.every((s) => typeof s === 'string' && s.trim().length > 0 && s.length <= DIR_PATH_LEN_MAX)) {
-    throw new HttpError(400, `pins: lista de hasta ${DIRS_PINS_MAX} rutas no vacías (máx ${DIR_PATH_LEN_MAX} caracteres)`)
-  }
-  const resolved: string[] = []
-  for (const p of list as string[]) {
-    let real: string
-    try {
-      real = fs.realpathSync(p)
-    } catch {
-      throw new HttpError(400, `ruta inexistente: ${p}`)
+  const hasPins = 'pins' in body
+  const hasDefault = 'defaultDir' in body
+  if (!hasPins && !hasDefault) throw new HttpError(400, 'nada que actualizar: mandá `pins` y/o `defaultDir`')
+
+  let resolvedPins: string[] | null = null
+  if (hasPins) {
+    const list = body.pins
+    if (!Array.isArray(list) || list.length > DIRS_PINS_MAX
+      || !list.every((s) => typeof s === 'string' && s.trim().length > 0 && s.length <= DIR_PATH_LEN_MAX)) {
+      throw new HttpError(400, `pins: lista de hasta ${DIRS_PINS_MAX} rutas no vacías (máx ${DIR_PATH_LEN_MAX} caracteres)`)
     }
-    if (!fs.statSync(real).isDirectory()) throw new HttpError(400, `no es un directorio: ${p}`)
-    if (!WORKSPACES_ROOTS.some((root) => insideDir(real, root))) {
-      throw new HttpError(400, `fuera del perímetro (unión de WORKSPACES_ROOTS): ${p}`)
-    }
-    resolved.push(real)
+    resolvedPins = (list as string[]).map(resolveStorableDir)
   }
+
+  let resolvedDefault: string | null = null
+  if (hasDefault) {
+    const d = body.defaultDir
+    if (d !== null && (typeof d !== 'string' || d.trim().length === 0 || d.length > DIR_PATH_LEN_MAX)) {
+      throw new HttpError(400, `defaultDir: ruta no vacía (máx ${DIR_PATH_LEN_MAX} caracteres) o null para volver al .env`)
+    }
+    resolvedDefault = d === null ? null : resolveStorableDir(d as string)
+  }
+
   const current = readDirs()
-  writeDirs({ pins: resolved, recent: current.recent })
-  return c.json({ ok: true })
+  writeDirs({
+    pins: resolvedPins ?? current.pins,
+    recent: current.recent,
+    defaultDir: hasDefault ? resolvedDefault : current.defaultDir,
+  })
+  return c.json({ ok: true, defaultDir: defaultDirEffective() })
 })
 
 // MRU: la llama el dispatch (esta tarea) al nacer una sesión, y la tarea 40 la
@@ -1834,7 +1923,7 @@ function recordRecentDir(dir: string): void {
   if (!WORKSPACES_ROOTS.some((root) => insideDir(real, root))) return
   const current = readDirs()
   const recent = [real, ...current.recent.filter((p) => p !== real)].slice(0, RECENT_DIRS_MAX)
-  writeDirs({ pins: current.pins, recent })
+  writeDirs({ ...current, recent })
 }
 
 // Browse (tarea 39): /api/fs/list está anclado a la raíz de una SESIÓN
@@ -2352,12 +2441,17 @@ async function handleTerm(ws: WebSocket, url: URL) {
     // rueda — sin esto, no habría forma de ver scrollback desde el celular.
     // `; set-option status <on|off>`: refleja la pref de la PWA (statusbar=off)
     // al attachear, siempre explícito para RE-encender si otro cliente la apagó.
+    // `-c`: solo pesa si la sesión NO existe todavía (attach-or-create). Desde
+    // la tarea 43 el "+" de los chips crea por HTTP (/api/session/new) con un
+    // dir explícito, así que el único nacimiento que pasa por acá es el de la
+    // sesión default (bootstrap): va al home efectivo, no al DEFAULT_DIR pelado.
+    const homeDir = defaultDirEffective()
     const statusOn = url.searchParams.get('statusbar') !== 'off'
-    p = pty.spawn('tmux', ['new-session', '-A', '-s', tmuxName, '-c', DEFAULT_DIR, ';', 'set-option', 'mouse', 'on', ';', 'set-option', 'status', statusOn ? 'on' : 'off'], {
+    p = pty.spawn('tmux', ['new-session', '-A', '-s', tmuxName, '-c', homeDir, ';', 'set-option', 'mouse', 'on', ';', 'set-option', 'status', statusOn ? 'on' : 'off'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
-      cwd: DEFAULT_DIR,
+      cwd: homeDir,
       env,
     })
   } catch (e) {

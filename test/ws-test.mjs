@@ -464,7 +464,7 @@ try {
 
 // 9j. GET /api/workspaces + POST /api/dispatch (tarea 6): despachar un agente en
 // un dir de WORKSPACES_ROOT con prompt inicial + permission-mode. SOLO los checks
-// deterministas que NO lanzan claude (contrato + rechazos + 409): la integridad
+// deterministas que NO lanzan claude (contrato + rechazos + naming): la integridad
 // del quoting/argv del prompt la aserta el script scratch del agente con un stub
 // (DECK_CLAUDE_BIN), para no arrancar un claude real en la corrida de Lucas.
 // Dir scratch de PRIMER nivel bajo la raíz + un archivo scratch (para verificar
@@ -499,15 +499,24 @@ try {
   ok('dispatch dir ".." → 400', (await dispPost({ dir: '..', prompt: 'x', mode: 'plan' })).status === 400);
   ok('dispatch dir inexistente → 404', (await dispPost({ dir: 'no-existe-zzz', prompt: 'x', mode: 'plan' })).status === 404);
 
-  // 409: decisión de Lucas (a) — un dir que ya tiene sesión no crea <nombre>-2.
-  // Pre-creamos la sesión (nombre = basename sanitizado) y NO lanzamos claude:
-  // el 409 salta antes de spawnear/enviar nada.
+  // Apilado sobre el MISMO dir (tarea 43): hasta el 2026-07-15 esto era un 409
+  // "ya hay una sesión ahí" (decisión (a) de la tarea 6). Lucas lo revirtió:
+  // querer dos claude sobre el mismo path es un caso real, así que ahora se apila
+  // con sufijo numérico sobre el BASE (el prefijo del padre queda solo para
+  // desambiguar homónimos de OTRO dir). Se ejercita por /api/session/new, que usa
+  // el MISMO dispatchSessionName pero NO lanza claude: un dispatch acá dejaría un
+  // claude real corriendo en la corrida de Lucas.
   execFileSync('tmux', ['new-session', '-d', '-s', DISP_NAME, '-c', DISP_DIR]);
-  const dup = await dispPost({ dir: DISP_NAME, prompt: 'x', mode: 'plan' });
-  const dupj = await dup.json();
-  ok('dispatch sobre dir con sesión viva → 409 "ya hay una sesión ahí"',
-    dup.status === 409 && /ya hay una sesión/.test(dupj.error || ''));
+  const stack = await fetch(`${HTTP}/api/session/new`, {
+    method: 'POST',
+    headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+    body: JSON.stringify({ path: DISP_DIR }),
+  });
+  const stackj = await stack.json();
+  ok('session/new sobre un dir que YA tiene sesión → se apila <nombre>-2 (ya no 409)',
+    stack.status === 200 && stackj.session === `${DISP_NAME}-2`);
 } finally {
+  try { execFileSync('tmux', ['kill-session', '-t', `=${DISP_NAME}-2`], { stdio: 'ignore' }); } catch {}
   try { execFileSync('tmux', ['kill-session', '-t', `=${DISP_NAME}`], { stdio: 'ignore' }); } catch {}
   fs.rmSync(DISP_DIR, { recursive: true, force: true });
   fs.rmSync(DISP_FILE, { force: true });
@@ -798,6 +807,38 @@ try {
 } finally {
   if (subsBackup !== null) fs.writeFileSync(SUBS_FILE, subsBackup);
   else fs.rmSync(SUBS_FILE, { force: true });
+}
+
+// 9q. GET /api/dirs + PUT defaultDir (tarea 43): el home del panel, o sea donde
+// el "+" de la fila de chips pare las sesiones nuevas. OJO: esta suite corre
+// contra el server REAL y el store vive en ~/.claude-deck/dirs.json, con los
+// pins y el default de VERDAD de Lucas. Por eso acá van SOLO checks que no
+// escriben: el contrato de lectura y los rechazos (que validan antes de tocar el
+// archivo). El roundtrip de escritura lo cubre el script scratch del agente, que
+// aisla el store con un HOME temporal.
+const dirsPut = (body) => fetch(`${HTTP}/api/dirs`, {
+  method: 'PUT',
+  headers: { 'x-deck-token': TOKEN, 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+{
+  const r = await fetch(`${HTTP}/api/dirs`, { headers: { 'x-deck-token': TOKEN } });
+  const j = await r.json();
+  ok('GET /api/dirs → 200 con pins/recent/defaultDir', r.status === 200
+    && Array.isArray(j.pins) && Array.isArray(j.recent) && typeof j.defaultDir === 'string');
+  // defaultDir sale SIEMPRE efectivo: el elegido desde la PWA o el fallback del
+  // .env, nunca vacío (el frontend lo usa tal cual para crear la sesión)
+  ok('GET /api/dirs → defaultDir absoluto y no vacío', !!j.defaultDir && j.defaultDir.startsWith('/'));
+  const cfg = await (await fetch(`${HTTP}/api/config`, { headers: { 'x-deck-token': TOKEN } })).json();
+  ok('/api/config y /api/dirs coinciden en defaultDir', cfg.defaultDir === j.defaultDir);
+  ok('PUT /api/dirs {} → 400 (nada que actualizar)', (await dirsPut({})).status === 400);
+  ok('PUT defaultDir fuera del perímetro → 400', (await dirsPut({ defaultDir: '/etc' })).status === 400);
+  ok('PUT defaultDir inexistente → 400', (await dirsPut({ defaultDir: `${WROOT}/no-existe-zzz-43` })).status === 400);
+  ok('PUT defaultDir tipo inválido → 400', (await dirsPut({ defaultDir: 42 })).status === 400);
+  // ningún 400 escribe: el store real de Lucas tiene que haber quedado intacto
+  const after = await (await fetch(`${HTTP}/api/dirs`, { headers: { 'x-deck-token': TOKEN } })).json();
+  ok('los rechazos NO tocaron el store real', after.defaultDir === j.defaultDir
+    && JSON.stringify(after.pins) === JSON.stringify(j.pins));
 }
 
 // 10. sesión inexistente → 404

@@ -2282,6 +2282,138 @@ ok('quickkeys: el catálogo ofrece "ctrl+end" (fuera de la barra default)', cend
 ok('quickkeys: "ctrl+end" en la barra se muestra "^End"', cendRun.added && cendRun.barLabel === '^End');
 ok('quickkeys: tap en "ctrl+end" manda CSI 1;5F (\\x1b[1;5F)', cendRun.sentSeq);
 
+// 43. directorio por defecto (tarea 43): el "+" de la fila de chips ya NO crea
+// por el WS con el DEFAULT_DIR del .env clavado, sino que POSTea a
+// /api/session/new con el home efectivo del panel, elegible desde la tab
+// Proyectos. Tres partes: la fila de Ajustes, el POST del "+", y el
+// badge/boton "hacer default" en Proyectos.
+//
+// Va ULTIMA a proposito: el tap del "+" termina en un selectSession que deja
+// seleccionada la sesion mockeada ('zz-nueva'), y no hay bridge de store para
+// devolver la UI a su estado anterior. Como despues solo viene browser.close(),
+// no molesta a nadie. El WS real igual se contiene stubeando
+// claudeConn.reconnect (patron de las secciones 2/3).
+//
+// El "+" ahora es SEGURO de tapear headless: antes creaba una sesion tmux REAL
+// (WS con create=1), por eso las secciones 18/20 solo hacian long-press; ahora,
+// con el fetch mockeado, no nace nada.
+const defdirRun = await page.evaluate(async () => {
+  const realFetch = window.fetch;
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const tap = (el) => {
+    if (!el) return false;
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 43, clientX: 10, clientY: 10 }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 43, clientX: 10, clientY: 10 }));
+    return true;
+  };
+  const out = {};
+
+  const DEF = '/tmp/zzroot/proj-a';
+  const OTHER = '/tmp/zzroot/proj-b';
+  let defaultState = DEF;
+  const newCalls = [];
+  const dirsPuts = [];
+  const sessions = [{ name: 'zz-shell', attached: false, dir: OTHER, state: null, claudeRunning: false }];
+  const workspaces = { roots: [{ root: '/tmp/zzroot', dirs: ['proj-a', 'proj-b'] }], root: '/tmp/zzroot', dirs: ['proj-a', 'proj-b'] };
+
+  window.fetch = (url, opts) => {
+    const u = String(url);
+    if (u.includes('/api/dirs/browse')) {
+      const p = new URL(u, location.origin).searchParams.get('path');
+      return Promise.resolve(new Response(JSON.stringify({ path: p, dirs: p === '/tmp/zzroot' ? ['proj-a', 'proj-b'] : [] }), { status: 200 }));
+    }
+    if (u.includes('/api/dirs') && opts && opts.method === 'PUT') {
+      const body = JSON.parse(opts.body);
+      dirsPuts.push(body);
+      // el server real solo pisa las claves PRESENTES (pins y defaultDir no se
+      // pisan entre si): el mock imita esa semantica
+      if ('defaultDir' in body) defaultState = body.defaultDir === null ? DEF : body.defaultDir;
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, defaultDir: defaultState }), { status: 200 }));
+    }
+    if (u.includes('/api/dirs')) {
+      return Promise.resolve(new Response(JSON.stringify({ pins: [DEF, OTHER], recent: [], defaultDir: defaultState }), { status: 200 }));
+    }
+    if (u.includes('/api/session/new') && opts && opts.method === 'POST') {
+      const body = JSON.parse(opts.body);
+      newCalls.push(body);
+      return Promise.resolve(new Response(JSON.stringify({ session: 'zz-nueva', dir: body.path }), { status: 200 }));
+    }
+    if (u.includes('/api/tmux/sessions')) return Promise.resolve(new Response(JSON.stringify(sessions), { status: 200 }));
+    if (u.includes('/api/workspaces')) return Promise.resolve(new Response(JSON.stringify(workspaces), { status: 200 }));
+    if (u.includes('/api/config')) return Promise.resolve(new Response(JSON.stringify({ session: 'deck', defaultDir: defaultState }), { status: 200 }));
+    return realFetch(url, opts);
+  };
+
+  // el store trae el defaultDir REAL (lo sembro restoreInitialSession al arrancar
+  // la pagina, antes de este mock): refreshProjects lo repisa con el de mentira,
+  // que es justo el camino por el que el poll de la tab lo mantiene al dia
+  await window.refreshProjects();
+  await wait(60);
+
+  // --- (a) fila de Ajustes -------------------------------------------------
+  const gear = document.querySelector('#btn-settings');
+  const sheet = document.querySelector('#settings-sheet');
+  tap(gear); await frame();
+  const dirRow = document.querySelector('#set-dir-row');
+  out.rowPresent = !!dirRow;
+  out.rowSub = dirRow ? (dirRow.querySelector('.set-sub')?.textContent || '') : '';
+  // el chevron cierra Ajustes y salta a Proyectos: el default se elige alla, sin
+  // duplicar el arbol de browse adentro del sheet
+  tap(dirRow); await frame();
+  out.rowClosesSheet = sheet.classList.contains('hidden');
+  out.rowOpensProjects = !!document.querySelector('#view-projects.active');
+
+  // --- (b) el "+" POSTea a /api/session/new con el default -----------------
+  const conn = window.claudeConn;
+  const realReconnect = conn.reconnect;
+  conn.reconnect = () => {}; // que el WS real no se mueva por el selectSession
+  tap(document.querySelector('#btn-new-session'));
+  await wait(250);
+  out.newCallCount = newCalls.length;
+  out.newCallPath = newCalls[0] ? newCalls[0].path : '';
+  out.newCallHasHideStatus = newCalls[0] ? 'hideStatus' in newCalls[0] : false;
+  conn.reconnect = realReconnect;
+
+  // --- (c) badge y "hacer default" en Proyectos ----------------------------
+  const pinRow = (d) => document.querySelector(`.proj-section[data-tier="pins"] .proj-dir[data-dir="${d}"]`);
+  out.badgeOnDefault = !!pinRow(DEF)?.querySelector('.proj-default-badge');
+  out.noBadgeOnOther = !pinRow(OTHER)?.querySelector('.proj-default-badge');
+  out.buttonOnOther = !!pinRow(OTHER)?.querySelector('.proj-make-default');
+  out.noButtonOnDefault = !pinRow(DEF)?.querySelector('.proj-make-default');
+
+  // tap en "hacer default" del otro dir: PUT SOLO con defaultDir (sin pins, para
+  // no pisarlos) y el badge se muda
+  tap(pinRow(OTHER).querySelector('.proj-make-default'));
+  await wait(250);
+  out.putBody = dirsPuts[0] || null;
+  out.putOnlyDefault = !!dirsPuts[0] && 'defaultDir' in dirsPuts[0] && !('pins' in dirsPuts[0]);
+  out.badgeMoved = !!pinRow(OTHER)?.querySelector('.proj-default-badge') && !pinRow(DEF)?.querySelector('.proj-default-badge');
+
+  // el store quedo al dia: la fila de Ajustes (que lo lee) ahora dice proj-b.
+  // Es el proxy de leer el store sin bridge, y de paso prueba que el "+" y el
+  // badge no pueden discrepar (misma fuente).
+  tap(gear); await frame();
+  out.rowSubAfter = document.querySelector('#set-dir-row .set-sub')?.textContent || '';
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+
+  window.fetch = realFetch;
+  return out;
+});
+ok('default: Ajustes tiene la fila "Directorio por defecto" con el basename', defdirRun.rowPresent
+  && defdirRun.rowSub.includes('proj-a'));
+ok('default: la fila de Ajustes cierra el sheet y lleva a Proyectos', defdirRun.rowClosesSheet && defdirRun.rowOpensProjects);
+ok('default: el + POSTea /api/session/new UNA vez con el dir por defecto (ya no crea por el WS)',
+  defdirRun.newCallCount === 1 && defdirRun.newCallPath === '/tmp/zzroot/proj-a');
+ok('default: el + manda la pref hideStatus (la sesión nace sin la franja verde)', defdirRun.newCallHasHideStatus);
+ok('default: el dir por defecto muestra el badge y NO el botón', defdirRun.badgeOnDefault && defdirRun.noButtonOnDefault);
+ok('default: los demás dirs muestran el botón y NO el badge', defdirRun.buttonOnOther && defdirRun.noBadgeOnOther);
+ok('default: "hacer default" PUTea solo defaultDir (no pisa los pins)', defdirRun.putOnlyDefault
+  && defdirRun.putBody.defaultDir === '/tmp/zzroot/proj-b');
+ok('default: el badge se muda al nuevo dir', defdirRun.badgeMoved);
+ok('default: Ajustes refleja el default nuevo (el + y el badge leen la misma fuente)',
+  defdirRun.rowSubAfter.includes('proj-b'));
+
 await browser.close();
 console.log(results.join('\n'));
 process.exit(results.some((r) => r.startsWith('FAIL')) ? 1 : 0);

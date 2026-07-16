@@ -4,6 +4,7 @@ import { closeSettingsSheet, toggleTmuxStatus } from '../../lib/settings'
 import { openHostSheet } from '../../lib/host'
 import { openQuickkeysSheet } from '../../lib/quickkeys'
 import { togglePush } from '../../lib/push'
+import { projName } from '../../lib/projects'
 
 // Sheet de ajustes: lo abre el engranaje de la fila de sesiones (que reemplazó
 // a la campana suelta). Esqueleto host-sheet (siempre montado, toggle hidden,
@@ -49,6 +50,7 @@ const SET_ICONS = {
       <path d="M6.5 9l3 2.5-3 2.5M12 14h5" />
     </>,
   ),
+  folder: svg(<path d="M3 7.5a2 2 0 0 1 2-2h4l2 2.5h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />),
 }
 
 export function SettingsSheet() {
@@ -56,6 +58,8 @@ export function SettingsSheet() {
   const pushState = useDeckStore((s) => s.pushState)
   const h = useDeckStore((s) => s.hostStatus)
   const hideTmuxStatus = useDeckStore((s) => s.hideTmuxStatus)
+  const defaultDir = useDeckStore((s) => s.defaultDir)
+  const setActiveTab = useDeckStore((s) => s.setActiveTab)
 
   const pushTap = useTap(() => togglePush())
   const tmuxTap = useTap(() => toggleTmuxStatus())
@@ -67,6 +71,12 @@ export function SettingsSheet() {
     closeSettingsSheet()
     openQuickkeysSheet()
   })
+  // el default se ELIGE en Proyectos (ahí están pins/recientes/explorar): esta
+  // fila lo muestra y lleva, en vez de duplicar el árbol dentro del sheet
+  const dirTap = useTap(() => {
+    closeSettingsSheet()
+    setActiveTab('projects')
+  })
 
   const pushSub =
     pushState === 'denied'
@@ -74,6 +84,8 @@ export function SettingsSheet() {
       : 'Cuando el agente termina o pide permiso'
   // "MacBook Pro de Lucas · 67% · alertas" (sin batería queda "Mac · alertas")
   const battSub = h ? [h.name || 'Mac', h.battery ? `${h.battery.pct}%` : null, 'alertas'].filter(Boolean).join(' · ') : ''
+  // "claude-deck · acá nacen las sesiones del +" (mismo patrón que battSub)
+  const dirSub = defaultDir ? `${projName(defaultDir)} · acá nacen las sesiones del +` : 'cargando...'
 
   return (
     <div
@@ -112,6 +124,14 @@ export function SettingsSheet() {
             <span className="set-chev">›</span>
           </button>
         )}
+        <button id="set-dir-row" className="set-row" {...dirTap}>
+          <span className="set-ico">{SET_ICONS.folder}</span>
+          <div className="set-info">
+            <div className="set-label">Directorio por defecto</div>
+            <div className="set-sub">{dirSub}</div>
+          </div>
+          <span className="set-chev">›</span>
+        </button>
         <button id="set-qk-row" className="set-row" {...qkTap}>
           <span className="set-ico">{SET_ICONS.keys}</span>
           <div className="set-info">

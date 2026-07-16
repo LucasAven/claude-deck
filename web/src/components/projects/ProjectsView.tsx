@@ -12,6 +12,7 @@ import {
   fetchDirs,
   pin,
   unpin,
+  setDefaultDir,
   browseDir,
   type ProjSession,
 } from '../../lib/projects'
@@ -184,8 +185,39 @@ function PinToggle({
   )
 }
 
+// --- "hacer default" (tarea 43): marca el dir como el home del panel, o sea
+// donde el "+" de la fila de chips pare las sesiones nuevas. El que YA es
+// default muestra un badge en vez del boton (no hay "desfijar": el default
+// siempre es alguno; para volver al del .env se fija ese dir a mano). Espeja
+// defaultDir en el store con la ruta EFECTIVA que devuelve el server, asi el
+// "+" la usa sin re-fetchear. ---
+function DefaultToggle({ dir, isDefault, onChanged }: { dir: string; isDefault: boolean; onChanged: () => void }) {
+  const tap = useTap(async () => {
+    const res = await setDefaultDir(dir)
+    if (!res.ok) {
+      alert(`No se pudo fijar el directorio por defecto: ${res.error}`)
+      return
+    }
+    useDeckStore.setState({ defaultDir: res.defaultDir })
+    onChanged()
+  })
+
+  if (isDefault) {
+    return (
+      <span className="proj-default-badge" title="acá nacen las sesiones nuevas del +">
+        default
+      </span>
+    )
+  }
+  return (
+    <button className="proj-make-default" {...tap} title="hacer default: acá van a nacer las sesiones del +">
+      hacer default
+    </button>
+  )
+}
+
 // --- una fila de directorio (PINNEADOS/RECIENTES): nombre + etiqueta de raiz
-// (desambigua homonimos entre raices, projRootLabel) + acciones + pin ---
+// (desambigua homonimos entre raices, projRootLabel) + acciones + default + pin ---
 function DirRow({
   dir,
   roots,
@@ -195,6 +227,7 @@ function DirRow({
   onChanged,
   pinned,
   pinMode,
+  isDefault,
 }: {
   dir: string
   roots: string[]
@@ -204,15 +237,17 @@ function DirRow({
   onChanged: () => void
   pinned: boolean
   pinMode: 'unpin-only' | 'pin-only'
+  isDefault: boolean
 }) {
   const rootLabel = projRootLabel(dir, roots)
   return (
-    <div className="proj-dir" data-dir={dir}>
+    <div className={'proj-dir' + (isDefault ? ' is-default' : '')} data-dir={dir}>
       <div className="proj-dir-info">
         <span className="proj-dir-name">{projName(dir)}</span>
         {rootLabel && <span className="proj-dir-root">{rootLabel}</span>}
       </div>
       <DirActions dir={dir} activeSession={activeSession} cdEnabled={cdEnabled} cdReason={cdReason} onChanged={onChanged} />
+      <DefaultToggle dir={dir} isDefault={isDefault} onChanged={onChanged} />
       <PinToggle dir={dir} pinned={pinned} mode={pinMode} onChanged={onChanged} />
     </div>
   )
@@ -231,6 +266,7 @@ function TreeNode({
   cdEnabled,
   cdReason,
   onChanged,
+  defaultDir,
 }: {
   path: string
   roots: string[]
@@ -239,6 +275,7 @@ function TreeNode({
   cdEnabled: boolean
   cdReason: string
   onChanged: () => void
+  defaultDir: string
 }) {
   const [expanded, setExpanded] = useState(false)
   const [children, setChildren] = useState<string[] | null>(null)
@@ -263,8 +300,9 @@ function TreeNode({
   const pinned = pins.includes(path)
   const rootLabel = projRootLabel(path, roots)
 
+  const isDefault = path === defaultDir
   return (
-    <div className="proj-tree-node" data-dir={path}>
+    <div className={'proj-tree-node' + (isDefault ? ' is-default' : '')} data-dir={path}>
       <div className="proj-tree-row">
         <button
           className="proj-tree-caret"
@@ -279,6 +317,7 @@ function TreeNode({
           {rootLabel && <span className="proj-dir-root">{rootLabel}</span>}
         </div>
         <DirActions dir={path} activeSession={activeSession} cdEnabled={cdEnabled} cdReason={cdReason} onChanged={onChanged} />
+        <DefaultToggle dir={path} isDefault={isDefault} onChanged={onChanged} />
         <PinToggle dir={path} pinned={pinned} mode="toggle" onChanged={onChanged} />
       </div>
       {expanded && (
@@ -299,6 +338,7 @@ function TreeNode({
                   cdEnabled={cdEnabled}
                   cdReason={cdReason}
                   onChanged={onChanged}
+                  defaultDir={defaultDir}
                 />
               </div>
             ))}
@@ -329,8 +369,10 @@ function ProjectGroup({
       alert(`No se pudo crear la sesión: ${res.error}`)
       return
     }
-    // la sesion ya existe server-side: selectSession pelado (sin expectCreate /
-    // create=1), el guard anti-resurreccion ve una sesion viva (created=false)
+    // la sesion ya existe server-side: selectSession pelado, el guard
+    // anti-resurreccion ve una sesion viva (created=false). Desde la tarea 43
+    // este es el unico patron de creacion del panel: el "+" de los chips hace
+    // exactamente esto con el dir por defecto (ver createSession en store.ts).
     selectSession(res.session)
     setActiveTab('claude')
     onChanged()
@@ -359,6 +401,9 @@ function ProjectGroup({
 export function ProjectsView() {
   const activeTab = useDeckStore((s) => s.activeTab)
   const activeSession = useDeckStore((s) => s.session)
+  // home del panel (tarea 43): marca la fila con el badge "default". Sale del
+  // store para que el badge y el "+" no puedan discrepar.
+  const defaultDir = useDeckStore((s) => s.defaultDir)
   const [sessions, setSessions] = useState<ProjSession[]>([])
   const [roots, setRoots] = useState<string[]>([])
   const [pins, setPins] = useState<string[]>([])
@@ -375,6 +420,9 @@ export function ProjectsView() {
       const d = await fetchDirs()
       setPins(d.pins)
       setRecent(d.recent)
+      // el default puede haber cambiado desde otro dispositivo (el store es
+      // server-side): el poll lo trae y el "+" queda al dia sin recargar
+      if (d.defaultDir) useDeckStore.setState({ defaultDir: d.defaultDir })
     } catch {
       /* error transitorio: conservar pins/recientes actuales */
     }
@@ -456,6 +504,7 @@ export function ProjectsView() {
                 onChanged={refresh}
                 pinned
                 pinMode="unpin-only"
+                isDefault={p === defaultDir}
               />
             ))
           )}
@@ -476,6 +525,7 @@ export function ProjectsView() {
                 onChanged={refresh}
                 pinned={pins.includes(r)}
                 pinMode="pin-only"
+                isDefault={r === defaultDir}
               />
             ))
           )}
@@ -495,6 +545,7 @@ export function ProjectsView() {
                 cdEnabled={cdEnabled}
                 cdReason={cdReason}
                 onChanged={refresh}
+                defaultDir={defaultDir}
               />
             ))
           )}
