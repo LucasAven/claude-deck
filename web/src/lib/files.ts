@@ -1,5 +1,5 @@
 import { useDeckStore, sessionQuery } from '../store'
-import { api } from './api'
+import { deck } from './api'
 
 // Pestaña Archivos: árbol del directorio de la sesión, solo lectura, carga lazy
 // por nivel (app.js:1787-2081). Este módulo tiene los fetch (/api/fs/list,
@@ -26,22 +26,11 @@ export interface FsFile {
 }
 
 export async function fetchList(relPath: string): Promise<FsList> {
-  const q = relPath ? `path=${encodeURIComponent(relPath)}&` : ''
-  const res = await api(`/api/fs/list?${q}${sessionQuery(useDeckStore.getState().session)}`)
-  if (!res.ok) {
-    const err = await res.json().catch(() => null)
-    throw new Error((err && err.error) || `HTTP ${res.status}`)
-  }
-  return res.json()
+  return deck.get<FsList>('/api/fs/list', { session: true, params: relPath ? { path: relPath } : {} })
 }
 
 export async function fetchFile(rel: string): Promise<FsFile> {
-  const res = await api(`/api/fs/file?path=${encodeURIComponent(rel)}&${sessionQuery(useDeckStore.getState().session)}`)
-  if (!res.ok) {
-    const err = await res.json().catch(() => null)
-    throw new Error((err && err.error) || `HTTP ${res.status}`)
-  }
-  return res.json()
+  return deck.get<FsFile>('/api/fs/file', { session: true, params: { path: rel } })
 }
 
 // URL del byte crudo de una imagen del repo, para <img src> (tarea 16). La auth

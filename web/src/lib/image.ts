@@ -1,6 +1,6 @@
 import { useDeckStore } from '../store'
 import type { ImgChip } from '../store'
-import { api } from './api'
+import { deck, AuthError } from './api'
 
 // Imágenes → Claude (app.js:476-687): se re-encodean a PNG en un canvas (los
 // HEIC del iPhone no los entiende el server) y se suben; el server la pone en el
@@ -76,8 +76,9 @@ export async function sendPendingImage() {
   patchChip({ pending: false, meta: `${dims} · enviando…` })
   try {
     const session = useDeckStore.getState().session
-    const res = await api(`/api/paste-image?session=${encodeURIComponent(session ?? '')}`, {
+    const res = await deck.raw('/api/paste-image', {
       method: 'POST',
+      params: { session: session ?? '' },
       headers: { 'content-type': 'image/png' },
       body: blob,
     })
@@ -95,7 +96,7 @@ export async function sendPendingImage() {
       patchChip({ meta: `${dims} · error: ${msg}`, pending: true }) // otro tap reintenta
     }
   } catch (e) {
-    if (String((e as Error).message) !== '401') patchChip({ meta: 'error de red (¿server caído?)', pending: true })
+    if (!(e instanceof AuthError)) patchChip({ meta: 'error de red (¿server caído?)', pending: true })
   } finally {
     sendingImage = false
   }

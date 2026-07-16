@@ -1,7 +1,7 @@
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useDeckStore } from '../store'
-import { api } from './api'
+import { deck } from './api'
 
 // Terminal + WebSocket con reconexión (backoff). Port LITERAL de
 // createTermConnection + wireTouchScroll (public/app.js:45-278). TypeScript
@@ -175,7 +175,7 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
           // "borrar" una sesión la respawnea al toque mientras haya otro cliente
           // mirándola. Matarla de vuelta y caer a una viva; la default queda
           // exenta (recrearla siempre es deseado).
-          api(`/api/tmux/sessions/${encodeURIComponent(m.session)}`, { method: 'DELETE' }).catch(() => {})
+          deck.del(`/api/tmux/sessions/${encodeURIComponent(m.session)}`).catch(() => {})
           store.fallbackToLiveSession()
         } else {
           // meta.created acá solo puede ser la default recreándose sola; las

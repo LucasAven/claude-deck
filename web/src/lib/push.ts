@@ -6,7 +6,7 @@
 // 26). En iOS esto SOLO funciona dentro de la PWA instalada (Add to Home
 // Screen) y con permiso otorgado desde ahí — el botón se oculta si no hay
 // soporte (ahí simplemente no hay pushes).
-import { api } from './api'
+import { deck, AuthError } from './api'
 import { useDeckStore } from '../store'
 
 // El SW ya se registra en main.tsx; acá se detecta soporte y estado.
@@ -58,7 +58,7 @@ export async function subscribePush(): Promise<void> {
       set(perm === 'denied' ? 'denied' : 'off')
       return
     }
-    const { publicKey } = await (await api('/api/push/vapid')).json()
+    const { publicKey } = await deck.get<{ publicKey: string }>('/api/push/vapid')
     const reg = await navigator.serviceWorker.ready
     // reusar la subscription existente si la hay (evita rotar la clave)
     let sub = await reg.pushManager.getSubscription()
@@ -68,16 +68,12 @@ export async function subscribePush(): Promise<void> {
         applicationServerKey: urlB64ToUint8(publicKey),
       })
     }
-    await api('/api/push/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription: sub.toJSON() }),
-    })
+    await deck.post('/api/push/subscribe', { body: { subscription: sub.toJSON() } })
     set('on')
   } catch (e) {
     // 401 lo maneja api(); cualquier otro fallo deja el estado en off — el
     // botón queda apagado y se puede reintentar con otro tap
-    if (String((e as Error).message) !== '401') set('off')
+    if (!(e instanceof AuthError)) set('off')
   }
 }
 
@@ -88,11 +84,7 @@ export async function unsubscribePush(): Promise<void> {
     const reg = await navigator.serviceWorker.ready
     const sub = await reg.pushManager.getSubscription()
     if (sub) {
-      await api('/api/push/unsubscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: sub.endpoint }),
-      }).catch(() => {})
+      await deck.post('/api/push/unsubscribe', { body: { endpoint: sub.endpoint } }).catch(() => {})
       await sub.unsubscribe().catch(() => {})
     }
     set('off')

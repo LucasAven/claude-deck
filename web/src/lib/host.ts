@@ -1,5 +1,5 @@
 import { useDeckStore, type HostStatus } from '../store'
-import { api } from './api'
+import { deck, AuthError, DeckError } from './api'
 
 // Panel de host + alerta de batería (app.js:1233-1416): la Mac que sirve el deck
 // es el único camino al tailnet — si `deck away` la deja despierta a batería y se
@@ -35,9 +35,7 @@ export function battLow(status: HostStatus | null): boolean {
 export async function refreshHost(): Promise<void> {
   let status: HostStatus
   try {
-    const res = await api('/api/host/status')
-    if (!res.ok) return // error transitorio: conservar el último estado
-    status = (await res.json()) as HostStatus
+    status = await deck.get<HostStatus>('/api/host/status') // error transitorio → catch: conservar el último estado
   } catch {
     return
   }
@@ -64,32 +62,20 @@ export function dismissHostBanner() {
 
 // el toggle y el umbral gobiernan el watcher DEL SERVER (no un estado local)
 async function postHostAlert(patch: { enabled?: boolean; threshold?: number }) {
+  let data: { alert: HostStatus['alert'] }
   try {
-    const res = await api('/api/host/alert', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(patch),
-    })
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`
-      try {
-        msg = (await res.json()).error || msg
-      } catch {
-        /* sin body json */
-      }
-      alert(`No se pudo guardar la alerta: ${msg}`)
-      return
-    }
-    const data = await res.json()
-    const cur = useDeckStore.getState().hostStatus
-    if (cur) {
-      const status: HostStatus = { ...cur, alert: data.alert }
-      const next: Partial<{ hostStatus: HostStatus; hostBannerDismissed: boolean }> = { hostStatus: status }
-      if (!battLow(status)) next.hostBannerDismissed = false // el umbral también mueve el banner/chip
-      useDeckStore.setState(next)
-    }
+    data = await deck.post<{ alert: HostStatus['alert'] }>('/api/host/alert', { body: patch })
   } catch (e) {
-    if (String((e as Error).message) !== '401') alert('No se pudo guardar la alerta (error de red)')
+    if (e instanceof DeckError) alert(`No se pudo guardar la alerta: ${e.message}`)
+    else if (!(e instanceof AuthError)) alert('No se pudo guardar la alerta (error de red)')
+    return
+  }
+  const cur = useDeckStore.getState().hostStatus
+  if (cur) {
+    const status: HostStatus = { ...cur, alert: data.alert }
+    const next: Partial<{ hostStatus: HostStatus; hostBannerDismissed: boolean }> = { hostStatus: status }
+    if (!battLow(status)) next.hostBannerDismissed = false // el umbral también mueve el banner/chip
+    useDeckStore.setState(next)
   }
 }
 
@@ -105,28 +91,16 @@ export async function toggleAway() {
   const h = useDeckStore.getState().hostStatus
   if (!h) return
   const away = !h.sleepDisabled
+  let data: { sleepDisabled: boolean; crd: HostStatus['crd'] }
   try {
-    const res = await api('/api/host/away', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ away }),
-    })
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`
-      try {
-        msg = (await res.json()).error || msg
-      } catch {
-        /* sin body json */
-      }
-      alert(`No se pudo cambiar el modo away: ${msg}`)
-      return
-    }
-    const data = await res.json()
-    const cur = useDeckStore.getState().hostStatus
-    if (cur) useDeckStore.setState({ hostStatus: { ...cur, sleepDisabled: data.sleepDisabled, crd: data.crd } })
+    data = await deck.post<{ sleepDisabled: boolean; crd: HostStatus['crd'] }>('/api/host/away', { body: { away } })
   } catch (e) {
-    if (String((e as Error).message) !== '401') alert('No se pudo cambiar el modo away (error de red)')
+    if (e instanceof DeckError) alert(`No se pudo cambiar el modo away: ${e.message}`)
+    else if (!(e instanceof AuthError)) alert('No se pudo cambiar el modo away (error de red)')
+    return
   }
+  const cur = useDeckStore.getState().hostStatus
+  if (cur) useDeckStore.setState({ hostStatus: { ...cur, sleepDisabled: data.sleepDisabled, crd: data.crd } })
 }
 
 // umbral configurable con el prompt() low-fi de siempre (rename, snippets)

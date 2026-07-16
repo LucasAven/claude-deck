@@ -1,5 +1,5 @@
-import { useDeckStore, sessionQuery } from '../store'
-import { api } from './api'
+import { useDeckStore } from '../store'
+import { deck, errText } from './api'
 
 // Worktree en un tap (tarea 5): long-press en el + abre el menú CREAR;
 // "Nuevo worktree…" abre un bottom sheet que pega a POST /api/worktree — el
@@ -40,9 +40,7 @@ export function closeDispatchSheet() {
 // no sirve — sin session cae a DEFAULT_DIR y mezcla archivos)
 export async function fetchWorkspaces(): Promise<string[] | null> {
   try {
-    const res = await api('/api/workspaces')
-    if (!res.ok) return null
-    return ((await res.json()) as { dirs: string[] }).dirs
+    return (await deck.get<{ dirs: string[] }>('/api/workspaces')).dirs
   } catch {
     return null
   }
@@ -66,25 +64,12 @@ export async function dispatchAgent(
   effort: DispatchEffort,
 ): Promise<DispatchResult> {
   try {
-    const res = await api('/api/dispatch', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dir, prompt, mode, model, effort, hideStatus: useDeckStore.getState().hideTmuxStatus }),
+    const data = await deck.post<{ session: string }>('/api/dispatch', {
+      body: { dir, prompt, mode, model, effort, hideStatus: useDeckStore.getState().hideTmuxStatus },
     })
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`
-      try {
-        msg = (await res.json()).error || msg
-      } catch {
-        /* sin body json */
-      }
-      return { ok: false, error: msg }
-    }
-    const data = (await res.json()) as { session: string }
     return { ok: true, session: data.session }
   } catch (e) {
-    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
-    return { ok: false, error: 'error de red' }
+    return { ok: false, error: errText(e) }
   }
 }
 
@@ -98,10 +83,7 @@ export interface BranchInfo {
 // al abrir el sheet, no en el poll: elección de Lucas — endpoint propio)
 export async function fetchBranches(): Promise<BranchInfo | null> {
   try {
-    const q = sessionQuery(useDeckStore.getState().session)
-    const res = await api(`/api/git/branches${q ? `?${q}` : ''}`)
-    if (!res.ok) return null
-    return (await res.json()) as BranchInfo
+    return await deck.get<BranchInfo>('/api/git/branches', { session: true })
   } catch {
     return null
   }
@@ -111,25 +93,12 @@ export type WorktreeResult = { ok: true; session: string } | { ok: false; error:
 
 export async function createWorktree(branch: string, base: string): Promise<WorktreeResult> {
   try {
-    const q = sessionQuery(useDeckStore.getState().session)
-    const res = await api(`/api/worktree${q ? `?${q}` : ''}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ branch, base, hideStatus: useDeckStore.getState().hideTmuxStatus }),
+    const data = await deck.post<{ session: string }>('/api/worktree', {
+      session: true,
+      body: { branch, base, hideStatus: useDeckStore.getState().hideTmuxStatus },
     })
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`
-      try {
-        msg = (await res.json()).error || msg
-      } catch {
-        /* sin body json */
-      }
-      return { ok: false, error: msg }
-    }
-    const data = (await res.json()) as { session: string }
     return { ok: true, session: data.session }
   } catch (e) {
-    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
-    return { ok: false, error: 'error de red' }
+    return { ok: false, error: errText(e) }
   }
 }

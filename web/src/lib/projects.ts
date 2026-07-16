@@ -1,5 +1,5 @@
 import { useDeckStore } from '../store'
-import { api } from './api'
+import { deck, errText } from './api'
 
 // Tab Proyectos (tarea 41). La lista de sesiones que consume ProjectsView es mas
 // rica que la del store (que ProjectRow de chips normaliza a {name, state}): acá
@@ -16,9 +16,7 @@ export interface ProjSession {
 }
 
 export async function fetchProjectSessions(): Promise<ProjSession[]> {
-  const res = await api('/api/tmux/sessions')
-  if (!res.ok) throw new Error(`sessions ${res.status}`)
-  return (await res.json()) as ProjSession[]
+  return deck.get<ProjSession[]>('/api/tmux/sessions')
 }
 
 interface WorkspacesResp {
@@ -30,23 +28,11 @@ interface WorkspacesResp {
 // distintas). Degradacion silenciosa: sin raices, ProjectsView cae al dirname.
 export async function fetchWorkspaceRoots(): Promise<string[]> {
   try {
-    const res = await api('/api/workspaces')
-    if (!res.ok) return []
-    const data = (await res.json()) as WorkspacesResp
+    const data = await deck.get<WorkspacesResp>('/api/workspaces')
     return (data.roots || []).map((r) => r.root)
   } catch {
     return []
   }
-}
-
-async function errMsg(res: Response): Promise<string> {
-  let msg = `HTTP ${res.status}`
-  try {
-    msg = (await res.json()).error || msg
-  } catch {
-    /* sin body json */
-  }
-  return msg
 }
 
 export type CdResult = { ok: true } | { ok: false; error: string }
@@ -56,16 +42,10 @@ export type CdResult = { ok: true } | { ok: false; error: string }
 // corriendo) evita el 409, pero igual manejamos el error del server.
 export async function sessionCd(session: string, path: string): Promise<CdResult> {
   try {
-    const res = await api('/api/session/cd', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ session, path }),
-    })
-    if (!res.ok) return { ok: false, error: await errMsg(res) }
+    await deck.post('/api/session/cd', { body: { session, path } })
     return { ok: true }
   } catch (e) {
-    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
-    return { ok: false, error: 'error de red' }
+    return { ok: false, error: errText(e) }
   }
 }
 
@@ -78,17 +58,12 @@ export type NewSessionResult = { ok: true; session: string; dir: string } | { ok
 // anti-resurreccion ve created=false (la sesion no fue matada y resucitada).
 export async function newSession(path: string): Promise<NewSessionResult> {
   try {
-    const res = await api('/api/session/new', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path, hideStatus: useDeckStore.getState().hideTmuxStatus }),
+    const data = await deck.post<{ session: string; dir: string }>('/api/session/new', {
+      body: { path, hideStatus: useDeckStore.getState().hideTmuxStatus },
     })
-    if (!res.ok) return { ok: false, error: await errMsg(res) }
-    const data = (await res.json()) as { session: string; dir: string }
     return { ok: true, session: data.session, dir: data.dir }
   } catch (e) {
-    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
-    return { ok: false, error: 'error de red' }
+    return { ok: false, error: errText(e) }
   }
 }
 
@@ -103,9 +78,7 @@ export interface DirsResp {
 }
 
 export async function fetchDirs(): Promise<DirsResp> {
-  const res = await api('/api/dirs')
-  if (!res.ok) throw new Error(`dirs ${res.status}`)
-  return (await res.json()) as DirsResp
+  return deck.get<DirsResp>('/api/dirs')
 }
 
 export type PinResult = { ok: true } | { ok: false; error: string }
@@ -114,16 +87,10 @@ export type PinResult = { ok: true } | { ok: false; error: string }
 // valida cada ruta y devuelve 400 si alguna no cierra).
 export async function setPins(pins: string[]): Promise<PinResult> {
   try {
-    const res = await api('/api/dirs', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pins }),
-    })
-    if (!res.ok) return { ok: false, error: await errMsg(res) }
+    await deck.put('/api/dirs', { body: { pins } })
     return { ok: true }
   } catch (e) {
-    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
-    return { ok: false, error: 'error de red' }
+    return { ok: false, error: errText(e) }
   }
 }
 
@@ -136,8 +103,7 @@ export async function pin(dir: string): Promise<PinResult> {
     if (current.pins.includes(dir)) return { ok: true }
     return await setPins([...current.pins, dir])
   } catch (e) {
-    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
-    return { ok: false, error: 'error de red' }
+    return { ok: false, error: errText(e) }
   }
 }
 
@@ -146,8 +112,7 @@ export async function unpin(dir: string): Promise<PinResult> {
     const current = await fetchDirs()
     return await setPins(current.pins.filter((p) => p !== dir))
   } catch (e) {
-    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
-    return { ok: false, error: 'error de red' }
+    return { ok: false, error: errText(e) }
   }
 }
 
@@ -158,17 +123,10 @@ export async function unpin(dir: string): Promise<PinResult> {
 // en el store para que el "+" lo use sin re-fetchear.
 export async function setDefaultDir(dir: string): Promise<{ ok: true; defaultDir: string } | { ok: false; error: string }> {
   try {
-    const res = await api('/api/dirs', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ defaultDir: dir }),
-    })
-    if (!res.ok) return { ok: false, error: await errMsg(res) }
-    const data = (await res.json()) as { defaultDir: string }
+    const data = await deck.put<{ defaultDir: string }>('/api/dirs', { body: { defaultDir: dir } })
     return { ok: true, defaultDir: data.defaultDir }
   } catch (e) {
-    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
-    return { ok: false, error: 'error de red' }
+    return { ok: false, error: errText(e) }
   }
 }
 
@@ -180,9 +138,7 @@ interface BrowseResp {
 // Subdirectorios inmediatos de un path absoluto dentro de la unión (tarea 42,
 // árbol shallow lazy de EXPLORAR): solo nombres, el caller arma el join.
 export async function browseDir(path: string): Promise<string[]> {
-  const res = await api(`/api/dirs/browse?path=${encodeURIComponent(path)}`)
-  if (!res.ok) throw new Error(`browse ${res.status}`)
-  const data = (await res.json()) as BrowseResp
+  const data = await deck.get<BrowseResp>('/api/dirs/browse', { params: { path } })
   return data.dirs
 }
 

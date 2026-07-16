@@ -1,7 +1,7 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { useDeckStore, sessionQuery, type SbTurn } from '../store'
-import { api } from './api'
+import { useDeckStore, type SbTurn } from '../store'
+import { deck } from './api'
 
 // Scrollback legible (app.js:1088-1231): overlay fullscreen de solo lectura.
 // Fuente primaria: el transcript .jsonl de la sesión como turnos (asistente
@@ -72,9 +72,7 @@ export function sbApplyFont(delta: number) {
 async function sbFetchTranscript(bytes: number, keepAnchor: boolean): Promise<boolean> {
   let data: { turns?: unknown; more?: boolean }
   try {
-    const res = await api(`/api/claude/transcript?${sessionQuery(useDeckStore.getState().session)}&bytes=${bytes}`)
-    if (!res.ok) return false
-    data = await res.json()
+    data = await deck.get<{ turns?: unknown; more?: boolean }>('/api/claude/transcript', { session: true, params: { bytes } })
   } catch {
     return false
   }
@@ -126,9 +124,7 @@ async function sbFetchTranscript(bytes: number, keepAnchor: boolean): Promise<bo
 async function sbFetch(lines: number, keepAnchor: boolean) {
   let text: string
   try {
-    const res = await api(`/api/tmux/scrollback?${sessionQuery(useDeckStore.getState().session)}&lines=${lines}`)
-    if (!res.ok) throw new Error(String(res.status))
-    text = await res.text()
+    text = await deck.getText('/api/tmux/scrollback', { session: true, params: { lines } })
   } catch {
     sbMode = 'text'
     useDeckStore.setState({

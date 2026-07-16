@@ -3,6 +3,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useDeckStore } from '../../store'
 import { fetchList, fetchFile, rawImageUrl, registerTree, refreshTree, type FsEntry } from '../../lib/files'
+import { AuthError } from '../../lib/api'
 import { FT_ICONS, fileIcon } from '../../lib/icons'
 import { fmtSize, highlightCode, canRenderMd, isPreviewImage } from '../../lib/format'
 
@@ -44,7 +45,7 @@ function TreeNode({ ent, base, depth, onOpenFile }: { ent: FsEntry; base: string
         setLoaded(true)
         setExpanded(true)
       } catch (e) {
-        if (String((e as Error).message) === '401') return
+        if (e instanceof AuthError) return
         /* otro error: dejar la carpeta colapsada, reintentar en el próximo tap */
       }
       return
@@ -124,7 +125,7 @@ export function FilesView() {
         if (ses !== useDeckStore.getState().session) return // cambió la sesión mientras cargaba
         sessionRef.current = null
         resetFile()
-        setView((v) => ({ ...v, entries: [], loading: false, error: String((e as Error).message) === '401' ? null : `No se pudo listar: ${(e as Error).message}` }))
+        setView((v) => ({ ...v, entries: [], loading: false, error: e instanceof AuthError ? null : `No se pudo listar: ${(e as Error).message}` }))
         return
       }
       if (ses !== useDeckStore.getState().session) return // que una respuesta vieja no pise el árbol nuevo
@@ -175,7 +176,7 @@ export function FilesView() {
     try {
       data = await fetchFile(rel)
     } catch (e) {
-      setFile({ rel, loading: false, error: String((e as Error).message) === '401' ? null : `No se pudo leer el archivo: ${(e as Error).message}`, binary: false, image: false, content: '', truncated: false, size: 0 })
+      setFile({ rel, loading: false, error: e instanceof AuthError ? null : `No se pudo leer el archivo: ${(e as Error).message}`, binary: false, image: false, content: '', truncated: false, size: 0 })
       return
     }
     setFile({ rel, loading: false, error: null, binary: !!data.binary, image: false, content: data.content ?? '', truncated: !!data.truncated, size: data.size })

@@ -16,6 +16,7 @@ import {
   browseDir,
   type ProjSession,
 } from '../../lib/projects'
+import { AuthError } from '../../lib/api'
 
 // Tab Proyectos (tarea 41, layout A "separado"). Arriba las secciones pins /
 // recientes / explorar (tarea 42, MISMO componente: acá van los andamios con
@@ -413,7 +414,7 @@ export function ProjectsView() {
     try {
       setSessions(await fetchProjectSessions())
     } catch (e) {
-      if (String((e as Error).message) === '401') return
+      if (e instanceof AuthError) return
       /* error transitorio: conservar la ultima lista */
     }
     try {

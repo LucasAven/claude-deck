@@ -1,5 +1,5 @@
-import { useDeckStore, sessionQuery, type ClaudeStatus } from '../store'
-import { api } from './api'
+import { useDeckStore, type ClaudeStatus } from '../store'
+import { deck } from './api'
 
 // Statusline del panel (tarea 22): línea fina tipo statusLine de Claude Code con
 // % de contexto usado + tokens (+ modelo de la sesión, que viene gratis en el
@@ -49,14 +49,13 @@ export async function refreshStatus(): Promise<void> {
   const session = useDeckStore.getState().session
   if (!session) return
   try {
-    const res = await api(`/api/claude/status?${sessionQuery(session)}`)
-    if (!res.ok) return // transitorio: conservar el último estado
-    const data = (await res.json()) as { status: ClaudeStatus | null }
+    // transitorio (no-ok) o error de red → catch: conservar el último estado
+    const data = await deck.get<{ status: ClaudeStatus | null }>('/api/claude/status', { session })
     // ojo carrera: si el usuario cambió de sesión mientras esperábamos, descartar
     if (useDeckStore.getState().session !== session) return
     useDeckStore.setState({ claudeStatus: data.status })
   } catch {
-    /* error de red: conservar */
+    /* transitorio / error de red: conservar */
   }
 }
 

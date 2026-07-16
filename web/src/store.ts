@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api } from './lib/api'
+import { deck, AuthError, DeckError } from './lib/api'
 import { SESSION_NAME_RE, loadQuickkeys } from './lib/keys'
 import { closeSwitchMenu, loadSwitch } from './lib/switch'
 import { closeComposer } from './lib/composer'
@@ -309,30 +309,31 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   refreshGit: async () => {
     if (get().inDiff) return // no pisar la vista de diff
     try {
-      const q = sessionQuery(get().session)
-      let res = await api(`/api/git/summary${q ? `?${q}` : ''}`)
-      // Caer al repo default SOLO si la sesión no existe todavía (404: recién
-      // creada / aún sin dir). Si el dir existe pero NO es repo git (400), NO
-      // caer: mostraría los cambios de OTRO repo (el default) cuando la sesión
-      // está parada en un directorio sin git — se avisa con gitNoRepo.
-      if (!res.ok && res.status === 404 && q) res = await api('/api/git/summary')
-      if (res.ok) {
-        set({ git: (await res.json()) as GitSummary, gitNoRepo: false })
-        // Chip de CI/PR (tarea 15): piggyback tras un summary OK. Degradación
-        // silenciosa — cualquier error deja gitChecks en null (sin chip).
-        api(`/api/git/checks${q ? `?${q}` : ''}`)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((j) => set({ gitChecks: (j?.pr as PrChecks) ?? null }))
-          .catch(() => set({ gitChecks: null }))
-        return
+      let summary: GitSummary
+      try {
+        summary = await deck.get<GitSummary>('/api/git/summary', { session: true })
+      } catch (e) {
+        // Caer al repo default SOLO si la sesión no existe todavía (404: recién
+        // creada / aún sin dir). Si el dir existe pero NO es repo git (400), NO
+        // caer: mostraría los cambios de OTRO repo (el default) cuando la sesión
+        // está parada en un directorio sin git (se avisa con gitNoRepo, abajo).
+        if (e instanceof DeckError && e.status === 404 && get().session) {
+          summary = await deck.get<GitSummary>('/api/git/summary')
+        } else throw e
       }
-      if (res.status === 400) {
+      set({ git: summary, gitNoRepo: false })
+      // Chip de CI/PR (tarea 15): piggyback tras un summary OK. Degradación
+      // silenciosa: cualquier error deja gitChecks en null (sin chip).
+      deck
+        .get<{ pr?: PrChecks }>('/api/git/checks', { session: true })
+        .then((j) => set({ gitChecks: j?.pr ?? null }))
+        .catch(() => set({ gitChecks: null }))
+    } catch (e) {
+      if (e instanceof DeckError && e.status === 400) {
         set({ git: null, gitNoRepo: true, gitChecks: null }) // dir sin git → mensaje propio en ChangesView
         return
       }
-      throw new Error(`git summary ${res.status}`)
-    } catch (e) {
-      if (String((e as Error).message) !== '401') set({ git: null, gitNoRepo: false })
+      if (!(e instanceof AuthError)) set({ git: null, gitNoRepo: false })
     }
   },
 
@@ -363,7 +364,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   refreshSessions: async () => {
     let sessions: Session[] = []
     try {
-      sessions = (await (await api('/api/tmux/sessions')).json()) as Session[]
+      sessions = await deck.get<Session[]>('/api/tmux/sessions')
     } catch {
       return
     }
@@ -402,7 +403,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   killSession: async (name) => {
     if (!window.confirm(`¿Matar la sesión "${name}"? Se cierra lo que esté corriendo adentro.`)) return
     try {
-      await api(`/api/tmux/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' })
+      await deck.raw(`/api/tmux/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' })
     } catch {
       return
     }
@@ -429,23 +430,10 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       return
     }
     try {
-      const res = await api(`/api/tmux/sessions/${encodeURIComponent(name)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ newName }),
-      })
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`
-        try {
-          msg = (await res.json()).error || msg
-        } catch {
-          /* sin body json */
-        }
-        alert(`No se pudo renombrar: ${msg}`)
-        return
-      }
-    } catch {
-      return
+      await deck.patch(`/api/tmux/sessions/${encodeURIComponent(name)}`, { body: { newName } })
+    } catch (e) {
+      if (e instanceof DeckError) alert(`No se pudo renombrar: ${e.message}`)
+      return // 401 / error de red: salir sin avisar, como antes
     }
 
     if (get().session === name) {
@@ -490,7 +478,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
       // la config no llegó (arranque a medias o server caído al bootear): es un
       // tap explícito, vale reintentar acá antes de rendirse
       try {
-        const cfg = await (await api('/api/config')).json()
+        const cfg = await deck.get<{ defaultDir?: string }>('/api/config')
         if (typeof cfg.defaultDir === 'string' && cfg.defaultDir) {
           dir = cfg.defaultDir
           set({ defaultDir: dir })
@@ -523,7 +511,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   fallbackToLiveSession: async () => {
     let names: string[] = []
     try {
-      names = ((await (await api('/api/tmux/sessions')).json()) as Session[]).map((s) => s.name)
+      names = (await deck.get<Session[]>('/api/tmux/sessions')).map((s) => s.name)
     } catch {
       /* sin lista: cae a la default */
     }
@@ -553,7 +541,7 @@ export async function restoreInitialSession() {
   let def = 'deck'
   let dir = ''
   try {
-    const cfg = await (await api('/api/config')).json()
+    const cfg = await deck.get<{ session?: string; defaultDir?: unknown }>('/api/config')
     def = cfg.session || 'deck'
     // home efectivo del panel (tarea 43): el "+" pare acá. Puede cambiar en
     // caliente desde Proyectos, por eso setDefaultDir también lo espeja.

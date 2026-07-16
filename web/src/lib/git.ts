@@ -1,25 +1,21 @@
-import { useDeckStore, sessionQuery, type GitFile } from '../store'
-import { api } from './api'
+import { useDeckStore, type GitFile } from '../store'
+import { deck, AuthError } from './api'
 
 // Acciones de la pestaña Cambios (app.js:1724-1776). refreshGit (que pinta el
 // header + la lista + el badge) vive en el store; acá van el stage/unstage y el
 // fetch del diff, que el componente dispara. El diff se renderiza con diff2html
 // en ChangesView (dangerouslySetInnerHTML: salida de git ya escapada, §5.7).
+// La sesión activa la adjunta deck ({ session: true }); el error del body lo
+// extrae deck y lo tira como DeckError.
 
 export async function stageFile(f: GitFile): Promise<void> {
-  const q = sessionQuery(useDeckStore.getState().session)
   try {
-    const res = await api(`/api/git/stage?${q}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: f.path, action: f.staged ? 'unstage' : 'stage' }),
+    await deck.post('/api/git/stage', {
+      session: true,
+      body: { path: f.path, action: f.staged ? 'unstage' : 'stage' },
     })
-    if (!res.ok) {
-      const err = await res.json().catch(() => null)
-      throw new Error(err?.error || `HTTP ${res.status}`)
-    }
   } catch (e) {
-    if (String((e as Error).message) !== '401') {
+    if (!(e instanceof AuthError)) {
       window.alert(`No se pudo ${f.staged ? 'sacar del stage' : 'stagear'} ${f.path}: ${(e as Error).message}`)
     }
   }
@@ -30,37 +26,20 @@ export async function stageFile(f: GitFile): Promise<void> {
 // mensaje lo tipea Lucas (la app es un caño tonto: no genera mensajes). Ambos
 // tiran con el mensaje del server para que el caller reporte qué paso falló.
 export async function commitChanges(message: string): Promise<string> {
-  const q = sessionQuery(useDeckStore.getState().session)
-  const res = await api(`/api/git/commit?${q}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => null)
-    throw new Error(err?.error || `HTTP ${res.status}`)
-  }
-  return ((await res.json()) as { hash: string }).hash
+  const data = await deck.post<{ hash: string }>('/api/git/commit', { session: true, body: { message } })
+  return data.hash
 }
 
 export async function pushChanges(): Promise<void> {
-  const q = sessionQuery(useDeckStore.getState().session)
-  const res = await api(`/api/git/push?${q}`, { method: 'POST' })
-  if (!res.ok) {
-    const err = await res.json().catch(() => null)
-    throw new Error(err?.error || `HTTP ${res.status}`)
-  }
+  await deck.post('/api/git/push', { session: true })
 }
 
 export async function fetchDiff(file: GitFile): Promise<string> {
-  const q = `path=${encodeURIComponent(file.path)}&staged=${file.staged ? 1 : 0}&${sessionQuery(useDeckStore.getState().session)}`
-  const res = await api(`/api/git/diff?${q}`)
-  if (!res.ok) throw new Error(await res.text())
-  return res.text()
+  return deck.getText('/api/git/diff', { session: true, params: { path: file.path, staged: file.staged ? 1 : 0 } })
 }
 
 // Historial de commits (tarea 14). El endpoint /api/git/log ya existía (hash +
-// subject); ahora trae autor/epoch/stats — este es su primer consumidor.
+// subject); ahora trae autor/epoch/stats, y este es su primer consumidor.
 export interface Commit {
   hash: string
   subject: string
@@ -71,15 +50,9 @@ export interface Commit {
 }
 
 export async function fetchLog(n = 30): Promise<Commit[]> {
-  const q = sessionQuery(useDeckStore.getState().session)
-  const res = await api(`/api/git/log?n=${n}${q ? `&${q}` : ''}`)
-  if (!res.ok) throw new Error(await res.text())
-  return (await res.json()) as Commit[]
+  return deck.get<Commit[]>('/api/git/log', { session: true, params: { n } })
 }
 
 export async function fetchShow(hash: string): Promise<string> {
-  const q = sessionQuery(useDeckStore.getState().session)
-  const res = await api(`/api/git/show?hash=${encodeURIComponent(hash)}${q ? `&${q}` : ''}`)
-  if (!res.ok) throw new Error(await res.text())
-  return res.text()
+  return deck.getText('/api/git/show', { session: true, params: { hash } })
 }

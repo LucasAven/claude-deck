@@ -4,6 +4,7 @@ import { useDeckStore, type GitFile, type PrChecks } from '../../store'
 import { stageFile, fetchDiff, commitChanges, pushChanges, fetchLog, fetchShow, type Commit } from '../../lib/git'
 import { pasteTextToPrompt } from '../../lib/image'
 import { rawImageUrl } from '../../lib/files'
+import { AuthError } from '../../lib/api'
 import { relTime, isPreviewImage } from '../../lib/format'
 
 // Pestaña Cambios (index.html:136-148, app.js:1633-1785). El header + la lista
@@ -88,7 +89,7 @@ function CommitForm({ stagedCount }: { stagedCount: number }) {
     try {
       hash = await commitChanges(message)
     } catch (e) {
-      if (String((e as Error).message) !== '401') window.alert(`Commit falló: ${(e as Error).message}`)
+      if (!(e instanceof AuthError)) window.alert(`Commit falló: ${(e as Error).message}`)
       setBusy(false)
       return
     }
@@ -96,7 +97,7 @@ function CommitForm({ stagedCount }: { stagedCount: number }) {
       try {
         await pushChanges()
       } catch (e) {
-        if (String((e as Error).message) !== '401') {
+        if (!(e instanceof AuthError)) {
           window.alert(`Commit hecho (${hash}) pero el push falló: ${(e as Error).message}`)
         }
         setMsg('')
@@ -308,7 +309,7 @@ export function ChangesView() {
     try {
       setHistory(await fetchLog(30))
     } catch (e) {
-      if (String((e as Error).message) !== '401') setHistoryErr((e as Error).message)
+      if (!(e instanceof AuthError)) setHistoryErr((e as Error).message)
     }
   }
 

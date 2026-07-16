@@ -1,5 +1,5 @@
 import { useDeckStore } from '../store'
-import { api } from './api'
+import { deck, AuthError, DeckError } from './api'
 import { closeSwitchMenu } from './switch'
 import { composerIsOpen, insertIntoComposer } from './composer'
 
@@ -14,9 +14,7 @@ import { composerIsOpen, insertIntoComposer } from './composer'
 export async function loadSnippets(force?: boolean) {
   if (useDeckStore.getState().snippets && !force) return
   try {
-    const res = await api('/api/snippets')
-    if (!res.ok) return
-    const data = await res.json()
+    const data = await deck.get<{ snippets?: unknown }>('/api/snippets')
     if (Array.isArray(data.snippets)) useDeckStore.setState({ snippets: data.snippets })
   } catch {
     /* server caído: la paleta muestra el error (snippets sigue null) */
@@ -25,22 +23,10 @@ export async function loadSnippets(force?: boolean) {
 
 async function saveSnippets() {
   try {
-    const res = await api('/api/snippets', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ snippets: useDeckStore.getState().snippets }),
-    })
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`
-      try {
-        msg = (await res.json()).error || msg
-      } catch {
-        /* sin body json */
-      }
-      alert(`No se pudieron guardar los snippets: ${msg}`)
-    }
+    await deck.put('/api/snippets', { body: { snippets: useDeckStore.getState().snippets } })
   } catch (e) {
-    if (String((e as Error).message) !== '401') alert('No se pudieron guardar los snippets (error de red)')
+    if (e instanceof DeckError) alert(`No se pudieron guardar los snippets: ${e.message}`)
+    else if (!(e instanceof AuthError)) alert('No se pudieron guardar los snippets (error de red)')
   }
 }
 
@@ -50,9 +36,7 @@ async function saveSnippets() {
 export async function refreshSnippetsInBackground() {
   const before = JSON.stringify(useDeckStore.getState().snippets)
   try {
-    const res = await api('/api/snippets')
-    if (!res.ok) return
-    const data = await res.json()
+    const data = await deck.get<{ snippets?: unknown }>('/api/snippets')
     if (!Array.isArray(data.snippets)) return
     if (useDeckStore.getState().snippetsEditing) return // no pisar una edición en curso
     if (JSON.stringify(data.snippets) !== before) useDeckStore.setState({ snippets: data.snippets })
