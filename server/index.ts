@@ -81,7 +81,7 @@ if (!fs.existsSync(DEFAULT_DIR_RAW) || !fs.statSync(DEFAULT_DIR_RAW).isDirectory
 // las de pins/recientes/browse (todas realpath-eadas) para pintar el badge de
 // default; sin normalizar, un symlink o una barra final darían un falso negativo.
 const DEFAULT_DIR = fs.realpathSync(DEFAULT_DIR_RAW)
-if (!WORKSPACES_ROOTS.some((root) => insideDir(DEFAULT_DIR, root)))
+if (!insideUnion(DEFAULT_DIR))
   die(`DEFAULT_DIR debe estar dentro de alguna raíz del perímetro: ${DEFAULT_DIR_RAW} ⊄ union{${WORKSPACES_ROOTS.join(', ')}}`)
 if (!AUTH_TOKEN) die('falta AUTH_TOKEN — el servidor no arranca sin token (ver README, sección Seguridad)')
 if (AUTH_TOKEN.length < 32) die('AUTH_TOKEN demasiado corto: debe tener al menos 32 caracteres (probá: openssl rand -hex 32)')
@@ -110,8 +110,76 @@ function isTokenValid(token: string | undefined | null): boolean {
   return typeof token === 'string' && token.length > 0 && safeEqual(token, AUTH_TOKEN)
 }
 
+// ---------------------------------------------------------------------------
+// Guardián del perímetro de filesystem (docs/adr/0002)
+//
+// El perímetro es la UNION de WORKSPACES_ROOTS: la frontera de blast-radius de
+// los endpoints estructurados (git/fs/dispatch/worktree/dirs), que toman rutas
+// del cliente y tocan disco sin pasar por un shell. No confina al usuario (la
+// terminal tmux ya da un shell libre): acota lo que un bug de path-traversal
+// en esos lectores podría alcanzar (~/.ssh, ~/.aws, los transcripts, etc.).
+//
+// Gotcha central: la contención se decide por PREFIJO LEXICO (insideDir), que
+// solo es sólida si ambos lados están normalizados. Las raíces se realpath-ean
+// al boot; el lado del cliente se realpath-ea acá (resolveInside*), así un
+// symlink dentro del perímetro que apunte afuera NO lo elude. insideUnion es
+// la única puerta sin realpath: para rutas ya realpath-eadas o que todavía no
+// existen (el destino de un worktree), donde el caller garantiza el prefijo.
+//
+// Interfaz (los endpoints usan ESTO, nunca insideDir directo):
+//   resolveInside(p)        realpath dentro de la union, o HttpError 403.
+//   resolveInsideOrNull(p)  idem pero null: guards y filtros silenciosos.
+//   insideUnion(p)          check léxico contra la union, sin realpath.
+//   resolveWithin(p, base)  genérica: realpath de p contenido en una base
+//                           arbitraria YA realpath-eada, o null (filtros de
+//                           symlinks por-raíz o por-repo, transcripts).
+//
+// Perímetros secundarios que comparten la primitiva léxica pero NO la union:
+// checkRepoPath (subárbol del repo, 400) y el handler de estáticos
+// (PUBLIC_DIR, léxico a propósito: PUBLIC_DIR no está realpath-eado y un
+// realpath acá cambiaría qué se sirve). Son los únicos callers directos de
+// insideDir fuera de este bloque.
+// ---------------------------------------------------------------------------
+
+/** Primitiva léxica de contención. Detalle interno del guardián (ver arriba). */
 function insideDir(child: string, parent: string): boolean {
   return child === parent || child.startsWith(parent + path.sep)
+}
+
+/** Check léxico contra la union de WORKSPACES_ROOTS, sin realpath (ver doc del bloque). */
+function insideUnion(p: string): boolean {
+  return WORKSPACES_ROOTS.some((root) => insideDir(p, root))
+}
+
+/** Realpath validado contra la UNION de WORKSPACES_ROOTS (perímetro git/fs). */
+function resolveInside(p: string): string {
+  const real = fs.realpathSync(p)
+  if (insideUnion(real)) return real
+  throw new HttpError(403, 'directorio fuera del perímetro (union de WORKSPACES_ROOTS)')
+}
+
+/** Variante silenciosa de resolveInside: null si no existe o cae fuera de la union. */
+function resolveInsideOrNull(p: string): string | null {
+  try {
+    const real = fs.realpathSync(p)
+    return insideUnion(real) ? real : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Contención genérica en una base arbitraria YA realpath-eada (una raíz del
+ * perímetro, el toplevel de un repo, una raíz de transcripts): realpath de p,
+ * o null si p no existe o su realpath queda fuera de la base.
+ */
+function resolveWithin(p: string, baseReal: string): string | null {
+  try {
+    const real = fs.realpathSync(p)
+    return insideDir(real, baseReal) ? real : null
+  } catch {
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +429,7 @@ function transcriptForSession(name: string): string | null {
     if (!real.endsWith('.jsonl')) return null
     const inRoots = TRANSCRIPT_ROOTS.some((root) => {
       try {
-        return insideDir(real, fs.realpathSync(root))
+        return resolveWithin(real, fs.realpathSync(root)) !== null
       } catch {
         return false // el perfil no existe en esta máquina
       }
@@ -494,13 +562,6 @@ async function resolvePaneDir(session: string): Promise<string> {
   return dir
 }
 
-/** Realpath validado contra la UNION de WORKSPACES_ROOTS (perímetro git/fs). */
-function checkInsideWorkspaces(p: string): string {
-  const real = fs.realpathSync(p)
-  for (const root of WORKSPACES_ROOTS) if (insideDir(real, root)) return real
-  throw new HttpError(403, 'directorio fuera del perímetro (union de WORKSPACES_ROOTS)')
-}
-
 /**
  * Resuelve el directorio git sobre el que operar.
  * Sin `session` → el home efectivo del panel (defaultDirEffective, tarea 43).
@@ -516,7 +577,7 @@ async function resolveGitDir(session: string | undefined): Promise<string> {
   } catch {
     throw new HttpError(400, `el directorio de la sesión no es un repo git: ${dir}`)
   }
-  return checkInsideWorkspaces(toplevel)
+  return resolveInside(toplevel)
 }
 
 /**
@@ -532,7 +593,7 @@ async function resolveFsDir(session: string | undefined): Promise<string> {
   } catch {
     /* no es un repo: se lista el directorio del pane */
   }
-  return checkInsideWorkspaces(top)
+  return resolveInside(top)
 }
 
 // ---------------------------------------------------------------------------
@@ -595,7 +656,12 @@ async function gitSummary(dir: string) {
 
 const DIFF_LIMIT = 500 * 1024
 
-/** Validación estricta de un path relativo al repo: nada fuera del repo. Devuelve el absoluto. */
+/**
+ * Validación estricta de un path relativo al repo: nada fuera del repo.
+ * Devuelve el absoluto. Perímetro SECUNDARIO (el subárbol del repo, no la
+ * union, ver el guardián): usa la primitiva léxica con realpath propio, y el
+ * chequeo pre-realpath sobre `abs` es deliberado (el path puede no existir).
+ */
 function checkRepoPath(dir: string, rel: string): string {
   if (!rel || rel.includes('\0') || path.isAbsolute(rel) || rel.split(/[\\/]+/).includes('..')) {
     throw new HttpError(400, 'path inválido')
@@ -845,7 +911,7 @@ function fsList(dir: string, rel: string) {
     const target = path.join(abs, d.name)
     try {
       // statSync sigue symlinks; los que escapan del root no se listan
-      if (d.isSymbolicLink() && !insideDir(fs.realpathSync(target), realDir)) continue
+      if (d.isSymbolicLink() && resolveWithin(target, realDir) === null) continue
       const s = fs.statSync(target)
       if (!s.isDirectory() && !s.isFile()) continue // sockets, fifos, etc.
       entries.push({ name: d.name, type: s.isDirectory() ? 'dir' : 'file', size: s.size })
@@ -1363,7 +1429,7 @@ app.post('/api/worktree', async (c) => {
   const parent = fs.realpathSync(path.dirname(repo))
   const lastSeg = branch.split('/').pop() as string
   const wtPath = path.join(parent, `${path.basename(repo)}-${lastSeg}`)
-  if (!WORKSPACES_ROOTS.some((root) => insideDir(wtPath, root))) {
+  if (!insideUnion(wtPath)) {
     throw new HttpError(400, `el worktree caería fuera del perímetro (union de WORKSPACES_ROOTS): ${wtPath}`)
   }
   if (fs.existsSync(wtPath)) throw new HttpError(409, `ya existe ${wtPath}`)
@@ -1409,7 +1475,9 @@ app.get('/api/workspaces', (c) => {
       const target = path.join(root, d.name)
       try {
         const s = fs.statSync(target) // sigue symlinks
-        if (s.isDirectory() && insideDir(fs.realpathSync(target), root)) dirs.push(d.name)
+        // contención POR-RAIZ a propósito (no la union): un symlink de primer
+        // nivel que apunte a OTRA raíz no se lista bajo esta
+        if (s.isDirectory() && resolveWithin(target, root) !== null) dirs.push(d.name)
       } catch {
         continue // symlink roto / sin permisos
       }
@@ -1584,7 +1652,7 @@ app.post('/api/dispatch', async (c) => {
     } catch {
       throw new HttpError(404, 'directorio no encontrado')
     }
-    dir = checkInsideWorkspaces(real) // 403 si cae fuera de la unión
+    dir = resolveInside(real) // 403 si cae fuera de la unión
     if (!fs.statSync(dir).isDirectory()) throw new HttpError(400, 'no es un directorio')
   } else {
     if (dirName.includes('/') || dirName.includes(path.sep)) throw new HttpError(400, 'directorio inválido')
@@ -1660,7 +1728,7 @@ app.post('/api/session/new', async (c) => {
 
   let dir: string
   try {
-    dir = checkInsideWorkspaces(pathIn) // 403 fuera de la union; ENOENT -> 404 abajo
+    dir = resolveInside(pathIn) // 403 fuera de la union; ENOENT -> 404 abajo
   } catch (e) {
     if (e instanceof HttpError) throw e
     throw new HttpError(404, 'directorio no encontrado')
@@ -1710,7 +1778,7 @@ app.post('/api/session/cd', async (c) => {
 
   let dir: string
   try {
-    dir = checkInsideWorkspaces(pathIn) // 403 fuera de la unión; ENOENT -> 404 abajo
+    dir = resolveInside(pathIn) // 403 fuera de la unión; ENOENT -> 404 abajo
   } catch (e) {
     if (e instanceof HttpError) throw e
     throw new HttpError(404, 'directorio no encontrado')
@@ -1863,8 +1931,8 @@ function writeDirs(data: DirsStore): void {
 /** ¿Sigue siendo un dir válido? (existe, es directorio, cae dentro de la unión). */
 function dirStillValid(p: string): boolean {
   try {
-    const real = fs.realpathSync(p)
-    return fs.statSync(real).isDirectory() && WORKSPACES_ROOTS.some((root) => insideDir(real, root))
+    const real = resolveInsideOrNull(p)
+    return real !== null && fs.statSync(real).isDirectory()
   } catch {
     return false
   }
@@ -1882,7 +1950,8 @@ function resolveStorableDir(p: string): string {
     throw new HttpError(400, `ruta inexistente: ${p}`)
   }
   if (!fs.statSync(real).isDirectory()) throw new HttpError(400, `no es un directorio: ${p}`)
-  if (!WORKSPACES_ROOTS.some((root) => insideDir(real, root))) {
+  // 400 (no el 403 de resolveInside): acá se valida un body, criterio del PUT
+  if (!insideUnion(real)) {
     throw new HttpError(400, `fuera del perímetro (unión de WORKSPACES_ROOTS): ${p}`)
   }
   return real
@@ -1966,13 +2035,8 @@ app.put('/api/dirs', async (c) => {
 // una ruta fuera de la unión no se registra (guard silencioso, no revienta el
 // caller: esto corre fire-and-forget después de que la sesión ya existe).
 function recordRecentDir(dir: string): void {
-  let real: string
-  try {
-    real = fs.realpathSync(dir)
-  } catch {
-    return // no debería pasar (la sesión ya se creó ahí), pero por las dudas
-  }
-  if (!WORKSPACES_ROOTS.some((root) => insideDir(real, root))) return
+  const real = resolveInsideOrNull(dir)
+  if (!real) return // no debería pasar (la sesión ya se creó ahí), pero por las dudas
   const current = readDirs()
   const recent = [real, ...current.recent.filter((p) => p !== real)].slice(0, RECENT_DIRS_MAX)
   writeDirs({ ...current, recent })
@@ -1992,7 +2056,7 @@ app.get('/api/dirs/browse', (c) => {
   if (!raw || !path.isAbsolute(raw)) throw new HttpError(400, 'path debe ser una ruta absoluta')
   let abs: string
   try {
-    abs = checkInsideWorkspaces(raw) // 403 si cae fuera de la unión
+    abs = resolveInside(raw) // 403 si cae fuera de la unión
   } catch (e) {
     if (e instanceof HttpError) throw e
     throw new HttpError(404, 'directorio no encontrado') // ENOENT del realpath interno
@@ -2011,7 +2075,7 @@ app.get('/api/dirs/browse', (c) => {
     try {
       const s = fs.statSync(target) // sigue symlinks
       // symlink que escapa de la unión: no se lista (mismo guard que fsList)
-      if (s.isDirectory() && checkInsideWorkspaces(target)) dirs.push(d.name)
+      if (s.isDirectory() && resolveInsideOrNull(target)) dirs.push(d.name)
     } catch {
       continue // symlink roto/fuera de la unión, o sin permisos
     }
@@ -2422,6 +2486,8 @@ app.get('*', (c) => {
   let p = decodeURIComponent(new URL(c.req.url).pathname)
   if (p === '/') p = '/index.html'
   const abs = path.normalize(path.join(PUBLIC_DIR, p))
+  // perímetro secundario de estáticos: léxico a propósito, sin realpath
+  // (PUBLIC_DIR no está realpath-eado; ver la doc del guardián)
   if (!insideDir(abs, PUBLIC_DIR)) return c.text('Not found', 404)
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return c.text('Not found', 404)
   const body = new Uint8Array(fs.readFileSync(abs))
