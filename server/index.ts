@@ -1410,6 +1410,56 @@ async function worktreeSessionName(branch: string): Promise<string> {
   return name
 }
 
+// Nacimiento de una Sesión: el bloque new-session + efectos de arranque que los
+// tres endpoints de creación (worktree, dispatch, session/new) copiaban. El
+// naming queda afuera (worktreeSessionName vs dispatchSessionName son estrategias
+// distintas): el caller pasa el `name` ya resuelto y validado. Efectos opcionales:
+//  - recordRecent: registra el dir en el MRU (tarea 39; dispatch y session/new),
+//    best-effort. La sesión ya existe aunque falle la escritura del store.
+//  - startup: línea a tipear en el shell recién nacido (dispatch lanza `claude`);
+//    misma coreografía que el prototipo (delay de readiness, luego Enter aparte).
+//  - bornErrPrefix: prefijo del error si new-session falla (worktree avisa que el
+//    worktree quedó en disco sin sesión, sin inventar un rollback).
+// Modo de error único: HttpError(500) tanto en el nacimiento como en el arranque.
+interface SpawnOpts {
+  dir: string
+  name: string
+  hideStatus?: boolean
+  recordRecent?: boolean
+  startup?: string
+  bornErrPrefix?: string
+}
+async function spawnSession(o: SpawnOpts): Promise<void> {
+  try {
+    await runTmux(['new-session', '-d', '-s', o.name, '-c', o.dir])
+  } catch (e: any) {
+    throw new HttpError(500, `${o.bornErrPrefix ?? ''}tmux falló: ${firstErrLine(e)}`)
+  }
+  // MRU (tarea 39): best-effort, la sesión ya nació aunque falle la escritura
+  if (o.recordRecent) {
+    try {
+      recordRecentDir(o.dir)
+    } catch {
+      /* no crítico: la sesión ya existe */
+    }
+  }
+  // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
+  if (o.hideStatus) await tmuxSetStatus(o.name, false)
+  // arranque opcional: el shell recién nacido tarda un toque en estar listo;
+  // luego la línea literal y, con otro respiro, el Enter aparte (mismo patrón
+  // que el prototipo de la tarea 6)
+  if (o.startup !== undefined) {
+    await new Promise((r) => setTimeout(r, 250))
+    try {
+      await tmuxSendKeys(o.name, '-l', o.startup)
+      await new Promise((r) => setTimeout(r, 150))
+      await tmuxSendKeys(o.name, 'Enter')
+    } catch (e: any) {
+      throw new HttpError(500, `sesión ${o.name} creada, pero el envío del prompt falló: ${firstErrLine(e)}`)
+    }
+  }
+}
+
 app.post('/api/worktree', async (c) => {
   const repo = await resolveGitDir(c.req.query('session'))
   let body: { branch?: unknown; base?: unknown; hideStatus?: unknown }
@@ -1443,16 +1493,9 @@ app.post('/api/worktree', async (c) => {
   }
 
   const session = await worktreeSessionName(branch)
-  try {
-    await runTmux(['new-session', '-d', '-s', session, '-c', wtPath])
-  } catch (e: any) {
-    // el worktree quedó creado pero sin sesión: avisar sin inventar rollback
-    // (borrar un worktree recién pedido sería peor que dejarlo attacheable)
-    const msg = firstErrLine(e)
-    throw new HttpError(500, `worktree creado en ${wtPath}, pero tmux falló: ${msg}`)
-  }
-  // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
-  if (hideStatus) await tmuxSetStatus(session, false)
+  // el worktree ya quedó creado en disco: si tmux falla, avisar sin inventar un
+  // rollback (borrar un worktree recién pedido sería peor que dejarlo attacheable)
+  await spawnSession({ dir: wtPath, name: session, hideStatus, bornErrPrefix: `worktree creado en ${wtPath}, pero ` })
   console.log(`[deck] ${new Date().toISOString()} worktree ${branch} -> ${wtPath} (sesión ${session})`)
   return c.json({ session, path: wtPath, branch })
 })
@@ -1672,37 +1715,13 @@ app.post('/api/dispatch', async (c) => {
   // un homónimo en otro dir se desambigua (ver dispatchSessionName)
   const session = await dispatchSessionName(dir)
 
-  try {
-    await runTmux(['new-session', '-d', '-s', session, '-c', dir])
-  } catch (e: any) {
-    const msg = firstErrLine(e)
-    throw new HttpError(500, `tmux falló: ${msg}`)
-  }
-  // sesión ya nacida: registrar el MRU (tarea 39). Best-effort, no aborta el
-  // dispatch si por lo que sea falla la escritura del store de dirs.
-  try {
-    recordRecentDir(dir)
-  } catch {
-    /* no crítico: el dispatch ya creó la sesión */
-  }
-  // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
-  if (hideStatus) await tmuxSetStatus(session, false)
-
-  // el shell recién nacido tarda un toque en estar listo; luego mandamos la
-  // línea literal y, con otro respiro, el Enter (mismo patrón que el prototipo)
-  // sin modelo/effort elegido NO se pasa la flag (queda el default del CLI)
+  // línea de arranque: `claude $'<prompt>' --permission-mode <m> [--model] [--effort]`.
+  // sin modelo/effort elegido NO se pasa la flag (queda el default del CLI); el
+  // send-keys guionado con delays y el registro del MRU los hace spawnSession
   const modelFlag = model ? ` --model ${model}` : ''
   const effortFlag = effort ? ` --effort ${effort}` : ''
   const line = `${CLAUDE_BIN} ${shQuote(prompt)} --permission-mode ${mode}${modelFlag}${effortFlag}`
-  await new Promise((r) => setTimeout(r, 250))
-  try {
-    await tmuxSendKeys(session, '-l', line)
-    await new Promise((r) => setTimeout(r, 150))
-    await tmuxSendKeys(session, 'Enter')
-  } catch (e: any) {
-    const msg = firstErrLine(e)
-    throw new HttpError(500, `sesión ${session} creada, pero el envío del prompt falló: ${msg}`)
-  }
+  await spawnSession({ dir, name: session, hideStatus, recordRecent: true, startup: line })
   console.log(`[deck] ${new Date().toISOString()} dispatch ${dirName} (modo ${mode}${model ? `, modelo ${model}` : ''}${effort ? `, effort ${effort}` : ''}) -> sesión ${session}`)
   return c.json({ session, dir, mode, model, effort })
 })
@@ -1739,21 +1758,7 @@ app.post('/api/session/new', async (c) => {
   // (<nombre>-2) y los homonimos de otras raices se desambiguan por el padre
   // (ver dispatchSessionName)
   const session = await dispatchSessionName(dir)
-
-  try {
-    await runTmux(['new-session', '-d', '-s', session, '-c', dir])
-  } catch (e: any) {
-    const msg = firstErrLine(e)
-    throw new HttpError(500, `tmux falló: ${msg}`)
-  }
-  // honrar la pref de ocultar la franja verde ya al nacer (fire-and-forget)
-  if (hideStatus) await tmuxSetStatus(session, false)
-  // MRU (tarea 39): best-effort, la sesion ya existe aunque falle la escritura
-  try {
-    recordRecentDir(dir)
-  } catch {
-    /* no crítico */
-  }
+  await spawnSession({ dir, name: session, hideStatus, recordRecent: true })
   console.log(`[deck] ${new Date().toISOString()} nueva sesión pelada en ${dir} -> sesión ${session}`)
   return c.json({ session, dir })
 })
