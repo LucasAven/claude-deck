@@ -92,12 +92,14 @@ export async function newSession(path: string): Promise<NewSessionResult> {
   }
 }
 
-// Pins + recientes (tarea 42), fuente de las secciones PINNEADOS/RECIENTES.
-// El server ya filtra rutas que dejaron de existir o de estar dentro de la
-// unión (dirStillValid en GET /api/dirs).
+// Pins + recientes (tarea 42) + default (tarea 43), fuente de las secciones
+// PINNEADOS/RECIENTES. El server ya filtra rutas que dejaron de existir o de
+// estar dentro de la unión (dirStillValid en GET /api/dirs). `defaultDir` viene
+// EFECTIVO (nunca vacío): el elegido desde acá o el fallback del .env.
 export interface DirsResp {
   pins: string[]
   recent: string[]
+  defaultDir: string
 }
 
 export async function fetchDirs(): Promise<DirsResp> {
@@ -143,6 +145,27 @@ export async function unpin(dir: string): Promise<PinResult> {
   try {
     const current = await fetchDirs()
     return await setPins(current.pins.filter((p) => p !== dir))
+  } catch (e) {
+    if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
+    return { ok: false, error: 'error de red' }
+  }
+}
+
+// "Hacer default" (tarea 43): el dir donde el "+" de la fila de chips pare las
+// sesiones nuevas. PUT por clave presente: mandar solo `defaultDir` NO pisa los
+// pins (ni al revés), así que no hace falta el read-modify-write de pin/unpin.
+// Devuelve el default efectivo ya resuelto por el server, que el caller espeja
+// en el store para que el "+" lo use sin re-fetchear.
+export async function setDefaultDir(dir: string): Promise<{ ok: true; defaultDir: string } | { ok: false; error: string }> {
+  try {
+    const res = await api('/api/dirs', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ defaultDir: dir }),
+    })
+    if (!res.ok) return { ok: false, error: await errMsg(res) }
+    const data = (await res.json()) as { defaultDir: string }
+    return { ok: true, defaultDir: data.defaultDir }
   } catch (e) {
     if (String((e as Error).message) === '401') return { ok: false, error: 'sesión expirada' }
     return { ok: false, error: 'error de red' }

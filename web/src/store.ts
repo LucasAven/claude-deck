@@ -5,6 +5,7 @@ import { closeSwitchMenu, loadSwitch } from './lib/switch'
 import { closeComposer } from './lib/composer'
 import { invalidateTree, refreshTree } from './lib/files'
 import { orderNames } from './lib/chiporder'
+import { newSession } from './lib/projects'
 
 // Estado global (zustand): el módulo de terminal/WS lo lee fuera de React con
 // useDeckStore.getState() y dispara updates sin prop-drilling.
@@ -141,8 +142,11 @@ function loadHideTmuxStatus(): boolean {
 interface DeckStore {
   // --- núcleo (app.js:7-13) ---
   defaultSession: string
+  // home del panel: dónde pare la sesión el "+" de los chips (tarea 43). Sale
+  // EFECTIVO de /api/config (el elegido desde Proyectos o el fallback del .env)
+  // y lo refresca setDefaultDir al cambiarlo. '' = todavía no llegó la config.
+  defaultDir: string
   session: string | null
-  expectCreate: string | null
   activeTab: Tab
   inDiff: boolean
 
@@ -211,14 +215,6 @@ interface DeckStore {
   fallbackToLiveSession: () => Promise<void>
 }
 
-// Caer a otra sesión viva: la default si existe (se recrea vacía si no queda
-// ninguna), si no la primera de la lista. app.js:1612-1617.
-function nextSessionName(existing: string[], base: string): string {
-  let n = 2
-  while (existing.includes(`${base}-${n}`)) n++
-  return `${base}-${n}`
-}
-
 // timer del hint de sesión nueva: module-level como el hintTimer de app.js:285.
 let hintTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -240,8 +236,8 @@ function persistActiveSession(name: string | null) {
 
 export const useDeckStore = create<DeckStore>((set, get) => ({
   defaultSession: 'deck',
+  defaultDir: '',
   session: null,
-  expectCreate: null,
   activeTab: 'claude',
   inDiff: false,
 
@@ -482,20 +478,43 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     get().refreshGit()
   },
 
-  // app.js:1619-1628. Creación pedida por el usuario (botón +): expectCreate
-  // exime al guard anti-resurrección, así el attach con create=1 la levanta.
+  // Creación pedida por el usuario (botón + de la fila de chips). Desde la
+  // tarea 43 va por HTTP al home efectivo del panel (defaultDir, elegible desde
+  // Proyectos), el MISMO camino que "+ nueva sesión acá": antes creaba por el WS
+  // (expectCreate + create=1), que spawneaba con el DEFAULT_DIR del .env clavado
+  // y nombraba contando deck-2/deck-3 sin mirar el dir. Ahora el nombre lo saca
+  // el server del basename del dir (claude-deck, claude-deck-2...).
   createSession: async () => {
-    let existing: string[] = []
-    try {
-      existing = ((await (await api('/api/tmux/sessions')).json()) as Session[]).map((s) => s.name)
-    } catch {
-      /* sin lista: nextSessionName arranca en base-2 igual */
+    let dir = get().defaultDir
+    if (!dir) {
+      // la config no llegó (arranque a medias o server caído al bootear): es un
+      // tap explícito, vale reintentar acá antes de rendirse
+      try {
+        const cfg = await (await api('/api/config')).json()
+        if (typeof cfg.defaultDir === 'string' && cfg.defaultDir) {
+          dir = cfg.defaultDir
+          set({ defaultDir: dir })
+        }
+      } catch {
+        /* sigue vacío: el alert de abajo */
+      }
     }
-    const cur = get().session
-    if (cur && !existing.includes(cur)) existing.push(cur)
-    const name = nextSessionName(existing, get().defaultSession)
-    set({ expectCreate: name })
-    get().selectSession(name)
+    if (!dir) {
+      alert('No se pudo crear la sesión: el panel no sabe cuál es el directorio por defecto')
+      return
+    }
+    const res = await newSession(dir)
+    if (!res.ok) {
+      alert(`No se pudo crear la sesión: ${res.error}`)
+      return
+    }
+    // la sesión ya existe server-side: selectSession pelado (sin expectCreate),
+    // el guard anti-resurrección ve created=false y no la mata
+    get().selectSession(res.session)
+    // el hint lo disparaba meta.created del WS; creando por HTTP el attach ve
+    // una sesión que YA existe, así que lo pide el caller (después de
+    // selectSession, que hace hideHint)
+    get().showHint()
   },
 
   // app.js:1535-1553. La default si existe (se recrea vacía si no queda
@@ -532,13 +551,17 @@ export async function restoreInitialSession() {
   const { setSession } = useDeckStore.getState()
 
   let def = 'deck'
+  let dir = ''
   try {
     const cfg = await (await api('/api/config')).json()
     def = cfg.session || 'deck'
+    // home efectivo del panel (tarea 43): el "+" pare acá. Puede cambiar en
+    // caliente desde Proyectos, por eso setDefaultDir también lo espeja.
+    dir = typeof cfg.defaultDir === 'string' ? cfg.defaultDir : ''
   } catch {
     /* sin config: queda el default */
   }
-  useDeckStore.setState({ defaultSession: def })
+  useDeckStore.setState({ defaultSession: def, defaultDir: dir })
   let session = def
 
   // última sesión activa: si la guardada ya no existe, el attach sin create=1
