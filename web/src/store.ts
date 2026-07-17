@@ -208,6 +208,9 @@ interface DeckStore {
   showHint: () => void
   hideHint: () => void
   refreshSessions: () => Promise<void>
+  // El único ritual de "la Sesión activa pasa a ser `next`" (el seam de move).
+  // Lo comparten los 3 moves reales; rename y restore NO son moves (ver abajo).
+  transitionTo: (next: string) => void
   selectSession: (name: string) => void
   killSession: (name: string) => Promise<void>
   renameSession: (name: string) => Promise<void>
@@ -380,22 +383,40 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     set({ sessions: ordered.map((n) => ({ name: n, state: stateByName[n] })) })
   },
 
-  // app.js:1500-1512. Persistir, cerrar hint/menú/composer (guardando el
-  // borrador de la sesión saliente), reconectar el WS a la nueva sesión y
-  // refrescar git/sessions. (Fase 5: refreshTree si tab=files.)
-  selectSession: (name) => {
-    if (name === get().session) return
-    closeComposer() // guarda el borrador de la sesión actual antes de cambiarla
+  // El único ritual de move de la Sesión activa (app.js:1500-1512): cerrar
+  // hint/menú/composer (guardando el borrador de la saliente), persistir,
+  // reconectar el WS a la nueva sesión, marcar el árbol stale y refrescar
+  // git/sessions/status. Lo comparten los 3 moves reales (select, fallback,
+  // create-via-select). Antes cada uno lo copiaba con divergencias
+  // (invalidateTree solo en fallback, refreshClaudeStatus solo en select):
+  // centralizarlo mata esa asimetría. rename NO es un move (cambia el nombre de
+  // la MISMA sesión → mismo dir → no invalida el árbol); restore tampoco (es el
+  // set inicial del arranque, con App orquestando los fetches).
+  transitionTo: (next) => {
+    closeComposer() // guarda el borrador de la sesión saliente antes de cambiarla
     closeSwitchMenu()
-    // claudeStatus: null → la statusline no muestra datos rancios de la sesión
-    // saliente mientras llega el fetch de la nueva (tarea 22)
-    set({ session: name, switchState: loadSwitch(name), claudeStatus: null })
-    persistActiveSession(name)
+    // claudeStatus: null → la statusline no muestra datos rancios de la saliente
+    // mientras llega el fetch de la nueva (tarea 22)
+    set({ session: next, switchState: loadSwitch(next), claudeStatus: null })
+    persistActiveSession(next)
     get().hideHint()
     window.claudeConn?.reconnect()
-    get().refreshSessions()
+    // todo move cambia el dir de la sesión → el root del árbol de files cambió:
+    // marcarlo stale para que se re-liste aunque el nombre coincida (el fallback
+    // puede reusar el de una sesión muerta; el mismo razonamiento vale para los
+    // otros moves, que antes no lo hacían: bug de asimetría, app.js:1550)
+    invalidateTree()
+    if (get().activeTab === 'files') refreshTree(false)
     get().refreshGit()
+    get().refreshSessions()
     window.refreshClaudeStatus?.()
+  },
+
+  // El usuario elige una sesión de la fila/switcher. Si ya es la activa no hay
+  // nada que mover (el fallback SÍ re-mueve aunque el nombre coincida: ver ahí).
+  selectSession: (name) => {
+    if (name === get().session) return
+    get().transitionTo(name)
   },
 
   // app.js:1514-1531. El estado de switchers y el borrador del composer son por
@@ -439,6 +460,11 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     if (get().session === name) {
       set({ session: newName })
       persistActiveSession(newName) // sin esto un reload vuelve al nombre viejo (y recrea la default vacía)
+      // el attach tmux sobrevive al rename (no se reconecta el WS), pero
+      // wantedSession quedaría con el nombre viejo: un reconnect posterior armaría
+      // la URL con una sesión muerta y caería al fallback. retarget lo actualiza
+      // en el lugar, sin cortar el attach.
+      window.claudeConn?.retarget(newName)
       try {
         // el estado de switchers y el borrador del composer se guardan por
         // sesión: migrarlos al nuevo nombre
@@ -517,18 +543,9 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
     }
     const def = get().defaultSession
     const next = names.includes(def) ? def : names[0] || def
-    closeComposer()
-    closeSwitchMenu()
-    set({ session: next, switchState: loadSwitch(next) })
-    persistActiveSession(next)
-    get().hideHint()
-    window.claudeConn?.reconnect()
-    get().refreshGit()
-    // el fallback puede reusar el nombre de una sesión muerta: marcar el árbol
-    // stale para que se re-liste aunque la sesión "no cambió" (app.js:1550)
-    invalidateTree()
-    if (get().activeTab === 'files') refreshTree(false)
-    get().refreshSessions()
+    // sin guard de "misma": el fallback puede reusar el nombre de una sesión
+    // muerta, así que hay que re-mover aunque el nombre coincida (app.js:1550)
+    get().transitionTo(next)
   },
 }))
 

@@ -225,6 +225,14 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
       retries = 0
       connect()
     },
+    retarget(name: string) {
+      // rename de la sesión activa: tmux mantiene el attach vivo (el WS no se
+      // corta), pero wantedSession quedaría con el nombre viejo. Actualizarlo en
+      // el lugar para que un reconnect posterior arme la URL del WS con el nombre
+      // nuevo; sin esto, tras un rename un reconnect caía a una sesión muerta y
+      // disparaba el fallback.
+      wantedSession = name
+    },
     sendVis,
     resume() {
       // al volver del background: si el WS murió, reconectar ya (sin backoff)

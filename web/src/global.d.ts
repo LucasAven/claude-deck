@@ -9,6 +9,7 @@ interface ClaudeConn {
   setStatusBar: (on: boolean) => void
   fit: (force?: boolean) => void
   reconnect: () => void
+  retarget: (name: string) => void
   sendVis: () => void
   resume: () => void
   currentSession: () => string | null

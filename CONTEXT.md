@@ -15,6 +15,15 @@ Una sesión tmux nombrada en la Mac, attacheable a la vez desde VS Code y el cel
 Es la unidad que el panel lista, crea y mata.
 _Avoid_: pestaña, ventana, terminal (esas son vistas de una sesión)
 
+**Transición de Sesión**:
+El acto de cambiar cuál Sesión está activa en el panel: reconecta el WS a la
+nueva, marca stale el árbol de files y refresca git/sesiones/status. Un solo
+ritual (`transitionTo`, en store.ts) que comparten seleccionar, el fallback y
+crear. Renombrar NO es una transición (cambia el nombre de la MISMA Sesión,
+mismo dir, no toca el árbol); restaurar tampoco (es el set inicial del arranque,
+con App orquestando los fetches).
+_Avoid_: seleccionar (seleccionar es UNA de las transiciones), cambiar de pestaña
+
 **Servicio anexo**:
 Algo que el celu consume por el tailnet pero que no es el panel: una app expuesta
 con `deck expose`, el Screen Sharing nativo. No va detrás del `AUTH_TOKEN`.
