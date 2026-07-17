@@ -378,21 +378,58 @@ session_name_for_dir() { # $1 = directorio, $2 = cuenta (work | vacío) → nomb
 }
 session_name_for_cwd() { session_name_for_dir "$PWD" "${1:-}"; }
 
+# ¿la sesión tiene algún cliente attacheado? Un cliente es una terminal de la Mac
+# viéndola, o el celu (el server attachea con `tmux new-session -A` dentro de un
+# pty, así que cuenta como cliente tmux más). En tmux 3.7b #{session_attached} vía
+# display-message vuelve vacío, así que se cuentan los clientes directo, el mismo
+# camino que el server usa para redibujar.
+session_has_client() { # $1 = nombre de sesión
+  [ -n "$(tmux list-clients -t "=$1" 2>/dev/null)" ]
+}
+
+# primer nombre de sesión libre a partir de una base: base, base-2, base-3...
+# trunca la base para que el sufijo entre en el cap de 32 de SESSION_RE.
+next_free_session_name() { # $1 = nombre base ya saneado
+  local base="$1" cand="$1" i=2 suf
+  while tmux has-session -t "=$cand" 2>/dev/null; do
+    suf="-$i"
+    cand="$(printf '%s' "$base" | cut -c1-$((32 - ${#suf})))$suf"
+    i=$((i + 1))
+    [ "$i" -gt 99 ] && break
+  done
+  printf '%s' "$cand"
+}
+
+_launch_new() { # $1 = nombre de sesión libre, $2 = comando a tipear (cc/ccw + flags)
+  tmux new-session -d -s "$1" -c "$PWD"
+  info "✓ sesión tmux '$1' creada: ya aparece como chip en el panel del celu"
+  # se tipea el ALIAS, no su expansión: el pane corre tu zsh interactivo (con tu
+  # ~/.zshrc cargado), así cc/ccw significan lo mismo acá y en tu terminal
+  tmux send-keys -t "=$1:" "$2" Enter
+}
+
 cmd_launch() { # $1 = alias/comando a tipear en el pane (cc | ccw), resto = flags
   # dentro de tmux no se anida un attach: ahí el comando se corre directo
-  [ -n "${TMUX:-}" ] && die "ya estás adentro de una sesión tmux — corré '$*' directo"
+  [ -n "${TMUX:-}" ] && die "ya estás adentro de una sesión tmux: corré '$*' directo"
   local name acct=''
   [ "$1" = ccw ] && acct=work   # ccw = cuenta de trabajo: sesión aparte de cc
   name="$(session_name_for_cwd "$acct")"
   if ! tmux has-session -t "=$name" 2>/dev/null; then
-    tmux new-session -d -s "$name" -c "$PWD"
-    info "✓ sesión tmux '$name' creada — ya aparece como chip en el panel del celu"
-    # se tipea el ALIAS, no su expansión: el pane corre tu zsh interactivo (con
-    # tu ~/.zshrc cargado), así cc/ccw significan lo mismo acá y en tu terminal
-    tmux send-keys -t "=$name:" "$*" Enter
+    # nada corriendo para este dir/cuenta: nace acá
+    _launch_new "$name" "$*"
+  elif session_has_client "$name"; then
+    # la sesión de este dir ya está ABIERTA y en uso en otra ventana (otra
+    # terminal, o el celu): mirrorearla es lo que molestaba ("se me switchea a la
+    # de al lado"). El usuario quiere una PARALELA, así que nace una nueva
+    # desambiguada (base-2, base-3...) sin tocar la que ya está abierta.
+    local new; new="$(next_free_session_name "$name")"
+    info "✓ '$name' ya está abierta en otra ventana: arranco '$new' en paralelo"
+    _launch_new "$new" "$*"
+    name="$new"
   else
-    # sesión del mismo directorio ya viva: attach. Si quedó en el shell (claude
-    # cerrado o recién reiniciada la Mac), relanzar el comando pedido.
+    # existe pero DETACHADA (cerraste la terminal y claude siguió vivo, o quedó el
+    # shell tras un exit): reattach idempotente, así volvés a lo que dejaste. Si
+    # quedó en el shell, relanzar el comando pedido.
     local pane_cmd
     pane_cmd="$(tmux display-message -p -t "=$name:" '#{pane_current_command}' 2>/dev/null || true)"
     case "$pane_cmd" in
