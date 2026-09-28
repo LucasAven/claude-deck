@@ -400,8 +400,14 @@ next_free_session_name() { # $1 = nombre base ya saneado
   printf '%s' "$cand"
 }
 
+# new-session lanzado desde $HOME: si no hay server tmux, el que nace hereda ese
+# cwd. Heredar el del caller (un worktree) rompe el server entero cuando ese dir
+# se borra: tmux 3.7 ignora el `-c` si su propio cwd ya no existe, y TODO pane
+# nuevo nace en el dir muerto, donde claude aborta.
+tmux_new_session() { (cd "$HOME" && tmux new-session "$@"); }
+
 _launch_new() { # $1 = nombre de sesión libre, $2 = comando a tipear (cc/ccw + flags)
-  tmux new-session -d -s "$1" -c "$PWD"
+  tmux_new_session -d -s "$1" -c "$PWD"
   info "✓ sesión tmux '$1' creada: ya aparece como chip en el panel del celu"
   # se tipea el ALIAS, no su expansión: el pane corre tu zsh interactivo (con tu
   # ~/.zshrc cargado), así cc/ccw significan lo mismo acá y en tu terminal
@@ -429,12 +435,21 @@ cmd_launch() { # $1 = alias/comando a tipear en el pane (cc | ccw), resto = flag
   else
     # existe pero DETACHADA (cerraste la terminal y claude siguió vivo, o quedó el
     # shell tras un exit): reattach idempotente, así volvés a lo que dejaste. Si
-    # quedó en el shell, relanzar el comando pedido.
-    local pane_cmd
+    # quedó en el shell, relanzar el comando pedido; si ese shell quedó parado en
+    # un dir borrado (un worktree que ya no está), claude abortaría ahí, así que
+    # la sesión se recrea en el dir actual.
+    local pane_cmd pane_dir
     pane_cmd="$(tmux display-message -p -t "=$name:" '#{pane_current_command}' 2>/dev/null || true)"
+    pane_dir="$(tmux display-message -p -t "=$name:" '#{pane_current_path}' 2>/dev/null || true)"
     case "$pane_cmd" in
-      zsh|bash|sh) tmux send-keys -t "=$name:" "$*" Enter
-                   info "✓ sesión '$name' estaba en el shell: relanzando '$*'" ;;
+      zsh|bash|sh) if [ -d "$pane_dir" ]; then
+                     tmux send-keys -t "=$name:" "$*" Enter
+                     info "✓ sesión '$name' estaba en el shell: relanzando '$*'"
+                   else
+                     tmux kill-session -t "=$name"
+                     info "✓ '$name' estaba en un dir borrado ($pane_dir): la recreo en $PWD"
+                     _launch_new "$name" "$*"
+                   fi ;;
       *)           info "✓ attach a '$name' (ya hay algo corriendo: no se relanza nada)" ;;
     esac
   fi
@@ -661,7 +676,7 @@ _adopt_relaunch() { # $1=cwd $2=account
   else
     cmd="claude --continue"
   fi
-  tmux new-session -d -s "$name" -c "$1"
+  tmux_new_session -d -s "$name" -c "$1"
   tmux send-keys -t "=$name:" "$cmd" Enter
   info "✓ adoptada: sesión tmux '$name' corriendo '$cmd'"
   info "  seguila del celu (ya aparece como chip) o en la Mac con: deck attach $name"
