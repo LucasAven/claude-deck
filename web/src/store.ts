@@ -3,6 +3,7 @@ import { deck, AuthError, DeckError } from './lib/api'
 import { SESSION_NAME_RE, loadQuickkeys } from './lib/keys'
 import { closeSwitchMenu, loadSwitch } from './lib/switch'
 import { closeComposer } from './lib/composer'
+import type { ClaudeMode } from './lib/mode'
 import { invalidateTree, refreshTree } from './lib/files'
 import { orderNames } from './lib/chiporder'
 import { newSession } from './lib/projects'
@@ -161,6 +162,7 @@ interface DeckStore {
   // vuelve solo si el server acumula MÁS perdidas después del descarte
   pushBannerDismissedCount: number
   claudeStatus: ClaudeStatus | null // statusline del panel (tarea 22)
+  claudeMode: ClaudeMode | null // último modo leído del footer de Claude (lib/mode)
   snippets: string[] | null
   snippetsEditing: boolean
 
@@ -252,6 +254,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   hostBannerDismissed: false,
   pushBannerDismissedCount: 0,
   claudeStatus: null,
+  claudeMode: null,
   snippets: null,
   snippetsEditing: false,
 
@@ -341,7 +344,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   },
 
   // -------------------------------------------------------------------------
-  // Terminal + sesiones (Fase 2). El indicador #conn-claude sale de este flag;
+  // Terminal + sesiones (Fase 2). El sl-off de la statusline sale de este flag;
   // la conexión (lib/term.ts) lo setea vía callback (app.js:80).
   setConnected: (on) => set({ connected: on }),
 
@@ -395,9 +398,9 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   transitionTo: (next) => {
     closeComposer() // guarda el borrador de la sesión saliente antes de cambiarla
     closeSwitchMenu()
-    // claudeStatus: null → la statusline no muestra datos rancios de la saliente
+    // claudeStatus/claudeMode: null → la statusline no muestra datos rancios de la saliente
     // mientras llega el fetch de la nueva (tarea 22)
-    set({ session: next, switchState: loadSwitch(next), claudeStatus: null })
+    set({ session: next, switchState: loadSwitch(next), claudeStatus: null, claudeMode: null })
     persistActiveSession(next)
     get().hideHint()
     window.claudeConn?.reconnect()

@@ -43,7 +43,7 @@ ok('xterm montado en pestaña Claude', !!(await page.$('#term-claude .xterm')));
 
 // 3. WS conectado (indicador) + prompt visible en la terminal
 await new Promise((r) => setTimeout(r, 2500));
-ok('indicador de conexión ON', await page.$eval('#conn-claude', (el) => el.classList.contains('on')));
+ok('statusline sin atenuar (conectado)', await page.$eval('#statusline', (el) => !el.classList.contains('sl-off')));
 const termText = await page.$eval('#term-claude', (el) => el.innerText);
 ok('la terminal muestra contenido de la sesión tmux', termText.trim().length > 0);
 
@@ -199,22 +199,27 @@ ok('pegar texto llama term.paste con el texto del portapapeles',
   pastedTexts.length === 1 && pastedTexts[0] === 'hola texto pegado');
 ok('el chooser se cierra al elegir una opción', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
 
-// 5c. switchers (rediseño): dos pills en la fila de acciones — "✦ Model" abre
-// el menú de modelo/esfuerzo y "Mode ⇅" cicla con shift+tab
+// 5c. switchers: dos chips en la statusline. "✦ <modelo> ▾" abre el menú de
+// modelo/esfuerzo y "mode ▾" cicla con shift+tab
 // pd = tap completo: desde la tarea 12 las pills disparan en pointerup
 const pd = (el) => {
   el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
 };
+// Model y Mode viven como chips en la statusline (ya no en la fila de acciones)
 const swGeo = await page.evaluate(() => ({
-  actions: document.querySelector('.controlrow.actions').getBoundingClientRect().top,
-  keys: document.querySelector('.quickkeys[data-term="claude"]').getBoundingClientRect().top,
+  inStatusline: !!document.querySelector('#statusline #btn-switch') && !!document.querySelector('#statusline #btn-mode'),
+  notInActions: !document.querySelector('.controlrow.actions #btn-switch, .controlrow.actions #btn-mode'),
+  chipH: Math.round(document.querySelector('#btn-switch').getBoundingClientRect().height),
 }));
-ok('fila de acciones (pills Model/Mode) arriba de la fila de teclas', swGeo.actions < swGeo.keys);
-// labels fijos: qué modelo/esfuerzo está en uso lo dice la statusline, no las pills
-ok('pills con label fijo (Model y Mode, sin el modelo actual)',
-  (await page.$eval('#btn-switch', (el) => el.textContent)).includes('Model')
-  && (await page.$eval('#btn-mode', (el) => el.textContent)).includes('Mode'));
+ok('chips Model/Mode en la statusline (22px), fuera de la fila de acciones',
+  swGeo.inStatusline && swGeo.notInActions && swGeo.chipH === 22);
+// el label sale del footer de Claude (lib/mode): "mode" hasta ver uno, después
+// la palabra corta del modo; depende de la sesión real, así que solo se valida
+// que sea uno de los conocidos
+ok('chip de modo muestra "mode" o un modo conocido',
+  ['mode', 'manual', 'plan', 'edits', 'auto', 'bypass', "don't ask"]
+    .includes(await page.$eval('#sl-mode', (el) => el.textContent)));
 
 // modo: cada tap manda UN shift+tab (ESC[Z). Se espía sendKeys en vez de
 // mandarlos de verdad: "ciclo completo → queda como estaba" solo vale si en la
@@ -1879,20 +1884,19 @@ const slRun = await page.evaluate(async () => {
   const out = {};
 
   // sin datos (hook inactivo) → sin segmentos de ctx, pero la línea sigue
-  // visible (aloja batería + conexión, que viven acá desde que dejaron la
-  // fila de sesiones)
+  // visible (aloja la batería y los chips de modelo/modo)
   mock = { status: null };
   await window.refreshClaudeStatus(); await frame();
   out.bareWhenNull = !sl.classList.contains('hidden') && !document.querySelector('#sl-pct')
-    && !!sl.querySelector('#host-chip') && !!sl.querySelector('#conn-claude');
+    && !!sl.querySelector('#host-chip') && !!sl.querySelector('#btn-switch');
 
   // usado 42% → RESTANTE 58%, ok, tokens compactos + modelo (sin costo);
-  // label "ctx" a secas (tarea 28)
+  // sin labels "ctx"/"tok" (2026-10-28)
   mock = { status: { model: 'Opus 4.8', modelId: 'claude-opus-4-8', ctxPct: 42, ctxSize: 200000, inputTokens: 84000, outputTokens: 120, costUsd: 1.2345, exceeds200k: false } };
   await window.refreshClaudeStatus(); await frame();
   out.okVisible = !sl.classList.contains('hidden') && sl.classList.contains('sl-ok');
   out.pct = document.querySelector('#sl-pct').textContent;
-  out.label = sl.querySelector('.sl-label').textContent;
+  out.noLabels = !sl.querySelector('.sl-label');
   out.tokens = document.querySelector('#sl-tokens').textContent;
   out.model = document.querySelector('#sl-model').textContent;
   out.noCost = !document.querySelector('#sl-cost');
@@ -1939,10 +1943,10 @@ const slRun = await page.evaluate(async () => {
   window.fetch = realFetch;
   return out;
 });
-ok('statusline: sin datos queda pelada (sin ctx) pero visible, con batería + conexión adentro', slRun.bareWhenNull);
-ok('statusline: usado 42% → restante 58%, ok, label + tokens + modelo (sin costo)',
-  slRun.okVisible && slRun.pct === '58%' && slRun.label === 'ctx'
-  && slRun.tokens === '84k tok' && slRun.model === 'Opus 4.8' && slRun.noCost);
+ok('statusline: sin datos queda pelada (sin ctx) pero visible, con batería + chips adentro', slRun.bareWhenNull);
+ok('statusline: usado 42% → restante 58%, ok, sin labels, tokens + modelo (sin costo)',
+  slRun.okVisible && slRun.pct === '58%' && slRun.noLabels
+  && slRun.tokens === '84k' && slRun.model === 'Opus 4.8' && slRun.noCost);
 ok('statusline: restante 22% (usado 78) → warn (ámbar)', slRun.warn);
 ok('statusline: restante 8% (usado 92) → alert (rojo)', slRun.alert);
 ok('statusline: exceeds200k fuerza alert y % "—"', slRun.exceedsAlert);

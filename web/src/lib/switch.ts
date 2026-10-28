@@ -4,9 +4,9 @@ import { hideSnipTip } from './sniptip'
 
 // Switchers de modo (shift+tab) y modelo/esfuerzo (/model, /effort). Port de
 // app.js:341-474. Modo: cada tap manda UN shift+tab (\x1b[Z), igual que en la
-// terminal — la app no puede leer el estado real de Claude desde el pty, así que
-// la pill tiene label fijo. Modelo/esfuerzo se persisten por sesión en
-// deck-switch:<sesión>. El popover #switch-menu es único: kind vive en el store.
+// terminal. El modo que se ve en el chip lo lee lib/mode del footer de Claude.
+// Modelo/esfuerzo se persisten por sesión en deck-switch:<sesión>. El popover
+// #switch-menu es único: kind vive en el store.
 
 export function loadSwitch(session: string | null): SwitchState {
   try {
@@ -41,10 +41,10 @@ function toggle(kind: 'model' | 'attach') {
 export const openModelMenu = () => toggle('model')
 export const openAttachMenu = () => toggle('attach')
 
-// un shift+tab por llamada (la app no lee el modo real del pty; el estado se
-// mira en la terminal). No cierra el menú acá: #btn-mode no está en la lista de
-// exclusión del closer global de App, así que si el popover estaba abierto el
-// propio pointerdown del tap ya lo cerró
+// un shift+tab por llamada (el chip se actualiza solo cuando el footer de
+// Claude muestra el modo nuevo, ver lib/mode). No cierra el menú acá: #btn-mode
+// no está en la lista de exclusión del closer global de App, así que si el
+// popover estaba abierto el propio pointerdown del tap ya lo cerró
 export function cycleMode() {
   window.claudeConn?.sendKeys('\x1b[Z')
 }

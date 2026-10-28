@@ -11,6 +11,7 @@
   --accent-dim: #8a6a2e;
   --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
   --vvh: 100dvh;
+  --sl-h: 29px;  /* statusline: chip de 22px + padding 3px x2 + borde 1px */
   --vvt: 0px;
 }
 
@@ -421,6 +422,7 @@ body.composer-open .tabbar { display: none; }
   display: flex;
   align-items: center;
   gap: 6px;
+  height: var(--sl-h);
   padding: 3px 12px;
   font-family: var(--mono);
   font-size: 11px;
@@ -431,10 +433,15 @@ body.composer-open .tabbar { display: none; }
   white-space: nowrap;
   overflow: hidden;
 }
-.statusline .sl-label { opacity: 0.7; }
 .statusline .sl-sep { opacity: 0.4; }
 .statusline #sl-pct { font-weight: 600; }
-.statusline .sl-model { color: var(--text); opacity: 0.8; }
+/* ctx/tokens: ocupa lo que dejan los chips y se corta con "…" si no entra */
+.statusline .sl-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* niveles de contexto: ok (muted) → warn (ámbar) → alerta (rojo) */
 .statusline.sl-warn #sl-pct { color: var(--accent); }
 .statusline.sl-alert { color: #e5534b; }
@@ -448,8 +455,33 @@ body.composer-open .tabbar { display: none; }
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
+/* chips de modelo (#btn-switch, abre el menú) y modo (#btn-mode, shift+tab),
+   mudados de la fila de acciones. Color propio: no se tiñen con sl-alert. */
+.sl-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  margin: 0;
+  border: 1px solid #2a2f37;
+  border-radius: 7px;
+  background: #171b21;
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.sl-chip:active { border-color: var(--accent); }
+/* WS caído (reemplaza al dot de conexión): toda la línea a media opacidad y
+   el % pierde el color de warn/alert */
+.statusline.sl-off > * { opacity: 0.45; }
+.statusline.sl-off #sl-pct { color: var(--muted); }
+.sl-chip .sl-star { color: #c98bdb; }
+.sl-chip .sl-chev { color: var(--muted); font-size: 10px; }
 .sl-batt {
   display: inline-flex;
   align-items: center;
@@ -482,27 +514,6 @@ body.composer-open .tabbar { display: none; }
   background: var(--bg);
 }
 
-/* pills Model / Mode (rediseño): dos botones que se reparten el resto de la
-   fila de acciones — Model abre el menú de modelo/esfuerzo, Mode cicla con
-   shift+tab. Labels fijos: qué modelo/esfuerzo está en uso lo dice la
-   statusline. Marco y fondo los heredan de .controlrow button (el scope
-   .controlrow es necesario para ganarle en especificidad a esa regla). */
-.controlrow .switch-pill {
-  flex: 1;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 0 8px;
-  overflow: hidden;
-  white-space: nowrap;
-  color: var(--muted);
-  font-size: 13px;
-}
-.pill-chev { color: var(--muted); font-size: 11px; }
-.model-star { color: #b294bb; }
-
 /* popover compartido de los switchers (abre hacia arriba) */
 .switch-menu {
   position: absolute;
@@ -518,6 +529,8 @@ body.composer-open .tabbar { display: none; }
   max-height: 45dvh;
   overflow-y: auto;
 }
+/* el de modelo se abre desde #btn-switch (statusline): arriba de ella, no encima */
+.switch-menu[data-kind="model"] { bottom: calc(100% + var(--sl-h) + 6px); }
 .switch-menu .mh,
 .create-menu .mh {
   padding: 8px 12px 4px;
@@ -851,8 +864,7 @@ body.composer-open .tabbar { display: none; }
   border-color: var(--accent);
   color: var(--accent);
 }
-/* 44px de ancho (no 48): en un viewport de 375px la pill modelo·modo necesita
-   esos 16px extra para que el nombre del modelo se lea entero */
+/* 44px de ancho (no 48), del rediseño con las pills modelo/modo en la fila */
 .controlrow .ctl-sq {
   flex: none;
   width: 44px;
@@ -943,20 +955,6 @@ body.composer-open .tabbar { display: none; }
   cursor: pointer;
 }
 #img-chip-close:active { color: var(--accent); }
-
-/* indicador conectado/desconectado (vive en .sl-right de la statusline) */
-.conn { display: flex; align-items: center; }
-.conn .dot {
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  background: #555c66;
-  box-shadow: 0 0 0 0 transparent;
-  transition: background .3s;
-}
-.conn.on .dot {
-  background: var(--accent);
-  box-shadow: 0 0 8px 0 var(--accent-dim);
-}
 
 /* ---------- hint sesión nueva ---------- */
 .hint {

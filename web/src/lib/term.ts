@@ -2,6 +2,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useDeckStore } from '../store'
 import { deck } from './api'
+import { watchMode } from './mode'
 
 // Terminal + WebSocket con reconexión (backoff). Port LITERAL de
 // createTermConnection + wireTouchScroll (public/app.js:45-278). TypeScript
@@ -61,6 +62,7 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
   const fit = new FitAddon()
   term.loadAddon(fit)
   term.open(container)
+  watchMode(term) // modo de permisos para el chip de la statusline
 
   // shift+enter desde teclado físico (BT): xterm lo mandaría como \r (submit).
   // Traducirlo al newline suave de Claude Code (ESC+CR, ver KEYS.nl).

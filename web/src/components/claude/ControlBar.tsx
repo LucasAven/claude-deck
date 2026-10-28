@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { KEYS, QUICKKEY_CATALOG } from '../../lib/keys'
 import { useTap } from '../../hooks/useTap'
 import { useDeckStore } from '../../store'
-import { openModelMenu, openAttachMenu, cycleMode } from '../../lib/switch'
+import { openAttachMenu } from '../../lib/switch'
 import { openSnippetsMenu } from '../../lib/snippets'
 import { openComposer } from '../../lib/composer'
 import { openScrollback } from '../../lib/scrollback'
@@ -10,7 +10,7 @@ import { attachImage, sendPendingImage, hideImgChip } from '../../lib/image'
 import { SwitchMenu } from './SwitchMenu'
 
 // Controlbar (index.html:88-133). Chip de imagen + popover switch-menu + fila
-// de acciones (adjuntar/snippets/composer/scrollback + pill modelo·modo) + fila
+// de acciones (adjuntar/snippets/composer/scrollback) + fila
 // de quickkeys. La lógica vive en las libs (switch/snippets/composer/image);
 // acá se pinta y se cablea con useTap (preventDefault en pointerdown mantiene el
 // foco del teclado virtual — §5.4, NO reemplazar por onClick). El scrollback
@@ -34,8 +34,6 @@ export function ControlBar() {
   const quickkeys = useDeckStore((s) => s.quickkeys)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const modeTap = useTap(() => cycleMode())
-  const switchTap = useTap(() => openModelMenu())
   const attachTap = useTap(() => openAttachMenu())
   const snippetsTap = useTap(() => openSnippetsMenu())
   const composerTap = useTap(() => openComposer())
@@ -75,9 +73,8 @@ export function ControlBar() {
 
       <SwitchMenu onCamera={() => inputRef.current?.click()} />
 
-      {/* rediseño: una sola fila de acciones — los 4 cuadrados + los botones
-          Model (abre el menú de modelo/esfuerzo) y Mode (cicla con shift+tab).
-          Labels fijos: el modelo/esfuerzo en uso los muestra la statusline. */}
+      {/* rediseño: una sola fila de acciones con los 4 cuadrados. Los botones
+          Model y Mode se mudaron a chips de la statusline. */}
       <div className="controlrow actions">
         <button id="btn-attach" className="ctl-sq" title="Adjuntar: cámara o portapapeles" {...attachTap}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
@@ -91,14 +88,6 @@ export function ControlBar() {
         </button>
         <button id="btn-scrollback" className="ctl-sq" title="Ponerse al día (scrollback legible)" {...scrollbackTap}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5.5h16M4 9.5h16M4 13.5h10" /><path d="M17 21v-6M14 17.8l3 3 3-3" /></svg>
-        </button>
-        <button id="btn-switch" className="switch-pill" title="Modelo y esfuerzo" {...switchTap}>
-          <span className="model-star">✦</span>
-          <span>Model</span>
-        </button>
-        <button id="btn-mode" className="switch-pill" title="Ciclar modo (shift+tab)" {...modeTap}>
-          <span>Mode</span>
-          <span className="pill-chev">⇅</span>
         </button>
       </div>
 

@@ -1,6 +1,8 @@
 import { useDeckStore } from '../../store'
 import { ctxLevel, ctxRemaining, fmtTokens } from '../../lib/status'
 import { battLow, openHostSheet } from '../../lib/host'
+import { openModelMenu, cycleMode } from '../../lib/switch'
+import { MODES } from '../../lib/mode'
 import { useTap } from '../../hooks/useTap'
 
 // Statusline del panel (tarea 22): línea fina y discreta (mono) arriba de la
@@ -8,8 +10,8 @@ import { useTap } from '../../hooks/useTap'
 // contexto RESTANTE (Lucas 2026-07-07: prefiere "cuánto queda" sobre "cuánto
 // usé" — se invierte en el display, el endpoint sigue exponiendo el usado) +
 // tokens de input, modelo y esfuerzo (el costo se retiró: no le interesa).
-// El label del ctx es "ctx" a secas (tarea 28: se retiró la palabra
-// "restante"; el número sigue siendo el restante, la semántica no cambió).
+// Sin labels: "96% · 84k" (Lucas 2026-10-28 sacó "ctx" y "tok" para que
+// entren junto a los chips; el número sigue siendo el restante).
 // El esfuerzo (también tarea 28) sale de switchState.effort, señal BLANDA:
 // refleja lo elegido en el SwitchMenu del deck (persistido por sesión en
 // deck-switch:<sesión>), no lo que Claude corre realmente si el effort se
@@ -20,10 +22,18 @@ import { useTap } from '../../hooks/useTap'
 // alerta cuando queda POCO contexto (ctxLevel: ok/warn/alert); esos segmentos
 // se ocultan si no hay datos (hook inactivo).
 //
-// A la derecha viven el chip de batería del host y el punto de conexión (antes
-// en la fila de sesiones): como el host es el único camino al tailnet, acá se
-// ve de un vistazo batería + estado del enlace. La línea está SIEMPRE visible
-// (ya no roba/devuelve filas → no hace falta el fit() por visibilidad, §5.5).
+// A la derecha vive el chip de batería del host (antes en la fila de
+// sesiones). El punto de conexión se retiró (Lucas 2026-10-28, para ganar
+// ancho): con el WS caído la línea entera se atenúa (sl-off). La línea está
+// SIEMPRE visible (ya no roba/devuelve filas → no hace falta el fit() por
+// visibilidad, §5.5).
+//
+// Modelo y modo son chips tocables (mudados de la fila de acciones de la
+// controlbar): #btn-switch abre el menú de modelo/esfuerzo y #btn-mode manda un
+// shift+tab. El chip de modo muestra el último modo leído del footer de la
+// terminal, con el color de Claude (lib/mode), y "mode" hasta ver uno. Los
+// chips se pintan aunque no haya datos (si no, sin hook no habría cómo cambiar
+// de modelo); lo que se acorta con "…" cuando falta ancho es ctx/tokens.
 export function Statusline() {
   const s = useDeckStore((st) => st.claudeStatus)
   const connected = useDeckStore((st) => st.connected)
@@ -32,12 +42,16 @@ export function Statusline() {
   const rem = ctxRemaining(s) // % restante (Lucas lo prefiere sobre el usado)
   // esfuerzo elegido en el SwitchMenu (fuente blanda, ver cabecera)
   const effort = useDeckStore((st) => st.switchState.effort)
+  // último modo leído del footer de la terminal (lib/mode); null → "mode"
+  const mode = useDeckStore((st) => st.claudeMode)
 
   // el chip de host va con useTap (no onClick): un onClick se dispara con el
   // `click` fantasma que el navegador sintetiza tras un tap táctil, y al cerrar
   // un overlay tocando su ✕ ese click fantasma caía acá y abría el host-sheet
   // solo (tarea 20). useTap solo escucha pointer events, así que lo ignora.
   const hostChipTap = useTap(() => openHostSheet())
+  const switchTap = useTap(() => openModelMenu())
+  const modeTap = useTap(() => cycleMode())
 
   // chip 🔋 solo si el host reporta batería (Mac de escritorio / pmset ilegible
   // → null); la barrita interna del ícono refleja el nivel (ancho útil 13.2px)
@@ -45,36 +59,38 @@ export function Statusline() {
   const fillW = batt ? Math.max(0.8, (13.2 * batt.pct) / 100).toFixed(1) : '0'
 
   return (
-    <div id="statusline" className={'statusline sl-' + level}>
-      {s && (
-        <>
-          <span className="sl-ctx">
-            <span className="sl-label">ctx</span>{' '}
-            <span id="sl-pct">{rem != null ? `${rem}%` : '—'}</span>
-          </span>
-          <span className="sl-sep">·</span>
-          <span id="sl-tokens" className="sl-tokens">
-            {fmtTokens(s.inputTokens)} tok
-          </span>
-          {s.model && (
+    <div id="statusline" className={'statusline sl-' + level + (connected ? '' : ' sl-off')}>
+      <span className="sl-info">
+        {s && (
+          <>
+            <span className="sl-ctx">
+              <span id="sl-pct">{rem != null ? `${rem}%` : '—'}</span>
+            </span>
+            <span className="sl-sep"> · </span>
+            <span id="sl-tokens" className="sl-tokens">
+              {fmtTokens(s.inputTokens)}
+            </span>
+          </>
+        )}
+      </span>
+      <span className="sl-right">
+        <button id="btn-switch" className="sl-chip" title="Modelo y esfuerzo" {...switchTap}>
+          <span className="sl-star">✦</span>
+          <span id="sl-model">{s?.model ?? 'Model'}</span>
+          {effort && (
             <>
               <span className="sl-sep">·</span>
-              <span id="sl-model" className="sl-model">
-                {s.model}
-              </span>
-              {effort && (
-                <>
-                  <span className="sl-sep">·</span>
-                  <span id="sl-effort" className="sl-model">
-                    {effort}
-                  </span>
-                </>
-              )}
+              <span id="sl-effort">{effort}</span>
             </>
           )}
-        </>
-      )}
-      <span className="sl-right">
+          <span className="sl-chev">▾</span>
+        </button>
+        <button id="btn-mode" className="sl-chip" title="Ciclar modo (shift+tab)" {...modeTap}>
+          <span id="sl-mode" style={mode ? { color: MODES[mode].color } : undefined}>
+            {mode ? MODES[mode].word : 'mode'}
+          </span>
+          <span className="sl-chev">▾</span>
+        </button>
         {/* chip de batería del host: tap abre el sheet (mismos id/clases de siempre) */}
         <button
           id="host-chip"
@@ -89,9 +105,6 @@ export function Statusline() {
           </svg>
           <span id="host-chip-pct">{batt ? `${batt.pct}%` : ''}</span>
         </button>
-        <span className={'conn' + (connected ? ' on' : '')} id="conn-claude">
-          <span className="dot" />
-        </span>
       </span>
     </div>
   )
