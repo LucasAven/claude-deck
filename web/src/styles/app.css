@@ -1,5 +1,21 @@
 /* claude-deck — tema oscuro "sala de control" */
 
+/* JetBrains Mono empaquetada (build oficial, OFL.txt al lado): el iPhone no la
+   trae, y el corte "latin" de Google Fonts no tiene ⇧ ni ⏎. La terminal xterm
+   sigue con su propia fuente (lib/term.ts). */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../assets/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../assets/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
 :root {
   --bg: #0b0d10;
   --panel: #12151a;
@@ -9,7 +25,7 @@
   --muted: #7d8590;
   --accent: #e8b04b;        /* ámbar — único color de acento */
   --accent-dim: #8a6a2e;
-  --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   --vvh: 100dvh;
   --sl-h: 29px;  /* statusline: chip de 22px + padding 3px x2 + borde 1px */
   --vvt: 0px;
