@@ -531,6 +531,47 @@ body.composer-open .tabbar { display: none; }
 }
 /* el de modelo se abre desde #btn-switch (statusline): arriba de ella, no encima */
 .switch-menu[data-kind="model"] { bottom: calc(100% + var(--sl-h) + 6px); }
+/* d-pad: grilla 3x3 alineada al borde izquierdo de #btn-dpad, también arriba
+   de la statusline */
+.switch-menu[data-kind="dpad"] {
+  bottom: calc(100% + var(--sl-h) + 6px);
+  left: 12px;
+  right: auto;
+  display: grid;
+  grid-template-columns: repeat(3, 48px);
+  grid-auto-rows: 48px;
+  gap: 3px;
+  padding: 7px;
+  border-radius: 24px;
+  max-height: none;
+  overflow: visible;
+}
+.dp-cell {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: #1b1f26;
+  color: #cdd2d9;
+  font-family: inherit;
+  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.dp-cell:active { color: var(--accent); }
+.dp-enter {
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 20px;
+}
+.dp-enter:active { color: var(--bg); opacity: 0.8; }
 .switch-menu .mh,
 .create-menu .mh {
   padding: 8px 12px 4px;
@@ -794,6 +835,8 @@ body.composer-open .tabbar { display: none; }
   border-color: var(--accent);
   color: var(--accent);
 }
+/* el d-pad abierto suma el fondo ámbar al 12% */
+#btn-dpad.active { background: rgba(232, 176, 75, 0.12); }
 /* panel de snippets dentro del composer: el popover vive en la controlbar,
    que composer-open oculta — acá la paleta va en el flujo del sheet */
 .composer-snips {

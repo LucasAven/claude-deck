@@ -41,7 +41,7 @@ export const KEYS: Record<string, string> = {
 // es el del catálogo en el sheet; el de la BARRA sale de deck-quickkeys.
 // barLabel (rediseño): forma compacta para la barra (^C en vez de ctrl+c); el
 // editor sigue mostrando el label largo.
-// Las flechas y enter salieron del catálogo: van a vivir en el d-pad de la
+// Las flechas y enter salieron del catálogo: viven en el d-pad de la
 // toolbox (sus secuencias siguen en KEYS para eso). Una config guardada que las
 // tenga las pierde en silencio vía loadQuickkeys.
 export const QUICKKEY_CATALOG: { id: string; label: string; title: string; barLabel?: string }[] = [

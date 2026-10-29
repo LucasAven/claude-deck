@@ -30,7 +30,7 @@ export function closeSwitchMenu() {
 }
 
 // toggle: si ya está abierto CON este kind, cerrarlo; si muestra otro, re-pintarlo
-function toggle(kind: 'model' | 'attach') {
+function toggle(kind: 'model' | 'dpad') {
   if (useDeckStore.getState().switchMenu === kind) {
     closeSwitchMenu()
     return
@@ -39,7 +39,7 @@ function toggle(kind: 'model' | 'attach') {
 }
 
 export const openModelMenu = () => toggle('model')
-export const openAttachMenu = () => toggle('attach')
+export const openDpadMenu = () => toggle('dpad')
 
 // un shift+tab por llamada (el chip se actualiza solo cuando el footer de
 // Claude muestra el modo nuevo, ver lib/mode). No cierra el menú acá: #btn-mode

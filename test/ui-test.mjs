@@ -58,8 +58,7 @@ ok('nombre del chip activo tocable para renombrar', await page.$eval(
   '#session-chips .chip.active .chip-name',
   (el) => el.title === 'Renombrar sesión',
 ).catch(() => false));
-// el + (adjuntar) salió de la toolbox: vuelve dentro del d-pad (sección 5b2
-// salteada mientras tanto)
+// el + (adjuntar) salió de la toolbox: cámara y pegar viven en el d-pad (5b2)
 ok('botón + (adjuntar) retirado de la toolbox', (await page.$('#btn-attach')) === null);
 ok('botones viejos de cámara/pegar retirados', (await page.$('#btn-img')) === null && (await page.$('#btn-paste')) === null);
 
@@ -197,31 +196,61 @@ await page.click('#img-chip-close');
 await new Promise((r) => setTimeout(r, 300));
 ok('✕ descarta el preview sin enviar', await page.$eval('#img-chip', (el) => el.classList.contains('hidden')) && pasteReqs === 0);
 
-// 5b2. botón + (tarea 13): chooser cámara/pegar en el popover compartido, y
-// pegar texto del portapapeles → term.paste (bracketed paste: no submitea).
+// 5b2. d-pad: #btn-dpad abre una grilla 3x3 en el popover compartido
+// (cámara ↑ pegar / ← ⏎ → / · ↓ ·). Flechas y enter no cierran el menú y
+// mantener una flecha auto-repite; cámara y pegar sí cierran. Pegar texto del
+// portapapeles → term.paste (bracketed paste: no submitea).
 // Los taps disparan en pointerup (tarea 12): hay que mandar el par.
 const tapSel = (sel) => page.$eval(sel, (b) => {
   b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
 });
-// SKIP mientras el + no tenga casa: salió de la toolbox y vuelve dentro del
-// d-pad. Al volver, apuntar estos checks a su nuevo botón.
-if (await page.$('#btn-attach')) {
-await tapSel('#btn-attach');
-const attachMenu = await page.evaluate(() => {
+await tapSel('#btn-dpad');
+const dpad = await page.evaluate(() => {
   const menu = document.querySelector('#switch-menu');
   return {
-    open: !menu.classList.contains('hidden') && menu.dataset.kind === 'attach',
-    labels: [...menu.querySelectorAll('.mi span')].map((s) => s.textContent),
-    icons: menu.querySelectorAll('.mi svg').length,
+    open: !menu.classList.contains('hidden') && menu.dataset.kind === 'dpad',
+    active: document.querySelector('#btn-dpad').classList.contains('active'),
+    cells: [...menu.children].map((c) => c.dataset.k || c.dataset.act || ''),
   };
 });
-ok('tap en + abre el chooser de adjuntar', attachMenu.open);
-ok('chooser con Cámara y Pegar (con íconos)', attachMenu.labels.length === 2
-  && /Cámara/.test(attachMenu.labels[0]) && /Pegar/.test(attachMenu.labels[1]) && attachMenu.icons === 2);
+ok('tap en el d-pad abre la grilla y el botón queda en ámbar', dpad.open && dpad.active);
+ok('grilla 3x3: cámara ↑ pegar / ← ⏎ → / vacío ↓ vacío',
+  dpad.cells.join(',') === 'camera,up,paste,left,enter,right,,down,');
+
+// flechas/enter espiados: nada llega a la sesión real
+const dpadKeys = await page.evaluate(async () => {
+  const orig = claudeConn.sendKeys;
+  const sent = [];
+  claudeConn.sendKeys = (k) => sent.push(k);
+  const menu = document.querySelector('#switch-menu');
+  const cell = (k) => menu.querySelector(`[data-k="${k}"]`);
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+  };
+  tap(cell('down'));
+  tap(cell('down'));
+  tap(cell('enter'));
+  const seq = sent.splice(0);
+  const stillOpen = !menu.classList.contains('hidden');
+  // hold de 700ms: 0, 350, 430, 510, 590, 670 → 6 envíos
+  cell('up').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+  await new Promise((r) => setTimeout(r, 700));
+  cell('up').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+  const held = sent.splice(0).length;
+  await new Promise((r) => setTimeout(r, 300));
+  const afterRelease = sent.length;
+  claudeConn.sendKeys = orig;
+  return { seq, stillOpen, held, afterRelease };
+});
+ok('↓ ↓ ⏎ mandan las secuencias y no cierran el menú',
+  dpadKeys.seq.join('|') === '\x1b[B|\x1b[B|\r' && dpadKeys.stillOpen);
+ok('mantener una flecha auto-repite y frena al soltar', dpadKeys.held >= 5 && dpadKeys.held <= 7 && dpadKeys.afterRelease === 0);
 await page.evaluate(() => document.querySelector('#term-claude')
   .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
-ok('tap afuera cierra el chooser', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
+ok('tap afuera cierra el d-pad', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden'))
+  && !(await page.$eval('#btn-dpad', (el) => el.classList.contains('active'))));
 
 // texto en el portapapeles → "Pegar" lo mete en el prompt vía term.paste
 // (clipboard.read mockeado y term.paste espiado: nada llega a la sesión real)
@@ -237,22 +266,18 @@ const pastedTexts = await page.evaluate(async () => {
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
   };
-  tap(document.querySelector('#btn-attach'));
-  // el menú abre por setState (render async en React): esperar a que el
-  // AttachMenu monte antes de buscar el ítem "Pegar" (en el vanilla el DOM se
-  // actualizaba sincrónico y esto no hacía falta)
+  tap(document.querySelector('#btn-dpad'));
+  // el menú abre por setState (render async en React): esperar a que la
+  // grilla monte antes de buscar la celda de pegar
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  tap([...document.querySelectorAll('#switch-menu .mi')].find((m) => m.textContent.includes('Pegar')));
+  tap(document.querySelector('#switch-menu [data-act="paste"]'));
   await new Promise((r) => setTimeout(r, 300));
   claudeConn.term.paste = orig;
   return calls;
 });
 ok('pegar texto llama term.paste con el texto del portapapeles',
   pastedTexts.length === 1 && pastedTexts[0] === 'hola texto pegado');
-ok('el chooser se cierra al elegir una opción', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
-} else {
-  console.log('SKIP 5b2: adjuntar (+) pendiente del d-pad');
-}
+ok('pegar cierra el d-pad', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
 
 // 5c. switchers: dos chips en la statusline. "✦ <modelo> ▾" abre el menú de
 // modelo/esfuerzo y "mode ▾" cicla con shift+tab

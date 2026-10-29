@@ -12,7 +12,7 @@ import { newSession } from './lib/projects'
 // useDeckStore.getState() y dispara updates sin prop-drilling.
 
 export type Tab = 'claude' | 'changes' | 'files' | 'projects'
-export type SwitchMenuKind = 'model' | 'attach' | 'snippets' | null
+export type SwitchMenuKind = 'model' | 'dpad' | 'snippets' | null
 
 export interface GitFile {
   staged: boolean

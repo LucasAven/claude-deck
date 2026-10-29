@@ -1,12 +1,13 @@
+import { useEffect, useRef } from 'react'
 import { useDeckStore } from '../../store'
-import { MODELS, EFFORTS } from '../../lib/keys'
+import { MODELS, EFFORTS, KEYS } from '../../lib/keys'
 import { saveSwitch, sendSlashCommand, closeSwitchMenu } from '../../lib/switch'
 import { pasteFromClipboard } from '../../lib/image'
 import { useTap } from '../../hooks/useTap'
 import { SnippetsPalette } from './Snippets'
 
 // Popover único de la controlbar (#switch-menu, app.js:398-464, 630-654,
-// 1027-1043): un solo contenedor con kind 'model'|'attach'|'snippets' en el
+// 1027-1043): un solo contenedor con kind 'model'|'dpad'|'snippets' en el
 // store. El toggle (tap en el kind abierto lo cierra) y el tap-afuera los manejan
 // lib/switch y el listener global de App. Acá solo se pinta el contenido del kind.
 
@@ -66,9 +67,49 @@ function ModelMenu() {
   )
 }
 
-// Adjuntar (app.js:617-654): chooser cámara / pegar. Corre dentro del pointerup
-// (useTap) → sigue habiendo user activation para abrir el file picker / clipboard.
-function AttachMenu({ onCamera }: { onCamera: () => void }) {
+const REPEAT_DELAY_MS = 350
+const REPEAT_EVERY_MS = 80
+
+// Flecha del d-pad: manda en pointerdown (no en el up como useTap) para que
+// mantener apretado auto-repita. En el popover no hay scroll que proteger, así
+// que no hace falta el slop. El preventDefault mantiene el teclado virtual.
+function ArrowCell({ k, title, children }: { k: string; title: string; children: React.ReactNode }) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stop = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+  useEffect(() => stop, [])
+  const send = () => window.claudeConn?.sendKeys(KEYS[k])
+  const repeat = () => {
+    send()
+    timerRef.current = setTimeout(repeat, REPEAT_EVERY_MS)
+  }
+  return (
+    <button
+      className="dp-cell"
+      data-k={k}
+      title={title}
+      onPointerDown={(e) => {
+        e.preventDefault()
+        stop()
+        send()
+        timerRef.current = setTimeout(repeat, REPEAT_DELAY_MS)
+      }}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+    >
+      {children}
+    </button>
+  )
+}
+
+// D-pad: grilla 3x3. Flechas y enter NO cierran el menú (↓ ↓ ⏎ seguidos);
+// cámara y pegar sí. Esos dos corren dentro del pointerup (useTap) → sigue
+// habiendo user activation para abrir el file picker / clipboard.
+function DpadMenu({ onCamera }: { onCamera: () => void }) {
   const cameraTap = useTap(() => {
     closeSwitchMenu()
     onCamera()
@@ -77,25 +118,33 @@ function AttachMenu({ onCamera }: { onCamera: () => void }) {
     closeSwitchMenu()
     pasteFromClipboard()
   })
+  const enterTap = useTap(() => window.claudeConn?.sendKeys(KEYS.enter))
   return (
     <>
-      <div className="mh">Adjuntar</div>
-      <button className="mi" {...cameraTap}>
+      <button className="dp-cell" data-act="camera" title="Cámara o galería" {...cameraTap}>
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="7" width="18" height="13" rx="2.5" />
           <path d="M8.5 7l1.6-2.4h3.8L15.5 7" />
           <circle cx="12" cy="13.2" r="3.4" />
         </svg>
-        <span>Cámara o galería</span>
       </button>
-      <button className="mi" {...pasteTap}>
+      <ArrowCell k="up" title="Flecha arriba">↑</ArrowCell>
+      <button className="dp-cell" data-act="paste" title="Pegar del portapapeles" {...pasteTap}>
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <rect x="5" y="4.5" width="14" height="17" rx="2.5" />
           <path d="M9 4.5a3 3 0 0 1 6 0" />
           <path d="M9.3 13.5l2 2 3.4-3.8" />
         </svg>
-        <span>Pegar del portapapeles</span>
       </button>
+      <ArrowCell k="left" title="Flecha izquierda">←</ArrowCell>
+      <button className="dp-cell dp-enter" data-k="enter" title="Enter" {...enterTap}>
+        {'⏎︎'}
+      </button>
+      <ArrowCell k="right" title="Flecha derecha">→</ArrowCell>
+      {/* TODO(d-pad): las dos esquinas de abajo quedan vacías hasta que sean configurables */}
+      <div className="dp-empty" />
+      <ArrowCell k="down" title="Flecha abajo">↓</ArrowCell>
+      <div className="dp-empty" />
     </>
   )
 }
@@ -107,7 +156,7 @@ export function SwitchMenu({ onCamera }: { onCamera: () => void }) {
   return (
     <div id="switch-menu" className={'switch-menu' + (kind ? '' : ' hidden')} data-kind={kind ?? undefined}>
       {kind === 'model' && <ModelMenu />}
-      {kind === 'attach' && <AttachMenu onCamera={onCamera} />}
+      {kind === 'dpad' && <DpadMenu onCamera={onCamera} />}
       {kind === 'snippets' && <SnippetsPalette />}
     </div>
   )

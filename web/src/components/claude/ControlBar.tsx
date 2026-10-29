@@ -6,6 +6,7 @@ import { openSnippetsMenu } from '../../lib/snippets'
 import { openComposer } from '../../lib/composer'
 import { openScrollback } from '../../lib/scrollback'
 import { attachImage, sendPendingImage, hideImgChip } from '../../lib/image'
+import { openDpadMenu } from '../../lib/switch'
 import { SwitchMenu } from './SwitchMenu'
 
 // Controlbar (index.html:88-133). Chip de imagen + popover switch-menu + la
@@ -31,6 +32,7 @@ function QuickKey({ k, title, blocked, children }: { k: string; title?: string; 
 export function ControlBar() {
   const imgChip = useDeckStore((s) => s.imgChip)
   const snippetsActive = useDeckStore((s) => s.switchMenu === 'snippets')
+  const dpadActive = useDeckStore((s) => s.switchMenu === 'dpad')
   const quickkeys = useDeckStore((s) => s.quickkeys)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -68,8 +70,7 @@ export function ControlBar() {
     if (!blocked()) openSnippetsMenu()
   })
   const composerTap = useTap(() => openComposer())
-  // inerte, pero con useTap igual: el preventDefault mantiene el teclado abierto
-  const dpadTap = useTap(() => {})
+  const dpadTap = useTap(() => openDpadMenu())
   const scrollbackTap = useTap(() => {
     if (!blocked()) openScrollback()
   })
@@ -114,9 +115,7 @@ export function ControlBar() {
           El fade del borde derecho solo está mientras queda contenido a la
           derecha: al final del scroll el último botón se ve entero. */}
       <div className="toolrow">
-        {/* TODO(d-pad): placeholder inerte. El d-pad va a traer ↑ ↓ ← → ⏎ y
-            el adjuntar (+) que salieron de la barra. */}
-        <button id="btn-dpad" className="ctl-sq" title="D-pad (próximamente)" {...dpadTap}>
+        <button id="btn-dpad" className={'ctl-sq' + (dpadActive ? ' active' : '')} title="D-pad" {...dpadTap}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="12" r="2" /><path d="M12 3l3 3.5H9zM12 21l3-3.5H9zM3 12l3.5-3v6zM21 12l-3.5-3v6z" /></svg>
         </button>
         <input id="img-input" type="file" accept="image/*" className="hidden" ref={inputRef} onChange={onImgInput} />
