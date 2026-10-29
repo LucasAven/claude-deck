@@ -39,18 +39,15 @@ export const KEYS: Record<string, string> = {
 // Catálogo de quickkeys disponibles para la barra (tarea 11b): label = lo que
 // muestra el botón, title = tooltip/descripción en el editor. El orden de acá
 // es el del catálogo en el sheet; el de la BARRA sale de deck-quickkeys.
-// barLabel (rediseño): forma compacta para la barra (^C en vez de ctrl+c) —
-// las teclas ya no scrollean y el ancho se reparte, así que cada label debe
-// entrar en ~44px; el editor sigue mostrando el label largo.
+// barLabel (rediseño): forma compacta para la barra (^C en vez de ctrl+c); el
+// editor sigue mostrando el label largo.
+// Las flechas y enter salieron del catálogo: van a vivir en el d-pad de la
+// toolbox (sus secuencias siguen en KEYS para eso). Una config guardada que las
+// tenga las pierde en silencio vía loadQuickkeys.
 export const QUICKKEY_CATALOG: { id: string; label: string; title: string; barLabel?: string }[] = [
   { id: 'nl', label: '\\n', title: 'Salto de línea (sin enviar)' },
-  { id: 'enter', label: '⏎', title: 'Enviar / aceptar (Enter)' },
   { id: 'slash', label: '/', title: 'Comando slash' },
   { id: 'esc', label: 'esc', title: 'Escape' },
-  { id: 'up', label: '↑', title: 'Flecha arriba' },
-  { id: 'down', label: '↓', title: 'Flecha abajo' },
-  { id: 'left', label: '←', title: 'Flecha izquierda' },
-  { id: 'right', label: '→', title: 'Flecha derecha' },
   { id: 'tab', label: 'tab', title: 'Tab' },
   { id: 'ctrlc', label: 'ctrl+c', barLabel: '^C', title: 'Interrumpir' },
   { id: 'ctrlr', label: 'ctrl+r', barLabel: '^R', title: 'Buscar en el historial' },
@@ -63,12 +60,9 @@ export const QUICKKEY_CATALOG: { id: string; label: string; title: string; barLa
   { id: 'ctrlend', label: 'ctrl+end', barLabel: '^End', title: 'Ir al final de la conversación (scroll)' },
 ]
 
-// barra por defecto = la histórica (nl primero, pedido del usuario — ui-test
-// asserta este orden con la config default)
-// (tarea 29) enter va segundo, junto a nl: nl hace salto sin enviar, enter
-// envia/acepta. Son 8 teclas: a 390px se reparten sin scroll; en pantallas mas
-// angostas (iPhone SE) el overflow-x de .quickkeys entra como rescate.
-export const DEFAULT_QUICKKEYS = ['nl', 'enter', 'slash', 'esc', 'up', 'down', 'tab', 'ctrlc']
+// barra por defecto = la histórica sin flechas ni enter (nl primero, pedido del
+// usuario; ui-test asserta este orden con la config default)
+export const DEFAULT_QUICKKEYS = ['nl', 'slash', 'esc', 'tab', 'ctrlc']
 
 export const QUICKKEYS_LS_KEY = 'deck-quickkeys'
 

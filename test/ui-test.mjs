@@ -58,7 +58,9 @@ ok('nombre del chip activo tocable para renombrar', await page.$eval(
   '#session-chips .chip.active .chip-name',
   (el) => el.title === 'Renombrar sesión',
 ).catch(() => false));
-ok('botón + (adjuntar) presente', (await page.$('#btn-attach')) !== null);
+// el + (adjuntar) salió de la toolbox: vuelve dentro del d-pad (sección 5b2
+// salteada mientras tanto)
+ok('botón + (adjuntar) retirado de la toolbox', (await page.$('#btn-attach')) === null);
 ok('botones viejos de cámara/pegar retirados', (await page.$('#btn-img')) === null && (await page.$('#btn-paste')) === null);
 
 // 5. barra de control abajo (zona del pulgar), entre la terminal y la tab bar
@@ -106,21 +108,68 @@ const sentKeys = await page.evaluate(() => {
 ok('tap con micro-movimiento dispara la tecla (1 sola vez)', sentKeys.length === 1 && sentKeys[0] === '\x1b');
 ok('drag sobre un quickkey NO dispara (scroll de la fila)', !sentKeys[1]);
 // orden de la barra de Claude: "nl" primero (acceso rápido, pedido del usuario),
-// "/" segundo. El botón nl (newline suave, ESC+CR) no se tapea: mandaría un
+// "/" segundo (↑ ↓ ⏎ salieron a favor del d-pad). El botón nl (newline suave, ESC+CR) no se tapea: mandaría un
 // salto de línea al prompt de la sesión deck real.
 const keyOrder = await page.$$eval(
   '.quickkeys[data-term="claude"] button[data-k]',
   (bs) => bs.map((b) => b.dataset.k),
 );
-ok('teclas "nl", "enter" y "/" primeras en la barra de Claude', keyOrder[0] === 'nl' && keyOrder[1] === 'enter' && keyOrder[2] === 'slash');
+ok('teclas "nl", "/" y "esc" primeras en la barra de Claude', keyOrder[0] === 'nl' && keyOrder[1] === 'slash' && keyOrder[2] === 'esc');
 ok('una sola barra de teclas (Shell retirado)', (await page.$$('.quickkeys')).length === 1);
-// rediseño: la barra default se reparte el ancho y NO scrollea (el overflow-x
-// queda solo como rescate para barras configuradas con muchas teclas)
-const qkScroll = await page.$eval('.quickkeys[data-term="claude"]', (el) => ({
-  scroll: el.scrollWidth,
-  client: el.clientWidth,
-}));
-ok('las 8 teclas default entran sin scroll', qkScroll.scroll <= qkScroll.client + 1);
+// toolbox de una fila: d-pad fijo a la izquierda, teclas + snippets + lector
+// scrolleando en el medio, Compose ámbar fijo a la derecha
+const toolrow = await page.evaluate(() => {
+  const row = document.querySelector('.controlbar .toolrow');
+  const sc = row?.querySelector('.quickkeys[data-term="claude"]');
+  const kids = sc ? [...sc.children].map((b) => b.dataset.k || b.id) : [];
+  const box = (q) => document.querySelector(q)?.getBoundingClientRect();
+  return {
+    rows: document.querySelectorAll('.controlbar .toolrow').length,
+    first: row?.firstElementChild?.id,
+    last: row?.lastElementChild?.id,
+    tail: kids.slice(-2).join(','),
+    h: Math.round(box('.toolrow')?.height ?? 0),
+    dpad: box('#btn-dpad'),
+    compose: box('#btn-composer'),
+    composeBg: getComputedStyle(document.querySelector('#btn-composer')).backgroundColor,
+    scrolls: getComputedStyle(sc).overflowX === 'auto',
+  };
+});
+ok('toolbox: una sola fila de 42px', toolrow.rows === 1 && toolrow.h === 42);
+ok('toolbox: d-pad 44x42 a la izquierda, Compose 48x42 ámbar a la derecha',
+  toolrow.first === 'btn-dpad' && toolrow.last === 'btn-composer'
+  && Math.round(toolrow.dpad.width) === 44 && Math.round(toolrow.compose.width) === 48
+  && toolrow.composeBg === 'rgb(245, 166, 35)');
+ok('toolbox: teclas, snippets y lector scrollean juntos en el medio',
+  toolrow.scrolls && toolrow.tail === 'btn-snippets,btn-scrollback');
+ok('toolbox: ↑ ↓ ⏎ fuera de la barra', !keyOrder.some((k) => ['up', 'down', 'enter'].includes(k)));
+// el tap que frena un scroll con inercia llega sin movimiento: si la fila
+// scrolleó hace <100ms al apoyar el dedo, no cuenta como tecla
+const scrollTap = await page.evaluate(async () => {
+  const sent = [];
+  const orig = claudeConn.sendKeys;
+  claudeConn.sendKeys = (d) => sent.push(d);
+  const sc = document.querySelector('.toolrow .quickkeys');
+  const b = sc.querySelector('[data-k="esc"]');
+  const tap = () => {
+    b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 3 }));
+    b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 3 }));
+  };
+  const before = sc.scrollLeft;
+  sc.scrollLeft = sc.scrollWidth;
+  sc.dispatchEvent(new Event('scroll'));
+  tap();
+  const during = sent.length;
+  await new Promise((r) => setTimeout(r, 250));
+  tap();
+  sc.scrollLeft = before;
+  // el scroll de vuelta también arma el guard: que no se coma el próximo tap
+  await new Promise((r) => setTimeout(r, 200));
+  claudeConn.sendKeys = orig;
+  return { during, after: sent.length };
+});
+ok('toolbox: un tap durante el scroll no manda la tecla, uno quieto sí',
+  scrollTap.during === 0 && scrollTap.after === 1);
 ok('ctrl+c se muestra compacto (^C) en la barra',
   (await page.$eval('.quickkeys[data-term="claude"] [data-k="ctrlc"]', (b) => b.textContent.trim())) === '^C');
 
@@ -155,6 +204,9 @@ const tapSel = (sel) => page.$eval(sel, (b) => {
   b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
 });
+// SKIP mientras el + no tenga casa: salió de la toolbox y vuelve dentro del
+// d-pad. Al volver, apuntar estos checks a su nuevo botón.
+if (await page.$('#btn-attach')) {
 await tapSel('#btn-attach');
 const attachMenu = await page.evaluate(() => {
   const menu = document.querySelector('#switch-menu');
@@ -198,6 +250,9 @@ const pastedTexts = await page.evaluate(async () => {
 ok('pegar texto llama term.paste con el texto del portapapeles',
   pastedTexts.length === 1 && pastedTexts[0] === 'hola texto pegado');
 ok('el chooser se cierra al elegir una opción', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
+} else {
+  console.log('SKIP 5b2: adjuntar (+) pendiente del d-pad');
+}
 
 // 5c. switchers: dos chips en la statusline. "✦ <modelo> ▾" abre el menú de
 // modelo/esfuerzo y "mode ▾" cicla con shift+tab
@@ -209,7 +264,7 @@ const pd = (el) => {
 // Model y Mode viven como chips en la statusline (ya no en la fila de acciones)
 const swGeo = await page.evaluate(() => ({
   inStatusline: !!document.querySelector('#statusline #btn-switch') && !!document.querySelector('#statusline #btn-mode'),
-  notInActions: !document.querySelector('.controlrow.actions #btn-switch, .controlrow.actions #btn-mode'),
+  notInActions: !document.querySelector('.toolrow #btn-switch, .toolrow #btn-mode'),
   chipH: Math.round(document.querySelector('#btn-switch').getBoundingClientRect().height),
 }));
 ok('chips Model/Mode en la statusline (22px), fuera de la fila de acciones',
@@ -2209,7 +2264,7 @@ const qkRun = await page.evaluate(async () => {
   // restaurar por defecto desde el editor → orden histórico de vuelta
   await openEditor();
   tap(document.querySelector('#qk-reset')); await frame();
-  out.reset = rowKeys().join(',') === 'nl,enter,slash,esc,up,down,tab,ctrlc';
+  out.reset = rowKeys().join(',') === 'nl,slash,esc,tab,ctrlc';
   sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
 
   claudeConn.sendKeys = realSend;
@@ -2225,27 +2280,25 @@ ok('quickkeys: ◀ mueve un lugar antes y persiste', qkRun.moved);
 ok('quickkeys: el primer chip no tiene ◀ y el backdrop cierra', qkRun.firstNoMove && qkRun.backdropCloses);
 ok('quickkeys: restaurar por defecto vuelve al orden histórico', qkRun.reset);
 
-// 24b. quickkey "enter" (tarea 29): viene en la barra default (segunda, tras
-// nl), con el glyph ⏎ (distinto de nl = \n para no confundir "enviar" con
-// "salto"); un tap corto manda CR crudo ('\r'), que envía/acepta el prompt de
-// Claude. sendKeys espiado: nada real llega a la sesión deck.
-const enterRun = await page.evaluate(async () => {
+// 24b. flechas y enter salieron del catálogo de quickkeys (van al d-pad): el
+// editor no las ofrece y una config guardada que las tenga las pierde al cargar.
+// Sus secuencias siguen en KEYS para el d-pad.
+const noArrowsRun = await page.evaluate(async () => {
   const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
-  const sent = [];
-  const realSend = claudeConn.sendKeys;
-  claudeConn.sendKeys = (s) => sent.push(s);
-  const down = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
-  const up = (el) => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
-  const tap = (el) => { down(el); up(el); };
-  const btn = document.querySelector('.quickkeys[data-term="claude"] [data-k="enter"]');
-  const out = { present: !!btn, label: btn ? btn.textContent.trim() : '' };
-  tap(btn); await frame();
-  out.sentCR = sent.length === 1 && sent[0] === '\r';
-  claudeConn.sendKeys = realSend;
-  return out;
+  const tap = (el) => {
+    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  };
+  tap(document.querySelector('#btn-settings')); await frame();
+  tap(document.querySelector('#set-qk-row')); await frame();
+  const offered = [...document.querySelectorAll('#qk-catalog [data-qk], #qk-current [data-qk]')].map((c) => c.dataset.qk);
+  const sheet = document.querySelector('#quickkeys-sheet');
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  return { offered };
 });
-ok('quickkeys: "enter" en la barra con label ⏎', enterRun.present && enterRun.label === '⏎');
-ok('quickkeys: tap en "enter" manda CR crudo (\\r)', enterRun.present && enterRun.sentCR);
+ok('quickkeys: el editor no ofrece ↑ ↓ ← → ⏎',
+  noArrowsRun.offered.length > 0
+  && !noArrowsRun.offered.some((k) => ['up', 'down', 'left', 'right', 'enter'].includes(k)));
 
 // 24c. quickkey "ctrl+end" (scroll al final de la conversación de Claude): NO
 // está en la barra default; el catálogo la ofrece con label largo "ctrl+end", y

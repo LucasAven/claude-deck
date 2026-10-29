@@ -509,7 +509,7 @@ body.composer-open .tabbar { display: none; }
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 10px;
+  padding: 8px 12px;
   border-top: 1px solid var(--border);
   background: var(--bg);
 }
@@ -789,7 +789,7 @@ body.composer-open .tabbar { display: none; }
   padding: 2px 4px;
 }
 /* ☰ ámbar mientras la paleta está abierta (como el mockup) */
-.controlrow .ctl-sq.active,
+.toolrow .ctl-sq.active,
 .composer-foot .ctl-sq.active {
   border-color: var(--accent);
   color: var(--accent);
@@ -836,66 +836,74 @@ body.composer-open .tabbar { display: none; }
   pointer-events: none;
 }
 
-/* filas de la controlbar; pisan los estilos base de .quickkeys */
-.controlrow {
-  padding: 0;
-  border-bottom: none;
-  gap: 8px;
-}
-/* la fila de acciones no lleva la clase .quickkeys (que es la que trae el
-   display:flex base): sin esto era un bloque — los cuadrados fluían inline sin
-   gap y la pill (div) rompía a su propia línea */
-.controlrow.actions {
+/* toolbox: una sola fila de 42px. D-pad y Compose fijos a los costados, las
+   teclas scrollean de costado en el medio (pisan los estilos base de
+   .quickkeys). */
+.toolrow {
   display: flex;
   align-items: center;
+  gap: 8px;
+  height: 42px;
 }
-.controlrow button {
+.toolrow button {
+  flex: none;
   min-width: 0;
-  min-height: 48px;
-  padding: 0 20px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 14px;
   border-radius: 12px;
   border: 1px solid #2a2f37;
   background: #1b1f26;
   color: #cdd2d9;
   font-size: 14px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
-.controlrow button:active {
+.toolrow button:active {
   background: #1b1f26;
   border-color: var(--accent);
   color: var(--accent);
 }
-/* 44px de ancho (no 48), del rediseño con las pills modelo/modo en la fila */
-.controlrow .ctl-sq {
-  flex: none;
+.toolrow .ctl-sq {
   width: 44px;
-  min-width: 44px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.controlrow button.busy {
-  pointer-events: none;
-  animation: img-busy 1s ease-in-out infinite;
+.toolrow .quickkeys {
+  flex: 1;
+  min-width: 0;
+  height: 42px;
+  gap: 8px;
+  padding: 0;
+  border-bottom: none;
 }
-@keyframes img-busy { 50% { opacity: 0.25; } }
-
-/* rediseño: las teclas se reparten el ancho parejo — con la barra default no
-   scrollean (la terminal gana ese aire). flex-basis 40px = mínimo con el que
-   las 8 default (tarea 29 sumó "enter") entran a 390px sin scroll con gap 6px
-   (8x40 + 7x6 = 362 < 370 útiles); en pantallas más angostas como el iPhone SE
-   la suma de mínimos desborda y el overflow-x
-   heredado de .quickkeys vuelve como rescate. */
-/* gap 6px (no el 8px de .controlrow): con enter la barra default tiene 8 teclas
-   y a 390px (370 útiles) 8x40 + 7x8 = 376 desbordaba; 8x40 + 7x6 = 362 entra. */
-.controlrow.quickkeys {
-  gap: 6px;
+/* fade del borde derecho mientras queda contenido por ver (ControlBar saca la
+   clase al llegar al final, si no el último botón quedaría medio borrado) */
+.toolrow .quickkeys.fade {
+  -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+  mask-image: linear-gradient(90deg, #000 85%, transparent);
 }
-.controlrow.quickkeys button {
-  flex: 1 0 40px;
-  padding: 0 6px;
+.toolrow .ctl-compose {
+  width: 48px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: #f5a623;
+  color: var(--bg);
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
 }
-
+.toolrow .ctl-compose:active {
+  background: #f5a623;
+  color: var(--bg);
+  opacity: 0.8;
+}
 /* chip de imagen adjunta (preview arriba de la fila de controles) */
 .img-chip {
   display: flex;
