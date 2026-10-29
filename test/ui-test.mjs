@@ -125,7 +125,8 @@ const toolrow = await page.evaluate(() => {
   return {
     rows: document.querySelectorAll('.controlbar .toolrow').length,
     first: row?.firstElementChild?.id,
-    last: row?.lastElementChild?.id,
+    // el último visible: ⌄ (#btn-kbclose) va después en el DOM pero sin teclado está oculto
+    last: [...(row?.children ?? [])].filter((c) => getComputedStyle(c).display !== 'none').pop()?.id,
     tail: kids.slice(-2).join(','),
     h: Math.round(box('.toolrow')?.height ?? 0),
     dpad: box('#btn-dpad'),
@@ -278,6 +279,50 @@ const pastedTexts = await page.evaluate(async () => {
 ok('pegar texto llama term.paste con el texto del portapapeles',
   pastedTexts.length === 1 && pastedTexts[0] === 'hola texto pegado');
 ok('pegar cierra el d-pad', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden')));
+
+// 5b3. teclado abierto: headless no tiene teclado, se simula achicando el
+// viewport (el visual viewport cae >100px bajo su alto sin teclado, como en el
+// iPhone). Fuera tabbar y statusline, la toolrow pegada al borde de abajo, ⌄ en
+// vez de Compose, la terminal pierde filas y el d-pad abre justo arriba de la
+// fila. ⌄ suelta el foco del textarea de xterm.
+const kbState = () => page.evaluate(() => {
+  const vis = (s) => { const e = document.querySelector(s); return !!e && getComputedStyle(e).display !== 'none' };
+  return {
+    kb: document.body.classList.contains('kb-open'),
+    tabbar: vis('.tabbar'), statusline: vis('.statusline'), compose: vis('#btn-composer'), kbclose: vis('#btn-kbclose'),
+    cbTop: Math.round(document.querySelector('.controlbar').getBoundingClientRect().top),
+    cbBottom: Math.round(document.querySelector('.controlbar').getBoundingClientRect().bottom),
+    termBottom: Math.round(document.querySelector('#term-claude').getBoundingClientRect().bottom),
+    vvh: Math.round(visualViewport.height),
+    rows: claudeConn.term.rows,
+  };
+});
+const kbBefore = await kbState();
+await page.focus('.xterm-helper-textarea');
+await page.setViewport({ width: 390, height: 480, isMobile: true, hasTouch: true });
+await new Promise((r) => setTimeout(r, 600));
+const kbOpen = await kbState();
+ok('teclado: sin teclado no hay kb-open y Compose está, ⌄ no', !kbBefore.kb && kbBefore.compose && !kbBefore.kbclose);
+ok('teclado: abierto oculta tabbar y statusline', kbOpen.kb && !kbOpen.tabbar && !kbOpen.statusline);
+ok('teclado: ⌄ reemplaza a Compose', kbOpen.kbclose && !kbOpen.compose);
+ok('teclado: la toolrow queda pegada al borde (arriba del teclado)', kbOpen.cbBottom === kbOpen.vvh);
+ok('teclado: la terminal pierde filas y termina arriba de la toolrow',
+  kbOpen.rows < kbBefore.rows && kbOpen.termBottom <= kbOpen.cbTop);
+await tapSel('#btn-dpad');
+await new Promise((r) => setTimeout(r, 100));
+const kbDpad = await page.$eval('#switch-menu', (m) => ({ open: !m.classList.contains('hidden'), top: m.getBoundingClientRect().top, bottom: m.getBoundingClientRect().bottom }));
+ok('teclado: el d-pad abre justo arriba de la toolrow, entero en pantalla',
+  kbDpad.open && kbOpen.cbTop - kbDpad.bottom <= 8 && kbDpad.bottom < kbOpen.cbTop && kbDpad.top >= 0);
+await tapSel('#btn-dpad');
+await page.focus('.xterm-helper-textarea');
+await tapSel('#btn-kbclose');
+ok('teclado: ⌄ suelta el foco del textarea de xterm',
+  !(await page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'))));
+await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+await new Promise((r) => setTimeout(r, 600));
+const kbAfter = await kbState();
+ok('teclado: al cerrar vuelve todo (tabbar, statusline, Compose, filas)',
+  !kbAfter.kb && kbAfter.tabbar && kbAfter.statusline && kbAfter.compose && !kbAfter.kbclose && kbAfter.rows === kbBefore.rows);
 
 // 5c. switchers: dos chips en la statusline. "✦ <modelo> ▾" abre el menú de
 // modelo/esfuerzo y "mode ▾" cicla con shift+tab

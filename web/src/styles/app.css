@@ -1753,9 +1753,19 @@ button.set-row:active .set-label { color: var(--accent); }
      así que se descarta la reserva (targets táctiles cómodos por min-height:56px) */
   padding-bottom: 0;
 }
-/* teclado virtual abierto (body.kb-open, ver updateViewportGeometry):
-   la tabbar se oculta para que la terminal gane esas filas */
-body.kb-open .tabbar { display: none; }
+/* teclado virtual abierto (body.kb-open, ver useViewportGeometry): tabbar y
+   statusline se ocultan para que la terminal gane esas filas y la toolrow quede
+   pegada al teclado (#app ya sigue al visual viewport). El d-pad baja con ella,
+   Compose cede su lugar a ⌄ y la toolrow recupera el borde que le prestaba la
+   statusline. Solo en la pestaña Claude: en las otras no hay ⌄ para bajar el
+   teclado y la tabbar es la única salida. */
+body.kb-open #app:has(#view-claude.active) .tabbar,
+body.kb-open .statusline,
+body.kb-open #btn-composer { display: none; }
+#btn-kbclose { display: none; }
+body.kb-open #btn-kbclose { display: inline-flex; }
+body.kb-open .statusline + .controlbar { border-top: 1px solid var(--border); }
+body.kb-open .switch-menu[data-kind="dpad"] { bottom: calc(100% + 6px); }
 .tab {
   position: relative; /* ancla del .tab-badge */
   flex: 1;

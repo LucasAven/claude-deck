@@ -70,6 +70,8 @@ export function ControlBar() {
     if (!blocked()) openSnippetsMenu()
   })
   const composerTap = useTap(() => openComposer())
+  // el foco lo tiene el textarea de xterm: soltarlo baja el teclado iOS
+  const kbCloseTap = useTap(() => (document.activeElement as HTMLElement | null)?.blur())
   const dpadTap = useTap(() => openDpadMenu())
   const scrollbackTap = useTap(() => {
     if (!blocked()) openScrollback()
@@ -111,7 +113,9 @@ export function ControlBar() {
 
       {/* toolbox: una sola fila. D-pad fijo a la izquierda, teclas + snippets +
           lector en el medio (scroll horizontal, la config de "Teclas rápidas"
-          en su orden guardado) y Compose fijo a la derecha como botón principal.
+          en su orden guardado) y Compose fijo a la derecha como botón principal
+          (con teclado abierto lo reemplaza ⌄, que cierra el teclado; el swap es
+          por CSS con body.kb-open).
           El fade del borde derecho solo está mientras queda contenido a la
           derecha: al final del scroll el último botón se ve entero. */}
       <div className="toolrow">
@@ -144,6 +148,9 @@ export function ControlBar() {
         </div>
         <button id="btn-composer" className="ctl-compose" title="Componer prompt" {...composerTap}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.7 3.8a2.1 2.1 0 0 1 3 3L7.5 19l-4 1 1-4z" /></svg>
+        </button>
+        <button id="btn-kbclose" className="ctl-sq" title="Cerrar teclado" {...kbCloseTap}>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M7 10l5 5 5-5" /></svg>
         </button>
       </div>
     </div>
