@@ -253,6 +253,51 @@ await page.evaluate(() => document.querySelector('#term-claude')
 ok('tap afuera cierra el d-pad', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden'))
   && !(await page.$eval('#btn-dpad', (el) => el.classList.contains('active'))));
 
+// arrastrar #btn-dpad manda flechas sin abrir el menú: ↓ al pasar los 14px,
+// repite cada 120ms, cambiar de eje cambia la flecha (el ×N vuelve a 1),
+// soltar frena. sendKeys espiado: nada llega a la sesión real
+const dpadDrag = await page.evaluate(async () => {
+  const orig = claudeConn.sendKeys;
+  const sent = [];
+  claudeConn.sendKeys = (k) => sent.push(k);
+  const btn = document.querySelector('#btn-dpad');
+  const r = btn.getBoundingClientRect();
+  const x = r.x + r.width / 2;
+  const y = r.y + r.height / 2;
+  const ev = (type, dx, dy) => btn.dispatchEvent(new PointerEvent(type, {
+    bubbles: true, pointerId: 7, clientX: x + dx, clientY: y + dy,
+  }));
+  const frame = () => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+  ev('pointerdown', 0, 0);
+  ev('pointermove', 0, 20);
+  await frame();
+  const first = sent.slice();
+  const label1 = document.querySelector('.dpad-drag-label')?.textContent;
+  const dragging = btn.classList.contains('dragging') && btn.dataset.dir === 'down';
+  await new Promise((res) => setTimeout(res, 300));
+  const repeated = sent.length;
+  ev('pointermove', 40, 0);
+  await frame();
+  const label2 = document.querySelector('.dpad-drag-label')?.textContent;
+  ev('pointerup', 40, 0);
+  const atRelease = sent.length;
+  await new Promise((res) => setTimeout(res, 300));
+  await frame();
+  claudeConn.sendKeys = orig;
+  return {
+    first, label1, label2, dragging, repeated,
+    rightLast: sent[atRelease - 1] === '\x1b[C',
+    stopped: sent.length === atRelease,
+    labelGone: !document.querySelector('.dpad-drag-label'),
+    menuClosed: document.querySelector('#switch-menu').classList.contains('hidden'),
+  };
+});
+ok('arrastrar el d-pad manda ↓ al pasar el umbral, con el botón y el label en modo drag',
+  dpadDrag.first.join('|') === '\x1b[B' && dpadDrag.dragging && dpadDrag.label1 === '↓ ×1  soltá para parar');
+ok('el drag repite cada 120ms y cambiar de eje pasa a → con el contador en 1',
+  dpadDrag.repeated >= 3 && dpadDrag.repeated <= 4 && dpadDrag.rightLast && dpadDrag.label2 === '→ ×1  soltá para parar');
+ok('soltar el drag frena, saca el label y no abre el menú', dpadDrag.stopped && dpadDrag.labelGone && dpadDrag.menuClosed);
+
 // texto en el portapapeles → "Pegar" lo mete en el prompt vía term.paste
 // (clipboard.read mockeado y term.paste espiado: nada llega a la sesión real)
 const pastedTexts = await page.evaluate(async () => {

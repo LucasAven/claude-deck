@@ -6,7 +6,7 @@ import { openSnippetsMenu } from '../../lib/snippets'
 import { openComposer } from '../../lib/composer'
 import { openScrollback } from '../../lib/scrollback'
 import { attachImage, sendPendingImage, hideImgChip } from '../../lib/image'
-import { openDpadMenu } from '../../lib/switch'
+import { closeSwitchMenu, openDpadMenu } from '../../lib/switch'
 import { SwitchMenu } from './SwitchMenu'
 
 // Controlbar (index.html:88-133). Chip de imagen + popover switch-menu + la
@@ -20,7 +20,14 @@ import { SwitchMenu } from './SwitchMenu'
 // un solo svg por ícono, no dos copias que se desincronizan.
 export const TOOL_ICONS = {
   dpad: (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="12" r="2" /><path d="M12 3l3 3.5H9zM12 21l3-3.5H9zM3 12l3.5-3v6zM21 12l-3.5-3v6z" /></svg>
+    // un path por triángulo: el drag del botón resalta solo el de su dirección
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+      <circle cx="12" cy="12" r="2" />
+      <path data-dir="up" d="M12 3l3 3.5H9z" />
+      <path data-dir="down" d="M12 21l3-3.5H9z" />
+      <path data-dir="left" d="M3 12l3.5-3v6z" />
+      <path data-dir="right" d="M21 12l-3.5-3v6z" />
+    </svg>
   ),
   snippets: (
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6.5h16M4 12h16M4 17.5h16" /></svg>
@@ -47,6 +54,111 @@ function QuickKey({ k, title, blocked, children }: { k: string; title?: string; 
     <button data-k={k} title={title} {...tap}>
       {children}
     </button>
+  )
+}
+
+type Dir = 'up' | 'down' | 'left' | 'right'
+const DIR_ARROW: Record<Dir, string> = { up: '↑', down: '↓', left: '←', right: '→' }
+const DPAD_TAP_SLOP = 8 // soltar sin pasar de acá abre/cierra el menú
+const DPAD_DRAG_START = 14 // pasar de acá es un drag: manda flechas
+const DPAD_REPEAT_MS = 120
+
+// Botón del d-pad. Tap = toggle del menú (sin límite de tiempo: un tap lento
+// también abre). Arrastrar más de DPAD_DRAG_START px desde donde apoyó el dedo
+// manda la flecha del eje dominante una vez y la repite cada DPAD_REPEAT_MS
+// mientras el dedo siga afuera; volver adentro pausa y salir de nuevo manda
+// otra vez al instante. Soltar frena. El ×N del label cuenta solo la flecha
+// actual. No usa useTap porque necesita el move con pointer capture, pero
+// mantiene su preventDefault en pointerdown (el teclado virtual no se cierra).
+function DpadButton({ active }: { active: boolean }) {
+  const [drag, setDrag] = useState<{ dir: Dir; count: number } | null>(null)
+  const startRef = useRef<{ id: number; x: number; y: number; dragging: boolean } | null>(null)
+  const dirRef = useRef<Dir | null>(null) // la que repite ahora; null = pausado en la zona muerta
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stopRepeat = () => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    timerRef.current = null
+    dirRef.current = null
+  }
+  useEffect(() => stopRepeat, [])
+
+  const fire = (dir: Dir) => {
+    window.claudeConn?.sendKeys(KEYS[dir])
+    navigator.vibrate?.(5)
+    setDrag((d) => ({ dir, count: d?.dir === dir ? d.count + 1 : 1 }))
+  }
+
+  const end = () => {
+    stopRepeat()
+    startRef.current = null
+    setDrag(null)
+  }
+  // cancel y lostpointercapture solo cortan el drag de su propio dedo: con dos
+  // dedos, el que suelta primero no mata el drag del otro
+  const endFor = (e: React.PointerEvent) => {
+    if (e.pointerId === startRef.current?.id) end()
+  }
+
+  return (
+    <>
+      {drag && (
+        <div className="dpad-drag-label">
+          <b className="dl-dir">{DIR_ARROW[drag.dir]}</b> <b>×{drag.count}</b>
+          {'  '}soltá para parar
+        </div>
+      )}
+      <button
+        id="btn-dpad"
+        className={'ctl-sq' + (active ? ' active' : '') + (drag ? ' dragging' : '')}
+        data-dir={drag?.dir}
+        title="D-pad"
+        onPointerDown={(e) => {
+          e.preventDefault()
+          end()
+          startRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, dragging: false }
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId)
+          } catch {
+            /* pointer sintético (tests) sin puntero activo */
+          }
+        }}
+        onPointerMove={(e) => {
+          const start = startRef.current
+          if (!start || e.pointerId !== start.id) return
+          const dx = e.clientX - start.x
+          const dy = e.clientY - start.y
+          const outside = Math.hypot(dx, dy) >= DPAD_DRAG_START
+          if (!start.dragging) {
+            if (!outside) return
+            start.dragging = true
+            closeSwitchMenu()
+          }
+          const dir: Dir | null = !outside
+            ? null
+            : Math.abs(dx) > Math.abs(dy)
+              ? dx > 0 ? 'right' : 'left'
+              : dy > 0 ? 'down' : 'up'
+          if (dir === dirRef.current) return
+          stopRepeat()
+          if (!dir) return
+          dirRef.current = dir
+          fire(dir)
+          timerRef.current = setInterval(() => fire(dir), DPAD_REPEAT_MS)
+        }}
+        onPointerUp={(e) => {
+          const start = startRef.current
+          if (!start || e.pointerId !== start.id) return
+          const tap = !start.dragging && Math.hypot(e.clientX - start.x, e.clientY - start.y) < DPAD_TAP_SLOP
+          end()
+          if (tap) openDpadMenu()
+        }}
+        onPointerCancel={endFor}
+        onLostPointerCapture={endFor}
+      >
+        {TOOL_ICONS.dpad}
+      </button>
+    </>
   )
 }
 
@@ -93,7 +205,6 @@ export function ControlBar() {
   const composerTap = useTap(() => openComposer())
   // el foco lo tiene el textarea de xterm: soltarlo baja el teclado iOS
   const kbCloseTap = useTap(() => (document.activeElement as HTMLElement | null)?.blur())
-  const dpadTap = useTap(() => openDpadMenu())
   const scrollbackTap = useTap(() => {
     if (!blocked()) openScrollback()
   })
@@ -140,9 +251,7 @@ export function ControlBar() {
           El fade del borde derecho solo está mientras queda contenido a la
           derecha: al final del scroll el último botón se ve entero. */}
       <div className="toolrow">
-        <button id="btn-dpad" className={'ctl-sq' + (dpadActive ? ' active' : '')} title="D-pad" {...dpadTap}>
-          {TOOL_ICONS.dpad}
-        </button>
+        <DpadButton active={dpadActive} />
         <input id="img-input" type="file" accept="image/*" className="hidden" ref={inputRef} onChange={onImgInput} />
         <div
           className={'quickkeys' + (fade ? ' fade' : '')}

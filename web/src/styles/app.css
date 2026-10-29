@@ -861,6 +861,46 @@ body.composer-open .tabbar { display: none; }
 }
 /* el d-pad abierto suma el fondo ámbar al 12% */
 #btn-dpad.active { background: rgba(232, 176, 75, 0.12); }
+/* drag del d-pad: touch-action none para que el arrastre no scrollee la
+   página. Mientras arrastra el botón va ámbar sólido con solo el triángulo
+   de la dirección activa entero, y el resto de la fila se apaga */
+#btn-dpad { touch-action: none; }
+#btn-dpad.dragging {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  box-shadow: 0 0 0 4px rgba(232, 176, 75, 0.18);
+}
+#btn-dpad.dragging svg > * { opacity: 0.35; }
+#btn-dpad[data-dir="up"] path[data-dir="up"],
+#btn-dpad[data-dir="down"] path[data-dir="down"],
+#btn-dpad[data-dir="left"] path[data-dir="left"],
+#btn-dpad[data-dir="right"] path[data-dir="right"] { opacity: 1; }
+.toolrow > * { transition: opacity 0.12s; }
+.toolrow:has(#btn-dpad.dragging) > :not(#btn-dpad, .dpad-drag-label) {
+  opacity: 0.35;
+  pointer-events: none;
+}
+/* label del drag: absoluto contra .controlbar, arriba del botón y de la
+   statusline (con teclado abierto no hay statusline, ver kb-open) */
+.dpad-drag-label {
+  position: absolute;
+  bottom: calc(100% + var(--sl-h) + 8px);
+  left: 12px;
+  z-index: 40;
+  padding: 6px 14px;
+  border: 1.5px solid var(--accent);
+  border-radius: 999px;
+  background: #14171c;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: pre;
+  pointer-events: none;
+}
+.dpad-drag-label b { color: var(--text); }
+.dpad-drag-label .dl-dir { color: var(--accent); }
 /* panel de snippets dentro del composer: el popover vive en la controlbar,
    que composer-open oculta — acá la paleta va en el flujo del sheet */
 .composer-snips {
@@ -2056,6 +2096,7 @@ body.kb-open #btn-composer { display: none; }
 body.kb-open #btn-kbclose { display: inline-flex; }
 body.kb-open .statusline + .controlbar { border-top: 1px solid var(--border); }
 body.kb-open .switch-menu[data-kind="dpad"] { bottom: calc(100% + 6px); }
+body.kb-open .dpad-drag-label { bottom: calc(100% + 8px); }
 .tab {
   position: relative; /* ancla del .tab-badge */
   flex: 1;
