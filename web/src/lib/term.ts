@@ -64,9 +64,57 @@ function createTermConnection(container: HTMLElement): ClaudeConn {
   term.open(container)
   watchMode(term) // modo de permisos para el chip de la statusline
 
+  // ⌫ del teclado iOS. Mantener ⌫ manda UN solo keydown+keyup (el keyup llega
+  // a los ~15ms con el dedo todavía apoyado); el repeat no son keydowns: iOS
+  // borra directo del campo, un input deleteContent*Backward por paso (y pasa
+  // a deleteWordBackward si el hold sigue). xterm cancela el keydown y deja su
+  // textarea vacío, así que no había nada que repetir. En touch: ⌫ no llega a
+  // xterm, el textarea lleva un relleno largo con el caret al final y cada
+  // borrado nativo manda tantos DEL como caracteres se fueron (una palabra del
+  // relleno ≈ una palabra del prompt). El relleno se repone al empezar cada
+  // toque, no durante el hold (cambiarle el texto al teclado a mitad del repeat
+  // podría cortarlo), salvo que se agote.
+  // Listeners en capture: xterm hace stopPropagation en su keydown (capture) y
+  // uno de bubble en el textarea no correría. El refill va en setTimeout para
+  // correr después del diff que CompositionHelper agenda en un keydown 229; si
+  // ese diff ya mandó el DEL de un borrado nativo, el input no lo repite.
+  const touch = window.matchMedia('(pointer: coarse)')
+  const isTouchBackspace = (ev: KeyboardEvent) =>
+    touch.matches && ev.key === 'Backspace' && !ev.ctrlKey && !ev.altKey && !ev.metaKey
+  const ta = term.textarea
+  if (ta) {
+    const FILL = 'deck '.repeat(60)
+    const LOW = 100 // bajo esto se repone al empezar el próximo toque
+    let lastLen = 0
+    let xtermDiffs = false
+    const refill = (min: number) => setTimeout(() => {
+      if (ta.value.length < min) {
+        ta.value = FILL
+        ta.setSelectionRange(FILL.length, FILL.length)
+      }
+      lastLen = ta.value.length
+    }, 0)
+    ta.addEventListener('focus', () => refill(LOW), true)
+    ta.addEventListener('keydown', (ev) => {
+      xtermDiffs = ev.keyCode === 229 && !isTouchBackspace(ev)
+      refill(LOW)
+    }, true)
+    ta.addEventListener('input', (ev) => {
+      const e = ev as InputEvent
+      if (/^delete.*Backward$/.test(e.inputType) && !e.isComposing && !xtermDiffs) {
+        term.input('\x7f'.repeat(Math.max(1, lastLen - ta.value.length)), true)
+      }
+      xtermDiffs = false
+      lastLen = ta.value.length
+      refill(1)
+    }, true)
+  }
+
   // shift+enter desde teclado físico (BT): xterm lo mandaría como \r (submit).
   // Traducirlo al newline suave de Claude Code (ESC+CR, ver KEYS.nl).
+  // ⌫ en touch: lo maneja el input nativo (ver arriba), xterm no lo ve.
   term.attachCustomKeyEventHandler((ev) => {
+    if (isTouchBackspace(ev)) return false
     if (ev.key === 'Enter' && ev.shiftKey) {
       if (ev.type === 'keydown' && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ t: 'in', d: '\x1b\r' }))

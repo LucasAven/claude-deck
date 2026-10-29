@@ -324,6 +324,33 @@ const kbAfter = await kbState();
 ok('teclado: al cerrar vuelve todo (tabbar, statusline, Compose, filas)',
   !kbAfter.kb && kbAfter.tabbar && kbAfter.statusline && kbAfter.compose && !kbAfter.kbclose && kbAfter.rows === kbBefore.rows);
 
+// mantener ⌫ en iOS repite borrando nativo del textarea de xterm (no manda
+// más keydowns): queda un relleno largo con el caret al final, también después del Enter (xterm lo
+// vacía en ese keydown), y el relleno nunca viaja al pty. El Enter no sale:
+// WebSocket.send queda anulado mientras dura.
+const filler = await page.evaluate(async () => {
+  const sent = [];
+  const sub = claudeConn.term.onData((d) => { if (d !== '\x1b[I') sent.push(d); });
+  const ta = document.querySelector('.xterm-helper-textarea');
+  ta.focus();
+  await new Promise((r) => setTimeout(r, 20));
+  const afterFocus = [ta.value, ta.selectionStart];
+  const key = (k) => ta.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k, keyCode: k === 'Enter' ? 13 : 8, bubbles: true, cancelable: true }));
+  const realSend = WebSocket.prototype.send;
+  WebSocket.prototype.send = function () {};
+  key('Enter');
+  await new Promise((r) => setTimeout(r, 20));
+  WebSocket.prototype.send = realSend;
+  const afterEnter = [ta.value, ta.selectionStart];
+  sub.dispose();
+  ta.blur();
+  return { afterFocus, afterEnter, sent };
+});
+const fillOk = ([v, caret]) => v.length >= 100 && caret === v.length;
+ok('⌫ sostenido: el textarea de xterm tiene un relleno largo con el caret al final (al enfocar y tras Enter)',
+  fillOk(filler.afterFocus) && fillOk(filler.afterEnter));
+ok('⌫ sostenido: el relleno no viaja al pty', filler.sent.join('') === '\r');
+
 // 5c. switchers: dos chips en la statusline. "✦ <modelo> ▾" abre el menú de
 // modelo/esfuerzo y "mode ▾" cicla con shift+tab
 // pd = tap completo: desde la tarea 12 las pills disparan en pointerup
