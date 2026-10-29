@@ -2305,21 +2305,28 @@ ok('push-banner: suscripto en este dispositivo → oculto', pushBannerRun.hidden
 ok('push-banner: ✕ descarta el count actual', pushBannerRun.dismissed);
 ok('push-banner: más perdidas tras el descarte → reaparece', pushBannerRun.reshownOnNewMisses);
 
-// 24. quickkeys configurables (tarea 11b): la barra se renderiza desde
-// localStorage['deck-quickkeys'] (default = orden histórico, que la sección 5
-// ya asserta con "nl" primero); el editor #quickkeys-sheet se abre desde el
-// sheet de Ajustes (fila "Teclas rápidas" — reemplazó al long-press sobre la
-// barra). sendKeys espiado: nada llega a la sesión deck real. localStorage
-// limpiado al final (la config default no deja rastro).
+// 24. editor de teclas rápidas (tarea 11b, rediseño): #quickkeys-sheet se abre
+// desde Ajustes y trae, de arriba a abajo, la vista previa en vivo de la
+// toolbox, el riel arrastrable, el catálogo, las esquinas del d-pad y el estilo
+// del d-pad. El riel se renderiza desde localStorage['deck-quickkeys'] (default
+// = orden histórico, que la sección 5 ya asserta con "nl" primero) y las
+// esquinas desde localStorage['deck-dpad']. sendKeys espiado: nada llega a la
+// sesión deck real. Las dos claves quedan limpias al final.
 const qkRun = await page.evaluate(async () => {
   const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const rowKeys = () => [...document.querySelectorAll('.quickkeys[data-term="claude"] button[data-k]')].map((b) => b.dataset.k);
+  const listKeys = () => [...document.querySelectorAll('#qk-current .qk-row')].map((r) => r.dataset.qk);
+  const previewKeys = () => [...document.querySelectorAll('#qk-preview .qk-pv-key')].map((k) => k.dataset.k);
+  const saved = () => JSON.parse(localStorage.getItem('deck-quickkeys') || 'null');
+  const savedDpad = () => JSON.parse(localStorage.getItem('deck-dpad') || 'null');
   const sent = [];
   const realSend = claudeConn.sendKeys;
   claudeConn.sendKeys = (s) => sent.push(s);
-  const down = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
-  const up = (el) => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  const ev = (el, type, y) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 9, clientX: 60, clientY: y }));
+  const down = (el, y = 60) => ev(el, 'pointerdown', y);
+  const move = (el, y) => ev(el, 'pointermove', y);
+  const up = (el, y = 60) => ev(el, 'pointerup', y);
   const tap = (el) => { down(el); up(el); };
   const openEditor = async () => {
     tap(document.querySelector('#btn-settings')); await frame();
@@ -2329,79 +2336,133 @@ const qkRun = await page.evaluate(async () => {
   const out = { present: !!sheet, hiddenDefault: sheet.classList.contains('hidden') };
 
   // la fila "Teclas rápidas" de Ajustes abre el editor (y cierra Ajustes: no se
-  // apilan — comparten z-index); nada viajó a la terminal en el camino
+  // apilan, comparten z-index); nada viajó a la terminal en el camino
   await openEditor();
   out.settingsOpens = !sheet.classList.contains('hidden')
     && document.querySelector('#settings-sheet').classList.contains('hidden') && sent.length === 0;
 
-  // regresión: el long-press sobre una tecla ya NO abre el editor — ahora es un
-  // tap común y corriente (manda la tecla al soltar)
-  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
-  const esc = document.querySelector('.quickkeys [data-k="esc"]');
+  // "Listo" cierra el sheet
+  tap(document.querySelector('#qk-done')); await frame();
+  out.doneCloses = sheet.classList.contains('hidden');
+
+  // regresión: el long-press sobre una tecla ya NO abre el editor, es un tap
+  // común y corriente (manda la tecla al soltar)
+  const esc = document.querySelector('.quickkeys[data-term="claude"] [data-k="esc"]');
   down(esc); await wait(620); up(esc); await frame();
   out.longPressGone = sheet.classList.contains('hidden') && sent.length === 1;
   sent.length = 0;
   await openEditor();
 
-  // ✕ saca ctrl+c de la fila y de localStorage; + agrega ctrl+r al final;
-  // ◀ lo mueve un lugar antes — cada edición persiste al toque
+  // "−" saca ctrl+c del riel y de localStorage; el chip del catálogo agrega al
+  // final; la vista previa espeja el orden del riel
   tap(document.querySelector('#qk-current [data-qk="ctrlc"] .qk-del')); await frame();
-  out.removed = !rowKeys().includes('ctrlc') && !JSON.parse(localStorage.getItem('deck-quickkeys')).includes('ctrlc');
+  out.removed = !rowKeys().includes('ctrlc') && !saved().includes('ctrlc');
   tap(document.querySelector('#qk-catalog [data-qk="ctrlr"]')); await frame();
-  out.added = rowKeys().at(-1) === 'ctrlr';
-  tap(document.querySelector('#qk-current [data-qk="ctrlr"] .qk-move')); await frame();
-  out.moved = rowKeys().at(-2) === 'ctrlr'
-    && JSON.parse(localStorage.getItem('deck-quickkeys')).at(-2) === 'ctrlr';
+  out.added = rowKeys().at(-1) === 'ctrlr' && listKeys().at(-1) === 'ctrlr';
+  out.preview = previewKeys().length > 0 && previewKeys().join(',') === listKeys().join(',');
 
-  // el primer chip no ofrece ◀ (no hay "antes"); backdrop cierra
-  out.firstNoMove = !document.querySelector('#qk-current [data-qk="nl"] .qk-move');
+  // el catálogo sigue sin ofrecer flechas ni enter (viven en el d-pad)
+  out.offered = [...document.querySelectorAll('#qk-catalog [data-qk], #qk-current [data-qk]')].map((c) => c.dataset.qk);
+
+  // reordenar arrastrando el ⠿: dos renglones (44px cada uno) hacia abajo
+  // llevan la primera fila al tercer lugar. El commit va recién en el pointerup
+  const before = listKeys();
+  const grip = document.querySelector(`#qk-current [data-qk="${before[0]}"] .qk-grip`);
+  const y0 = grip.getBoundingClientRect().top + 10;
+  down(grip, y0);
+  move(grip, y0 + 44); await frame();
+  move(grip, y0 + 88); await frame();
+  const dragged = [before[1], before[2], before[0], ...before.slice(3)].join(',');
+  out.dragLive = listKeys().join(',') === dragged
+    && previewKeys().join(',') === dragged
+    && document.querySelector('#qk-current .qk-row.lifted')?.dataset.qk === before[0];
+  out.dragNotCommitted = saved().join(',') === before.join(',');
+  up(grip, y0 + 88); await frame();
+  out.dragCommitted = listKeys().join(',') === dragged
+    && rowKeys().join(',') === dragged
+    && saved().join(',') === dragged
+    && !document.querySelector('#qk-current .qk-row.lifted');
+
+  // la última tecla no se puede sacar: con una sola fila no hay "−"
+  for (let i = 0; i < 20 && listKeys().length > 1; i++) {
+    const del = document.querySelector('#qk-current .qk-row .qk-del');
+    if (!del) break;
+    tap(del); await frame();
+  }
+  out.lastNoDel = listKeys().length === 1 && !document.querySelector('#qk-current .qk-del');
+
+  // el backdrop cierra
   sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
   out.backdropCloses = sheet.classList.contains('hidden');
+  await openEditor();
 
-  // restaurar por defecto desde el editor → orden histórico de vuelta
+  // esquinas del d-pad: los <select> nativos persisten en deck-dpad
+  const pick = (id, v) => {
+    const sel = document.querySelector('#' + id);
+    sel.value = v;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  pick('qk-corner-bl', 'esc');
+  pick('qk-corner-br', 'ctrlend');
+  await frame();
+  out.cornersSaved = JSON.stringify(savedDpad().corners) === JSON.stringify({ bl: 'esc', br: 'ctrlend' });
+
+  // estilo del d-pad: el segmentado marca la opción elegida y la guarda
+  tap(document.querySelector('#qk-style [data-style="fixed"]')); await frame();
+  out.styleSaved = savedDpad().style === 'fixed'
+    && document.querySelector('#qk-style [data-style="fixed"]').classList.contains('sel');
+
+  // las esquinas configuradas aparecen en el d-pad real, abajo a los costados
+  tap(document.querySelector('#qk-done')); await frame();
+  tap(document.querySelector('#btn-dpad')); await frame();
+  const menu = document.querySelector('#switch-menu');
+  out.dpadCells = [...menu.children].map((c) => c.dataset.k || c.dataset.act || '').join(',');
+  // tocarla manda su secuencia y NO cierra el menú (igual que enter)
+  tap(menu.querySelector('[data-k="esc"]')); await frame();
+  out.cornerSends = sent.length === 1 && sent[0] === '\x1b' && menu.dataset.kind === 'dpad';
+  tap(document.querySelector('#btn-dpad')); await frame();
+  sent.length = 0;
+
+  // restaurar por defecto: vuelve el riel histórico Y la config del d-pad
   await openEditor();
   tap(document.querySelector('#qk-reset')); await frame();
-  out.reset = rowKeys().join(',') === 'nl,slash,esc,tab,ctrlc';
-  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  out.reset = rowKeys().join(',') === 'nl,slash,esc,tab,ctrlc'
+    && JSON.stringify(savedDpad()) === JSON.stringify({ corners: { bl: null, br: null }, style: 'floating' })
+    && !document.querySelector('#qk-corner-bl').value
+    && document.querySelector('#qk-style [data-style="floating"]').classList.contains('sel');
+  tap(document.querySelector('#qk-done')); await frame();
 
   claudeConn.sendKeys = realSend;
   localStorage.removeItem('deck-quickkeys'); // dejar limpio
+  localStorage.removeItem('deck-dpad');
   return out;
 });
-ok('quickkeys: sheet presente y oculto por defecto', qkRun.present && qkRun.hiddenDefault);
-ok('quickkeys: la fila de Ajustes abre el editor (y cierra Ajustes) sin mandar teclas', qkRun.settingsOpens);
-ok('quickkeys: el long-press ya no abre el editor — es un tap que manda la tecla', qkRun.longPressGone);
-ok('quickkeys: ✕ saca la tecla (fila + localStorage)', qkRun.removed);
-ok('quickkeys: el catálogo agrega al final', qkRun.added);
-ok('quickkeys: ◀ mueve un lugar antes y persiste', qkRun.moved);
-ok('quickkeys: el primer chip no tiene ◀ y el backdrop cierra', qkRun.firstNoMove && qkRun.backdropCloses);
-ok('quickkeys: restaurar por defecto vuelve al orden histórico', qkRun.reset);
+ok('teclas rápidas: sheet presente y oculto por defecto', qkRun.present && qkRun.hiddenDefault);
+ok('teclas rápidas: la fila de Ajustes abre el editor (y cierra Ajustes) sin mandar teclas', qkRun.settingsOpens);
+ok('teclas rápidas: "Listo" cierra el sheet', qkRun.doneCloses);
+ok('teclas rápidas: el long-press ya no abre el editor, es un tap que manda la tecla', qkRun.longPressGone);
+ok('teclas rápidas: "−" saca la tecla (riel + localStorage)', qkRun.removed);
+ok('teclas rápidas: el catálogo agrega al final', qkRun.added);
+ok('teclas rápidas: la vista previa espeja el orden del riel', qkRun.preview);
+ok('teclas rápidas: el catálogo no ofrece ↑ ↓ ← → ⏎',
+  qkRun.offered.length > 0
+  && !qkRun.offered.some((k) => ['up', 'down', 'left', 'right', 'enter'].includes(k)));
+ok('teclas rápidas: arrastrar el ⠿ reordena en vivo (riel + vista previa)', qkRun.dragLive);
+ok('teclas rápidas: el arrastre no escribe hasta soltar', qkRun.dragNotCommitted);
+ok('teclas rápidas: al soltar commitea el orden (barra + localStorage)', qkRun.dragCommitted);
+ok('teclas rápidas: la última tecla no se puede sacar', qkRun.lastNoDel);
+ok('teclas rápidas: el backdrop cierra', qkRun.backdropCloses);
+ok('teclas rápidas: las esquinas del d-pad persisten en deck-dpad', qkRun.cornersSaved);
+ok('teclas rápidas: el estilo del d-pad persiste y queda marcado', qkRun.styleSaved);
+ok('d-pad: las esquinas configuradas se pintan abajo a los costados',
+  qkRun.dpadCells === 'camera,up,paste,left,enter,right,esc,down,ctrlend');
+ok('d-pad: tocar una esquina manda su tecla y no cierra el menú', qkRun.cornerSends);
+ok('teclas rápidas: restaurar por defecto vuelve el riel y la config del d-pad', qkRun.reset);
 
-// 24b. flechas y enter salieron del catálogo de quickkeys (van al d-pad): el
-// editor no las ofrece y una config guardada que las tenga las pierde al cargar.
-// Sus secuencias siguen en KEYS para el d-pad.
-const noArrowsRun = await page.evaluate(async () => {
-  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
-  const tap = (el) => {
-    el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
-    el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
-  };
-  tap(document.querySelector('#btn-settings')); await frame();
-  tap(document.querySelector('#set-qk-row')); await frame();
-  const offered = [...document.querySelectorAll('#qk-catalog [data-qk], #qk-current [data-qk]')].map((c) => c.dataset.qk);
-  const sheet = document.querySelector('#quickkeys-sheet');
-  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
-  return { offered };
-});
-ok('quickkeys: el editor no ofrece ↑ ↓ ← → ⏎',
-  noArrowsRun.offered.length > 0
-  && !noArrowsRun.offered.some((k) => ['up', 'down', 'left', 'right', 'enter'].includes(k)));
-
-// 24c. quickkey "ctrl+end" (scroll al final de la conversación de Claude): NO
-// está en la barra default; el catálogo la ofrece con label largo "ctrl+end", y
-// agregada a la barra se muestra compacta como "^End" y manda CSI 1;5F
-// ('\x1b[1;5F'). sendKeys espiado: nada real llega a la sesión deck. localStorage
-// limpio al final.
+// 24b. la tecla "^End" (scroll al final de la conversación de Claude): NO está
+// en el riel default, el catálogo la ofrece con su label compacto y agregada al
+// riel manda CSI 1;5F ('\x1b[1;5F'). sendKeys espiado: nada real llega a la
+// sesión deck. localStorage limpio al final.
 const cendRun = await page.evaluate(async () => {
   const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
   const rowKeys = () => [...document.querySelectorAll('.quickkeys[data-term="claude"] button[data-k]')].map((b) => b.dataset.k);
@@ -2411,18 +2472,17 @@ const cendRun = await page.evaluate(async () => {
   const down = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
   const up = (el) => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
   const tap = (el) => { down(el); up(el); };
-  const sheet = document.querySelector('#quickkeys-sheet');
   tap(document.querySelector('#btn-settings')); await frame();
   tap(document.querySelector('#set-qk-row')); await frame();
 
-  // el catálogo la ofrece con el label largo (no está en la barra default)
+  // el catálogo la ofrece (no está en el riel default)
   const cat = document.querySelector('#qk-catalog [data-qk="ctrlend"]');
   const out = { offered: !!cat, catLabel: cat ? cat.textContent.trim() : '' };
   tap(cat); await frame();
   out.added = rowKeys().at(-1) === 'ctrlend';
-  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  tap(document.querySelector('#qk-done')); await frame();
 
-  // en la barra se muestra compacta (^End) y el tap manda CSI 1;5F
+  // en el riel se muestra compacta (^End) y el tap manda CSI 1;5F
   const btn = document.querySelector('.quickkeys[data-term="claude"] [data-k="ctrlend"]');
   out.barLabel = btn ? btn.textContent.trim() : '';
   tap(btn); await frame();
@@ -2432,9 +2492,24 @@ const cendRun = await page.evaluate(async () => {
   localStorage.removeItem('deck-quickkeys');
   return out;
 });
-ok('quickkeys: el catálogo ofrece "ctrl+end" (fuera de la barra default)', cendRun.offered && cendRun.catLabel.includes('ctrl+end'));
-ok('quickkeys: "ctrl+end" en la barra se muestra "^End"', cendRun.added && cendRun.barLabel === '^End');
-ok('quickkeys: tap en "ctrl+end" manda CSI 1;5F (\\x1b[1;5F)', cendRun.sentSeq);
+ok('teclas rápidas: el catálogo ofrece "^End" (fuera del riel default)', cendRun.offered && cendRun.catLabel.includes('^End'));
+ok('teclas rápidas: "^End" en el riel se muestra compacta', cendRun.added && cendRun.barLabel === '^End');
+ok('teclas rápidas: tap en "^End" manda CSI 1;5F (\\x1b[1;5F)', cendRun.sentSeq);
+
+// 24c. migración de una config vieja: las flechas y el enter salieron del
+// catálogo (viven en el d-pad), así que loadQuickkeys los descarta al arrancar
+// y conserva el orden del resto. Se escribe la config vieja, se recarga y se
+// lee el riel; al final se saca la clave y se recarga para dejar el default.
+await page.evaluate(() => localStorage.setItem('deck-quickkeys', JSON.stringify(['up', 'nl', 'down', 'esc', 'enter', 'tab'])));
+await page.reload({ waitUntil: 'networkidle2', timeout: 20000 });
+await page.waitForSelector('#term-claude .xterm', { timeout: 10000 });
+await new Promise((r) => setTimeout(r, 1500));
+const migrated = await page.$$eval('.quickkeys[data-term="claude"] button[data-k]', (els) => els.map((b) => b.dataset.k));
+ok('teclas rápidas: una config vieja con ↑ ↓ ⏎ migra a nl,esc,tab', migrated.join(',') === 'nl,esc,tab');
+await page.evaluate(() => localStorage.removeItem('deck-quickkeys'));
+await page.reload({ waitUntil: 'networkidle2', timeout: 20000 });
+await page.waitForSelector('#term-claude .xterm', { timeout: 10000 });
+await new Promise((r) => setTimeout(r, 1500));
 
 // 43. directorio por defecto (tarea 43): el "+" de la fila de chips ya NO crea
 // por el WS con el DEFAULT_DIR del .env clavado, sino que POSTea a

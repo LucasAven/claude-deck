@@ -1,5 +1,6 @@
 import { useDeckStore } from '../store'
 import type { SwitchState } from '../store'
+import { KEYS } from './keys'
 import { hideSnipTip } from './sniptip'
 
 // Switchers de modo (shift+tab) y modelo/esfuerzo (/model, /effort). Port de
@@ -46,7 +47,7 @@ export const openDpadMenu = () => toggle('dpad')
 // no está en la lista de exclusión del closer global de App, así que si el
 // popover estaba abierto el propio pointerdown del tap ya lo cerró
 export function cycleMode() {
-  window.claudeConn?.sendKeys('\x1b[Z')
+  window.claudeConn?.sendKeys(KEYS.shifttab)
 }
 
 // manda un slash command al prompt de Claude; el Enter va aparte con una pausa

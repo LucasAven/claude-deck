@@ -572,6 +572,14 @@ body.composer-open .tabbar { display: none; }
   font-size: 20px;
 }
 .dp-enter:active { color: var(--bg); opacity: 0.8; }
+/* esquina configurable: la tecla con el tamaño y la fuente de las quickkeys,
+   no el 18px de las flechas */
+.dp-corner {
+  font-family: var(--mono);
+  font-size: 13px;
+  gap: 2px;
+}
+.dp-mod { color: var(--muted); }
 .switch-menu .mh,
 .create-menu .mh {
   padding: 8px 12px 4px;
@@ -1078,7 +1086,25 @@ body.composer-open .tabbar { display: none; }
 }
 .host-val.warn { color: var(--accent); }
 .host-val.good { color: #8fbe6b; } /* mismo verde que chip-dot-working */
-/* ---------- editor de quickkeys (tarea 11b): reusa host-sheet ---------- */
+/* ---------- editor de teclas rápidas (tarea 11b): reusa host-sheet ---------- */
+/* el sheet creció (vista previa + riel + catálogo + d-pad): este panel scrollea,
+   el resto de los host-sheet queda como estaba */
+#quickkeys-sheet .host-sheet-panel {
+  max-height: 92dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.qk-title b { font-weight: 600; }
+.qk-done {
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 6px 2px;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--accent);
+  cursor: pointer;
+}
 .qk-label {
   font-size: 11px;
   letter-spacing: 0.08em;
@@ -1086,6 +1112,146 @@ body.composer-open .tabbar { display: none; }
   color: var(--muted);
   margin: 14px 0 8px;
 }
+.qk-label-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.qk-hint {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+}
+
+/* vista previa: copia muerta de la .toolrow real, en chico. Misma estructura
+   (d-pad fijo | teclas que scrollean | compose fijo) para que se lea igual */
+.qk-preview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  pointer-events: none;
+}
+.qk-preview svg { width: 17px; height: 17px; display: block; }
+.qk-pv-sq,
+.qk-pv-key,
+.qk-pv-compose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid #2a2f37;
+  background: #1b1f26;
+  color: #cdd2d9;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.qk-pv-sq { width: 38px; }
+.qk-pv-key { padding: 0 11px; }
+.qk-pv-compose {
+  width: 42px;
+  border: none;
+  background: #f5a623;
+  color: var(--bg);
+}
+.qk-pv-keys {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  overflow: hidden;
+}
+.qk-pv-keys.fade {
+  -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+  mask-image: linear-gradient(90deg, #000 85%, transparent);
+}
+
+/* riel: lista con borde, filas de 44px separadas por 1px */
+.qk-list {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.qk-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 8px 0 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.qk-row:last-child { border-bottom: none; }
+/* la fila levantada sigue al dedo (translateY), se despega del resto y marca
+   el borde izquierdo en ámbar */
+.qk-row.lifted {
+  z-index: 1;
+  background: var(--panel-2);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  border-bottom-color: transparent;
+}
+.qk-row.lifted::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+.qk-grip {
+  flex: none;
+  width: 30px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 15px;
+  cursor: grab;
+  /* el agarre se queda con el gesto: sin esto el panel scrollea bajo el dedo */
+  touch-action: none;
+}
+.qk-row.lifted .qk-grip { color: var(--accent); }
+.qk-key {
+  flex: none;
+  width: 54px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+}
+.qk-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--muted);
+}
+.qk-del {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.qk-del:active { color: var(--accent); }
+
+/* catálogo: chips punteados con el + en ámbar */
 .qk-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1105,34 +1271,142 @@ body.composer-open .tabbar { display: none; }
   user-select: none;
   -webkit-touch-callout: none;
 }
-.qk-act {
-  border: none;
-  background: none;
-  padding: 2px 4px;
-  font-size: 11px;
-  color: var(--muted);
-  cursor: pointer;
-}
-.qk-del { font-size: 12px; }
 .qk-chip.qk-add {
   border-style: dashed;
-  color: var(--muted);
+  color: var(--text);
   cursor: pointer;
 }
 .qk-chip.qk-add:active { color: var(--accent); border-color: var(--accent); }
+.qk-plus { color: var(--accent); }
 .qk-empty { font-size: 12px; color: var(--muted); padding: 6px 0; }
+
+/* esquinas del d-pad: diagrama a la izquierda, las tres líneas a la derecha */
+.qk-corners {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.qk-dp {
+  flex: none;
+  width: 140px;
+  height: 140px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--bg);
+}
+.qk-dp-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.qk-dp-ico { color: var(--muted); }
+.qk-dp-ico svg { width: 14px; height: 14px; display: block; }
+.qk-dp-enter {
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+}
+.qk-dp-corner { font-size: 11px; }
+.qk-dp-corner.empty {
+  background: none;
+  border: 1px dashed var(--border);
+}
+.qk-dp-corner.focus {
+  background: none;
+  border: 1px dashed var(--accent);
+  color: var(--accent);
+}
+.qk-corner-rows {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+}
+/* al lado del diagrama queda poco ancho: que "(fijas)" baje de línea en vez de
+   empujar el texto fuera del panel */
+.qk-corner-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.qk-fixed { color: var(--muted); }
+/* el <select> es nativo (iOS abre su picker); acá solo se lo viste de chip */
+.qk-sel {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.qk-sel.focus { border-color: var(--accent); }
+.qk-sel select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  outline: none;
+  background: none;
+  padding: 7px 24px 7px 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+}
+.qk-sel-caret {
+  position: absolute;
+  right: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+/* estilo del d-pad: segmentado de dos opciones */
+.qk-seg {
+  display: flex;
+  gap: 6px;
+}
+.qk-seg-btn {
+  flex: 1;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+.qk-seg-btn.sel {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(232, 176, 75, 0.12);
+}
+
 .qk-reset {
   display: block;
-  margin: 16px 0 2px;
-  border: 1px solid var(--border);
+  margin: 18px 0 2px;
+  border: none;
   background: none;
-  border-radius: 9px;
-  padding: 8px 12px;
-  font-size: 12px;
+  padding: 8px 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
   color: var(--muted);
   cursor: pointer;
 }
-.qk-reset:active { color: var(--accent); border-color: var(--accent); }
+.qk-reset:active { color: var(--accent); }
 
 /* ---------- sheet de ajustes (engranaje): reusa host-sheet ---------- */
 .set-title {

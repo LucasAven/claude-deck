@@ -11,6 +11,9 @@ export const KEYS: Record<string, string> = {
   left: '\x1b[D',
   right: '\x1b[C',
   tab: '\t',
+  // shift+tab (CSI Z): cicla el modo de Claude Code. Lo manda el chip de modo
+  // (lib/switch.cycleMode) y también es una quickkey del catálogo.
+  shifttab: '\x1b[Z',
   ctrlc: '\x03',
   slash: '/',
   // salto de línea SIN enviar el prompt: Claude Code trata ESC+CR (alt+enter)
@@ -36,31 +39,33 @@ export const KEYS: Record<string, string> = {
   ctrlend: '\x1b[1;5F',
 }
 
-// Catálogo de quickkeys disponibles para la barra (tarea 11b): label = lo que
-// muestra el botón, title = tooltip/descripción en el editor. El orden de acá
-// es el del catálogo en el sheet; el de la BARRA sale de deck-quickkeys.
-// barLabel (rediseño): forma compacta para la barra (^C en vez de ctrl+c); el
-// editor sigue mostrando el label largo.
-// Las flechas y enter salieron del catálogo: viven en el d-pad de la
-// toolbox (sus secuencias siguen en KEYS para eso). Una config guardada que las
-// tenga las pierde en silencio vía loadQuickkeys.
-export const QUICKKEY_CATALOG: { id: string; label: string; title: string; barLabel?: string }[] = [
-  { id: 'nl', label: '\\n', title: 'Salto de línea (sin enviar)' },
-  { id: 'slash', label: '/', title: 'Comando slash' },
-  { id: 'esc', label: 'esc', title: 'Escape' },
-  { id: 'tab', label: 'tab', title: 'Tab' },
-  { id: 'ctrlc', label: 'ctrl+c', barLabel: '^C', title: 'Interrumpir' },
-  { id: 'ctrlr', label: 'ctrl+r', barLabel: '^R', title: 'Buscar en el historial' },
-  { id: 'ctrld', label: 'ctrl+d', barLabel: '^D', title: 'EOF / cerrar' },
-  { id: 'ctrlz', label: 'ctrl+z', barLabel: '^Z', title: 'Suspender proceso' },
-  { id: 'ctrla', label: 'ctrl+a', barLabel: '^A', title: 'Inicio de línea' },
-  { id: 'ctrle', label: 'ctrl+e', barLabel: '^E', title: 'Fin de línea' },
-  { id: 'ctrll', label: 'ctrl+l', barLabel: '^L', title: 'Limpiar pantalla' },
-  { id: 'ctrlu', label: 'ctrl+u', barLabel: '^U', title: 'Borrar la línea' },
-  { id: 'ctrlend', label: 'ctrl+end', barLabel: '^End', title: 'Ir al final de la conversación (scroll)' },
+// Catálogo de quickkeys disponibles para el riel de la toolbox (tarea 11b):
+// label = la forma compacta, una sola, que pintan tanto el botón del riel como
+// el editor (^C, ^End); desc = descripción corta que el editor lista al lado
+// del label y que además va como title del botón. El orden de acá es el del
+// catálogo en el sheet; el del RIEL sale de deck-quickkeys.
+// Las flechas y enter salieron del catálogo: viven en el d-pad (sus secuencias
+// siguen en KEYS para eso). Migración, sin código aparte: loadQuickkeys filtra
+// contra este catálogo y respeta el orden del resto, así que una config vieja
+// ["up","nl","down","esc","enter","tab"] carga como ["nl","esc","tab"].
+export const QUICKKEY_CATALOG: { id: string; label: string; desc: string }[] = [
+  { id: 'nl', label: '\\n', desc: 'Nueva línea sin enviar' },
+  { id: 'slash', label: '/', desc: 'Comandos' },
+  { id: 'esc', label: 'esc', desc: 'Cancelar / salir' },
+  { id: 'tab', label: 'tab', desc: 'Autocompletar' },
+  { id: 'ctrlc', label: '^C', desc: 'Interrumpir' },
+  { id: 'ctrlr', label: '^R', desc: 'Buscar historial' },
+  { id: 'ctrld', label: '^D', desc: 'Cerrar / EOF' },
+  { id: 'ctrlz', label: '^Z', desc: 'Suspender' },
+  { id: 'ctrla', label: '^A', desc: 'Inicio de línea' },
+  { id: 'ctrle', label: '^E', desc: 'Fin de línea' },
+  { id: 'ctrll', label: '^L', desc: 'Limpiar pantalla' },
+  { id: 'ctrlu', label: '^U', desc: 'Borrar línea' },
+  { id: 'shifttab', label: '⇧tab', desc: 'Cambiar modo' },
+  { id: 'ctrlend', label: '^End', desc: 'Ir al final' },
 ]
 
-// barra por defecto = la histórica sin flechas ni enter (nl primero, pedido del
+// riel por defecto = el histórico sin flechas ni enter (nl primero, pedido del
 // usuario; ui-test asserta este orden con la config default)
 export const DEFAULT_QUICKKEYS = ['nl', 'slash', 'esc', 'tab', 'ctrlc']
 
@@ -79,6 +84,40 @@ export function loadQuickkeys(): string[] {
     return list.length ? list : DEFAULT_QUICKKEYS
   } catch {
     return DEFAULT_QUICKKEYS
+  }
+}
+
+// ---------- config del d-pad ----------
+// Las dos esquinas de ABAJO del d-pad toman una tecla del catálogo, o quedan
+// vacías; las de arriba son fijas (cámara y pegar).
+// TODO(d-pad): ni el d-pad flotante ni el d-pad fijo en la toolbox existen
+// todavía. Hoy el único d-pad es el popover 3x3 y `style` solo se guarda;
+// cuando se implementen, los dos lo leen de acá.
+export type DpadStyle = 'floating' | 'fixed'
+export type DpadConfig = { corners: { bl: string | null; br: string | null }; style: DpadStyle }
+
+export const DEFAULT_DPAD: DpadConfig = { corners: { bl: null, br: null }, style: 'floating' }
+
+export const DPAD_LS_KEY = 'deck-dpad'
+
+// lector puro, igual que loadQuickkeys: esquina con un id que no esté en el
+// catálogo → vacía, estilo raro → flotante, cualquier cosa rota → DEFAULT_DPAD
+export function loadDpad(): DpadConfig {
+  try {
+    const raw = localStorage.getItem(DPAD_LS_KEY)
+    if (!raw) return DEFAULT_DPAD
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return DEFAULT_DPAD
+    const cfg = parsed as { corners?: unknown; style?: unknown }
+    const corners = (cfg.corners && typeof cfg.corners === 'object' ? cfg.corners : {}) as Record<string, unknown>
+    const known = new Set(QUICKKEY_CATALOG.map((k) => k.id))
+    const corner = (v: unknown) => (typeof v === 'string' && known.has(v) ? v : null)
+    return {
+      corners: { bl: corner(corners.bl), br: corner(corners.br) },
+      style: cfg.style === 'fixed' ? 'fixed' : 'floating',
+    }
+  } catch {
+    return DEFAULT_DPAD
   }
 }
 

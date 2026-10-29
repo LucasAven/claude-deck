@@ -15,8 +15,29 @@ import { SwitchMenu } from './SwitchMenu'
 // con useTap (preventDefault en pointerdown mantiene el foco del teclado
 // virtual — §5.4, NO reemplazar por onClick).
 
+// Íconos de la toolbox. Se exportan porque la "vista previa" del editor de
+// teclas rápidas (QuickkeysSheet) pinta una copia en chico de esta misma fila:
+// un solo svg por ícono, no dos copias que se desincronizan.
+export const TOOL_ICONS = {
+  dpad: (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="12" r="2" /><path d="M12 3l3 3.5H9zM12 21l3-3.5H9zM3 12l3.5-3v6zM21 12l-3.5-3v6z" /></svg>
+  ),
+  snippets: (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6.5h16M4 12h16M4 17.5h16" /></svg>
+  ),
+  scrollback: (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="3" /><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4" /></svg>
+  ),
+  compose: (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.7 3.8a2.1 2.1 0 0 1 3 3L7.5 19l-4 1 1-4z" /></svg>
+  ),
+  kbclose: (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M7 10l5 5 5-5" /></svg>
+  ),
+}
+
 // Una quickkey: manda la secuencia cruda al terminal (app.js:301-339). El
-// editor de la barra (tarea 11b) ya no se abre por long-press: vive en el
+// editor del riel (tarea 11b) ya no se abre por long-press: vive en el
 // sheet de ajustes (engranaje de la fila de sesiones).
 function QuickKey({ k, title, blocked, children }: { k: string; title?: string; blocked: () => boolean; children: React.ReactNode }) {
   const tap = useTap(() => {
@@ -120,7 +141,7 @@ export function ControlBar() {
           derecha: al final del scroll el último botón se ve entero. */}
       <div className="toolrow">
         <button id="btn-dpad" className={'ctl-sq' + (dpadActive ? ' active' : '')} title="D-pad" {...dpadTap}>
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="12" r="2" /><path d="M12 3l3 3.5H9zM12 21l3-3.5H9zM3 12l3.5-3v6zM21 12l-3.5-3v6z" /></svg>
+          {TOOL_ICONS.dpad}
         </button>
         <input id="img-input" type="file" accept="image/*" className="hidden" ref={inputRef} onChange={onImgInput} />
         <div
@@ -134,23 +155,23 @@ export function ControlBar() {
             const cat = QUICKKEY_CATALOG.find((c) => c.id === id)
             if (!cat) return null
             return (
-              <QuickKey key={id} k={id} title={cat.title} blocked={blocked}>
-                {cat.barLabel ?? cat.label}
+              <QuickKey key={id} k={id} title={cat.desc} blocked={blocked}>
+                {cat.label}
               </QuickKey>
             )
           })}
           <button id="btn-snippets" className={'ctl-sq' + (snippetsActive ? ' active' : '')} title="Snippets" {...snippetsTap}>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6.5h16M4 12h16M4 17.5h16" /></svg>
+            {TOOL_ICONS.snippets}
           </button>
           <button id="btn-scrollback" className="ctl-sq" title="Vista de lectura (scrollback legible)" {...scrollbackTap}>
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="3" /><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4" /></svg>
+            {TOOL_ICONS.scrollback}
           </button>
         </div>
         <button id="btn-composer" className="ctl-compose" title="Componer prompt" {...composerTap}>
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.7 3.8a2.1 2.1 0 0 1 3 3L7.5 19l-4 1 1-4z" /></svg>
+          {TOOL_ICONS.compose}
         </button>
         <button id="btn-kbclose" className="ctl-sq" title="Cerrar teclado" {...kbCloseTap}>
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M7 10l5 5 5-5" /></svg>
+          {TOOL_ICONS.kbclose}
         </button>
       </div>
     </div>

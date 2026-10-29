@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { deck, AuthError, DeckError } from './lib/api'
-import { SESSION_NAME_RE, loadQuickkeys } from './lib/keys'
+import { SESSION_NAME_RE, loadQuickkeys, loadDpad, type DpadConfig } from './lib/keys'
 import { closeSwitchMenu, loadSwitch } from './lib/switch'
 import { closeComposer } from './lib/composer'
 import type { ClaudeMode } from './lib/mode'
@@ -180,9 +180,11 @@ interface DeckStore {
   createMenuOpen: boolean
   worktreeSheetOpen: boolean
   dispatchSheetOpen: boolean
-  // quickkeys configurables (tarea 11b): orden de la barra + sheet de edición
+  // quickkeys configurables (tarea 11b): orden del riel + sheet de edición
   quickkeys: string[]
   quickkeysSheetOpen: boolean
+  // esquinas de abajo y estilo del d-pad, editables en el mismo sheet
+  dpad: DpadConfig
   // sheet de ajustes (engranaje de la fila de sesiones): push + batería + quickkeys
   settingsSheetOpen: boolean
   // pref: ocultar el status bar de tmux (franja verde), persistida por dispositivo
@@ -282,6 +284,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   dispatchSheetOpen: false,
   quickkeys: loadQuickkeys(),
   quickkeysSheetOpen: false,
+  dpad: loadDpad(),
   settingsSheetOpen: false,
   hideTmuxStatus: loadHideTmuxStatus(),
   switchMenu: null,
