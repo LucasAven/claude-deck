@@ -206,18 +206,81 @@ const tapSel = (sel) => page.$eval(sel, (b) => {
   b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
 });
+await page.evaluate(() => localStorage.removeItem('deck-dpad-spot'));
 await tapSel('#btn-dpad');
 const dpad = await page.evaluate(() => {
   const menu = document.querySelector('#switch-menu');
   return {
     open: !menu.classList.contains('hidden') && menu.dataset.kind === 'dpad',
     active: document.querySelector('#btn-dpad').classList.contains('active'),
-    cells: [...menu.children].map((c) => c.dataset.k || c.dataset.act || ''),
+    cells: [...menu.querySelectorAll(':scope > .dp-cell, :scope > .dp-slot')].map((c) => c.dataset.k || c.dataset.act || ''),
+    slots: menu.querySelectorAll(':scope > .dp-slot').length,
+    container: getComputedStyle(menu).backgroundColor + '|' + getComputedStyle(menu).boxShadow,
   };
 });
 ok('tap en el d-pad abre la grilla y el botón queda en ámbar', dpad.open && dpad.active);
 ok('grilla 3x3: cámara ↑ pegar / ← ⏎ → / vacío ↓ vacío',
   dpad.cells.join(',') === 'camera,up,paste,left,enter,right,,down,');
+ok('d-pad sin contenedor visible y esquinas vacías como slots "+"',
+  dpad.container === 'rgba(0, 0, 0, 0)|none' && dpad.slots === 2);
+
+// d-pad flotante: el handle de la esquina lo arrastra 1:1 mostrando los 9
+// lugares, al soltar se acomoda en el más cercano (deck-dpad-spot, uno solo
+// para teclado abierto y cerrado) y el doble tap lo vuelve al lugar por defecto. Pointers
+// sintéticos: setPointerCapture tira y el hook lo ignora.
+const dpadMove = await page.evaluate(async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const menu = document.querySelector('#switch-menu');
+  const handle = menu.querySelector('.dp-handle');
+  const pt = (type, x, y) => handle.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 7, clientX: x, clientY: y }));
+  await wait(200); // la fila se apaga con una transición de 0.12s
+  const dim = getComputedStyle(document.querySelector('.quickkeys')).opacity;
+  const te = new TouchEvent('touchend', { bubbles: true, cancelable: true });
+  handle.dispatchEvent(te);
+  const ghost = te.defaultPrevented;
+  const r0 = menu.getBoundingClientRect();
+  const h = handle.getBoundingClientRect();
+  pt('pointerdown', h.left + 15, h.top + 15);
+  pt('pointermove', h.left + 115, h.top - 185); await frame();
+  const r1 = menu.getBoundingClientRect();
+  const spots = document.querySelectorAll('.dp-spot').length;
+  const amber = handle.classList.contains('dragging');
+  pt('pointermove', innerWidth, 0); await frame();
+  pt('pointerup', innerWidth, 0); await wait(250);
+  const r2 = menu.getBoundingClientRect();
+  const saved = JSON.parse(localStorage.getItem('deck-dpad-spot') || 'null');
+  const spotsAfter = document.querySelectorAll('.dp-spot').length;
+  for (let i = 0; i < 2; i++) {
+    const hh = handle.getBoundingClientRect();
+    pt('pointerdown', hh.left + 15, hh.top + 15);
+    pt('pointerup', hh.left + 15, hh.top + 15);
+  }
+  await wait(250);
+  const r3 = menu.getBoundingClientRect();
+  const reset = JSON.parse(localStorage.getItem('deck-dpad-spot') || 'null');
+  localStorage.removeItem('deck-dpad-spot');
+  return {
+    dim,
+    ghost,
+    follow: [Math.round(r1.left - r0.left), Math.round(r1.top - r0.top)].join(','),
+    spots,
+    amber,
+    snapped: Math.round(innerWidth - r2.right) === 12 && saved?.col === 'right' && saved?.row === 'high',
+    spotsAfter,
+    back: Math.round(r3.left) === Math.round(r0.left) && Math.round(r3.top) === Math.round(r0.top),
+    reset: reset?.col === 'left' && reset?.row === 'low',
+  };
+});
+ok('d-pad abierto: el resto de la fila queda al 40%', dpadMove.dim === '0.4');
+// iOS manda un click sintético al soltar contra lo que quede bajo el dedo: si
+// el menú se movió es la terminal y abre el teclado. El touchend lo cancela.
+ok('el handle cancela el click sintético del touchend', dpadMove.ghost);
+ok('arrastrar el handle mueve el d-pad 1:1, en ámbar y con los 9 lugares a la vista',
+  dpadMove.follow === '100,-200' && dpadMove.spots === 9 && dpadMove.amber);
+ok('al soltar se acomoda en el lugar más cercano (arriba a la derecha) y lo guarda',
+  dpadMove.snapped && dpadMove.spotsAfter === 0);
+ok('doble tap en el handle lo vuelve al lugar por defecto', dpadMove.back && dpadMove.reset);
 
 // flechas/enter espiados: nada llega a la sesión real
 const dpadKeys = await page.evaluate(async () => {
@@ -252,6 +315,21 @@ await page.evaluate(() => document.querySelector('#term-claude')
   .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
 ok('tap afuera cierra el d-pad', await page.$eval('#switch-menu', (el) => el.classList.contains('hidden'))
   && !(await page.$eval('#btn-dpad', (el) => el.classList.contains('active'))));
+
+// esquina vacía: el "+" cierra el d-pad y abre Teclas rápidas para elegirla
+await tapSel('#btn-dpad');
+await tapSel('#switch-menu .dp-slot');
+await new Promise((r) => setTimeout(r, 200));
+const dpadSlot = await page.evaluate(() => ({
+  menuClosed: document.querySelector('#switch-menu').classList.contains('hidden'),
+  sheetOpen: !document.querySelector('#quickkeys-sheet').classList.contains('hidden'),
+  pointed: document.querySelector('#qk-corner-bl').closest('.qk-sel').classList.contains('focus')
+    && !document.querySelector('#qk-corner-br').closest('.qk-sel').classList.contains('focus'),
+}));
+ok('esquina vacía del d-pad abre Teclas rápidas con esa esquina resaltada',
+  dpadSlot.menuClosed && dpadSlot.sheetOpen && dpadSlot.pointed);
+await tapSel('#qk-done');
+await new Promise((r) => setTimeout(r, 200));
 
 // arrastrar #btn-dpad manda flechas sin abrir el menú: ↓ al pasar los 14px,
 // repite cada 120ms, cambiar de eje cambia la flecha (el ×N vuelve a 1),

@@ -166,6 +166,17 @@ export function QuickkeysSheet() {
   const doneTap = useTap(() => closeQuickkeysSheet())
   const resetTap = useTap(() => resetQuickkeys())
   const [focus, setFocus] = useState<'bl' | 'br' | null>(null)
+  // abierto desde el "+" de una esquina del d-pad: esa esquina queda resaltada
+  // hasta que se toque un select, y el sheet baja hasta la sección. No se le da
+  // foco al <select>: en iOS eso abre el picker solo, sin que el usuario lo pida.
+  const pointedCorner = useDeckStore((s) => s.quickkeysSheetCorner)
+  const cornersRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open || !pointedCorner) return
+    const raf = requestAnimationFrame(() => cornersRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+    return () => cancelAnimationFrame(raf)
+  }, [open, pointedCorner])
+  const shownFocus = focus ?? pointedCorner
 
   // Drag de reordenamiento, solo desde el ⠿ (tarea 11b, rediseño). No hay
   // long-press como en los chips de sesión: acá el riel no scrollea ni el tap
@@ -224,12 +235,15 @@ export function QuickkeysSheet() {
 
   // <select> nativo (iOS abre su picker), vestido de chip mono con ▾
   const cornerSelect = (which: 'bl' | 'br') => (
-    <span className={'qk-sel' + (focus === which ? ' focus' : '')}>
+    <span className={'qk-sel' + (shownFocus === which ? ' focus' : '')}>
       <select
         id={'qk-corner-' + which}
         value={dpad.corners[which] ?? ''}
         onChange={(e) => setDpadCorner(which, e.target.value || null)}
-        onFocus={() => setFocus(which)}
+        onFocus={() => {
+          setFocus(which)
+          useDeckStore.setState({ quickkeysSheetCorner: null })
+        }}
         onBlur={() => setFocus(null)}
       >
         <option value="">vacía</option>
@@ -296,8 +310,8 @@ export function QuickkeysSheet() {
         </div>
 
         <div className="qk-label">Esquinas del d-pad</div>
-        <div className="qk-corners">
-          <DpadDiagram corners={dpad.corners} focus={focus} />
+        <div className="qk-corners" ref={cornersRef}>
+          <DpadDiagram corners={dpad.corners} focus={shownFocus} />
           <div className="qk-corner-rows">
             <div className="qk-corner-row">
               <span>Arriba: cámara · pegar</span>
@@ -315,9 +329,9 @@ export function QuickkeysSheet() {
         </div>
 
         <div className="qk-label">Estilo del d-pad</div>
-        {/* TODO(d-pad): el d-pad flotante y el d-pad fijo en la toolbox no
-            existen todavía (hoy el único es el popover 3x3), así que esto solo
-            guarda el ajuste; cuando se implementen, los dos lo leen de acá. */}
+        {/* Flotante: el popover 3x3 se mueve con su handle. Fijo: queda en el
+            lugar por defecto, sin handle.
+            TODO(d-pad): el d-pad fijo DENTRO de la toolbox todavía no existe. */}
         <div id="qk-style" className="qk-seg">
           <StyleButton style="floating" label="Flotante" sel={dpad.style === 'floating'} />
           <StyleButton style="fixed" label="Fijo en el toolbox" sel={dpad.style === 'fixed'} />

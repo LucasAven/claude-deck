@@ -1,8 +1,21 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useDeckStore } from '../../store'
-import { MODELS, EFFORTS, KEYS, QUICKKEY_CATALOG } from '../../lib/keys'
+import {
+  DEFAULT_DPAD_SPOT,
+  DPAD_SPOTS,
+  EFFORTS,
+  KEYS,
+  MODELS,
+  QUICKKEY_CATALOG,
+  loadDpadSpot,
+  saveDpadSpot,
+  type DpadCol,
+  type DpadRow,
+  type DpadSpot,
+} from '../../lib/keys'
 import { saveSwitch, sendSlashCommand, closeSwitchMenu } from '../../lib/switch'
 import { pasteFromClipboard } from '../../lib/image'
+import { openQuickkeysSheet } from '../../lib/quickkeys'
 import { useTap } from '../../hooks/useTap'
 import { SnippetsPalette } from './Snippets'
 
@@ -126,15 +139,46 @@ function ArrowCell({ k, title, children }: { k: string; title: string; children:
   )
 }
 
+// iOS sintetiza mousedown/click después del touchend, en el punto donde se
+// levantó el dedo y contra lo que haya ahí EN ESE MOMENTO. Si el gesto movió o
+// cerró el menú (snap o doble tap del handle, cámara, pegar, el "+"), ese click
+// cae en la terminal, el textarea de xterm (que está en la línea del cursor,
+// justo debajo del lugar por defecto) toma foco y se abre el teclado.
+// preventDefault en el touchend cancela ese click. Va como listener nativo en
+// el elemento y no como onTouchEnd de React: el "+", cámara y pegar ya se
+// desmontaron cuando llega el touchend, y un nodo suelto no burbujea hasta la
+// raíz donde React delega. La acción no se pierde: corre antes, en pointerup.
+// Ref callback estable: React lo llama una vez por elemento montado.
+function noGhostClick(el: HTMLElement | null) {
+  el?.addEventListener(
+    'touchend',
+    (e) => {
+      if (e.cancelable) e.preventDefault()
+    },
+    { passive: false },
+  )
+}
+
 // Esquina de abajo configurable (sheet de teclas rápidas): manda la tecla
 // asignada y NO cierra el menú, igual que enter, para poder tocarla varias
-// veces seguidas. Sin tecla asignada el DOM queda igual que antes (.dp-empty).
-function CornerCell({ id }: { id: string | null }) {
-  const tap = useTap(() => {
-    if (id) window.claudeConn?.sendKeys(KEYS[id])
-  })
+// veces seguidas. Sin tecla asignada es un slot punteado con "+" que abre el
+// sheet de teclas rápidas para elegirla.
+function CornerCell({ which, id }: { which: 'bl' | 'br'; id: string | null }) {
   const cat = id ? QUICKKEY_CATALOG.find((c) => c.id === id) : undefined
-  if (!cat) return <div className="dp-empty" />
+  const tap = useTap(() => {
+    if (cat) {
+      window.claudeConn?.sendKeys(KEYS[cat.id])
+      return
+    }
+    closeSwitchMenu()
+    openQuickkeysSheet(which)
+  })
+  if (!cat)
+    return (
+      <button className="dp-slot" title="Elegir una tecla para esta esquina" ref={noGhostClick} {...tap}>
+        +
+      </button>
+    )
   // el modificador (^ o ⇧) va apagado delante de la tecla, mismo tamaño y fuente
   const [, mod, key] = cat.label.match(/^([\^⇧]?)(.*)$/) ?? ['', '', cat.label]
   return (
@@ -162,11 +206,11 @@ function DpadMenu({ onCamera }: { onCamera: () => void }) {
   const enterTap = useTap(() => window.claudeConn?.sendKeys(KEYS.enter))
   return (
     <>
-      <button className="dp-cell" data-act="camera" title="Cámara o galería" {...cameraTap}>
+      <button className="dp-cell" data-act="camera" title="Cámara o galería" ref={noGhostClick} {...cameraTap}>
         {DPAD_ICONS.camera}
       </button>
       <ArrowCell k="up" title="Flecha arriba">↑</ArrowCell>
-      <button className="dp-cell" data-act="paste" title="Pegar del portapapeles" {...pasteTap}>
+      <button className="dp-cell" data-act="paste" title="Pegar del portapapeles" ref={noGhostClick} {...pasteTap}>
         {DPAD_ICONS.paste}
       </button>
       <ArrowCell k="left" title="Flecha izquierda">←</ArrowCell>
@@ -174,22 +218,245 @@ function DpadMenu({ onCamera }: { onCamera: () => void }) {
         {'⏎︎'}
       </button>
       <ArrowCell k="right" title="Flecha derecha">→</ArrowCell>
-      <CornerCell id={corners.bl} />
+      <CornerCell which="bl" id={corners.bl} />
       <ArrowCell k="down" title="Flecha abajo">↓</ArrowCell>
-      <CornerCell id={corners.br} />
+      <CornerCell which="br" id={corners.br} />
     </>
+  )
+}
+
+// ---------- d-pad flotante: handle, lugares y snap ----------
+const DP_EDGE = 12 // distancia mínima a los bordes del área visible
+const DP_BACK_SWIPE = 20 // el drag no entra a la franja del back-swipe de iOS
+const DP_GAP = 6 // entre la fila de abajo y la statusline (o la toolbox)
+const DP_TAP_SLOP = 12 // soltar sin pasar de acá es un tap (cuenta para el doble tap), como useTap
+const DP_DOUBLE_TAP_MS = 300
+const DP_SETTLE_MS = 150 // el teclado dispara ráfagas de resize: se espera a que termine
+
+type Pt = { left: number; top: number }
+
+// Geometría en coordenadas del containing block del popover (.controlbar):
+// los 9 lugares y los límites del drag. Lo vertical sale del visualViewport
+// (#app lo sigue, así que comparten coordenadas de cliente); lo horizontal se
+// recorta además a la .controlbar, que ya descuenta el safe-area (notch en
+// horizontal) y deja la columna izquierda alineada con #btn-dpad.
+function measureDpad(menu: HTMLElement) {
+  const cb = menu.offsetParent as HTMLElement
+  const size = { w: menu.offsetWidth, h: menu.offsetHeight }
+  const vv = window.visualViewport
+  const c = cb.getBoundingClientRect()
+  const area = {
+    left: Math.max(vv?.offsetLeft ?? 0, c.left),
+    right: Math.min(vv ? vv.offsetLeft + vv.width : window.innerWidth, c.right),
+    top: vv?.offsetTop ?? 0,
+    bottom: vv ? vv.offsetTop + vv.height : window.innerHeight,
+  }
+  // left/top de un hijo absoluto se miden desde el padding box: el borde
+  // superior de la controlbar (con teclado abierto) corre el origen 1px
+  const origin = { left: c.left + cb.clientLeft, top: c.top + cb.clientTop }
+  // con teclado abierto la statusline no se muestra: el piso es la toolbox
+  const sl = document.querySelector<HTMLElement>('#view-claude .statusline')
+  const floor = (sl?.offsetHeight ? sl.getBoundingClientRect().top : c.top) - DP_GAP
+  const output = document.getElementById('term-claude')?.getBoundingClientRect().top ?? area.top
+  const minTop = area.top + DP_EDGE
+  const maxTop = area.bottom - DP_EDGE - size.h
+  const clampTop = (t: number) => Math.min(Math.max(t, minTop), maxTop)
+  const low = clampTop(floor - size.h)
+  const high = clampTop(output + DP_EDGE)
+  const tops: Record<DpadRow, number> = { low, mid: (low + high) / 2, high }
+  const lefts: Record<DpadCol, number> = {
+    left: area.left + DP_EDGE,
+    center: (area.left + area.right - size.w) / 2,
+    right: area.right - DP_EDGE - size.w,
+  }
+  const at = (s: DpadSpot): Pt => ({ left: lefts[s.col] - origin.left, top: tops[s.row] - origin.top })
+  return {
+    origin,
+    size,
+    at,
+    clamp: (p: Pt): Pt => ({
+      left: Math.min(Math.max(p.left, area.left + DP_BACK_SWIPE - origin.left), lefts.right - origin.left),
+      top: Math.min(Math.max(p.top, minTop - origin.top), maxTop - origin.top),
+    }),
+    nearest: (p: Pt): DpadSpot => {
+      const dist = (s: DpadSpot) => Math.hypot(at(s).left - p.left, at(s).top - p.top)
+      return DPAD_SPOTS.reduce((best, s) => (dist(s) < dist(best) ? s : best))
+    },
+  }
+}
+
+type DpadDrag = {
+  id: number
+  geo: ReturnType<typeof measureDpad>
+  grabX: number // dedo menos esquina del menú, para que el menú no salte al agarrarlo
+  grabY: number
+  x0: number
+  y0: number
+  moved: boolean // pasó DP_TAP_SLOP: es un drag y no un tap
+  at: Pt // última posición del drag, ya dentro de los límites
+}
+
+// Posición del popover del d-pad flotante. Al abrir (y cuando el
+// visualViewport termina de cambiar, p. ej. al abrir el teclado) va al lugar
+// guardado, recalculado para el área visible de ese momento; el handle lo arrastra 1:1 y al soltar se acomoda en el
+// lugar más cercano. Con `enabled` en false no hay posición propia y el CSS
+// lo deja en el lugar por defecto.
+function useDpadPlacement(menuRef: React.RefObject<HTMLDivElement | null>, enabled: boolean) {
+  const [pos, setPos] = useState<Pt | null>(null)
+  const [spots, setSpots] = useState<{ at: Pt[]; w: number; h: number } | null>(null) // contornos durante el drag
+  const [snapping, setSnapping] = useState(false)
+  const dragRef = useRef<DpadDrag | null>(null)
+  const lastTapRef = useRef(0)
+
+  const geometry = () => (menuRef.current?.offsetParent ? measureDpad(menuRef.current) : null)
+
+  useLayoutEffect(() => {
+    if (!enabled) {
+      setPos(null)
+      return
+    }
+    // durante un drag no se mueve: settle() vuelve a medir al soltar
+    const place = () => {
+      if (dragRef.current) return
+      const geo = geometry()
+      if (!geo) return
+      setSnapping(false)
+      setPos(geo.at(loadDpadSpot()))
+    }
+    place()
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const onResize = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(place, DP_SETTLE_MS)
+    }
+    const vv = window.visualViewport
+    vv?.addEventListener('resize', onResize)
+    window.addEventListener('resize', onResize)
+    return () => {
+      if (timer) clearTimeout(timer)
+      vv?.removeEventListener('resize', onResize)
+      window.removeEventListener('resize', onResize)
+      dragRef.current = null
+      setSpots(null)
+    }
+  }, [enabled])
+
+  // se mide de nuevo: si el teclado o la rotación cambiaron el viewport
+  // durante el drag, la geometría del pointerdown ya no sirve
+  const settle = (pick: (geo: ReturnType<typeof measureDpad>) => DpadSpot) => {
+    const drag = dragRef.current
+    dragRef.current = null
+    setSpots(null)
+    if (!drag) return
+    const geo = geometry() ?? drag.geo
+    const spot = pick(geo)
+    saveDpadSpot(spot)
+    setSnapping(true)
+    setPos(geo.at(spot))
+  }
+
+  const handleProps = {
+    onPointerDown: (e: React.PointerEvent) => {
+      e.preventDefault() // el teclado virtual no se cierra al agarrar el handle
+      if (dragRef.current) return // un segundo dedo no le roba el drag al primero
+      const geo = geometry()
+      const menu = menuRef.current?.getBoundingClientRect()
+      if (!geo || !menu) return
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        /* pointer sintético (tests) sin puntero activo */
+      }
+      dragRef.current = {
+        id: e.pointerId,
+        geo,
+        grabX: e.clientX - menu.left,
+        grabY: e.clientY - menu.top,
+        x0: e.clientX,
+        y0: e.clientY,
+        moved: false,
+        at: { left: menu.left - geo.origin.left, top: menu.top - geo.origin.top },
+      }
+      setSnapping(false)
+    },
+    // sigue al dedo desde el primer px; el slop solo decide si al soltar fue tap
+    onPointerMove: (e: React.PointerEvent) => {
+      const drag = dragRef.current
+      if (!drag || e.pointerId !== drag.id) return
+      if (!drag.moved && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) >= DP_TAP_SLOP) {
+        drag.moved = true
+        setSpots({ at: DPAD_SPOTS.map(drag.geo.at), w: drag.geo.size.w, h: drag.geo.size.h })
+      }
+      drag.at = drag.geo.clamp({
+        left: e.clientX - drag.grabX - drag.geo.origin.left,
+        top: e.clientY - drag.grabY - drag.geo.origin.top,
+      })
+      setPos(drag.at)
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      const drag = dragRef.current
+      if (!drag || e.pointerId !== drag.id) return
+      if (drag.moved) {
+        lastTapRef.current = 0
+        settle((geo) => geo.nearest(drag.at))
+        return
+      }
+      const now = performance.now()
+      const double = now - lastTapRef.current < DP_DOUBLE_TAP_MS
+      lastTapRef.current = double ? 0 : now
+      settle(() => (double ? DEFAULT_DPAD_SPOT : loadDpadSpot()))
+    },
+    // sin lostpointercapture a propósito: el gesto lo terminan solo el up y el
+    // cancel, así un lostpointercapture antes del up no se come el doble tap
+    onPointerCancel: (e: React.PointerEvent) => {
+      const drag = dragRef.current
+      if (!drag || e.pointerId !== drag.id) return
+      settle((geo) => (drag.moved ? geo.nearest(drag.at) : loadDpadSpot()))
+    },
+  }
+
+  return { pos, spots, snapping, dragging: spots !== null, handleProps }
+}
+
+function DpadHandle({ dragging, handlers }: { dragging: boolean; handlers: ReturnType<typeof useDpadPlacement>['handleProps'] }) {
+  return (
+    <button
+      className={'dp-handle' + (dragging ? ' dragging' : '')}
+      ref={noGhostClick}
+      title="Mover el d-pad (doble tap: volver al lugar por defecto)"
+      {...handlers}
+    >
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+        <path d="M15 5L5 15M15 10l-5 5M15 15h0" />
+      </svg>
+    </button>
   )
 }
 
 export function SwitchMenu({ onCamera }: { onCamera: () => void }) {
   const kind = useDeckStore((s) => s.switchMenu)
+  const floating = useDeckStore((s) => s.dpad.style === 'floating')
+  const menuRef = useRef<HTMLDivElement>(null)
+  const dp = useDpadPlacement(menuRef, kind === 'dpad' && floating)
   // data-kind espeja el kind al DOM: parte del contrato con ui-test.mjs (lee
   // menu.dataset.kind) y con el CSS, igual que el `dataset.kind` del vanilla.
   return (
-    <div id="switch-menu" className={'switch-menu' + (kind ? '' : ' hidden')} data-kind={kind ?? undefined}>
-      {kind === 'model' && <ModelMenu />}
-      {kind === 'dpad' && <DpadMenu onCamera={onCamera} />}
-      {kind === 'snippets' && <SnippetsPalette />}
-    </div>
+    <>
+      <div
+        id="switch-menu"
+        ref={menuRef}
+        className={'switch-menu' + (kind ? '' : ' hidden') + (kind === 'dpad' && dp.snapping ? ' dp-snapping' : '')}
+        data-kind={kind ?? undefined}
+        style={kind === 'dpad' && dp.pos ? { left: dp.pos.left, top: dp.pos.top, bottom: 'auto' } : undefined}
+      >
+        {kind === 'model' && <ModelMenu />}
+        {kind === 'dpad' && <DpadMenu onCamera={onCamera} />}
+        {kind === 'dpad' && floating && <DpadHandle dragging={dp.dragging} handlers={dp.handleProps} />}
+        {kind === 'snippets' && <SnippetsPalette />}
+      </div>
+      {dp.spots?.at.map((s, i) => (
+        <div key={i} className="dp-spot" style={{ left: s.left, top: s.top, width: dp.spots?.w, height: dp.spots?.h }} />
+      ))}
+    </>
   )
 }

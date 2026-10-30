@@ -183,6 +183,9 @@ interface DeckStore {
   // quickkeys configurables (tarea 11b): orden del riel + sheet de edición
   quickkeys: string[]
   quickkeysSheetOpen: boolean
+  // esquina del d-pad que abrió el sheet (el "+" de un slot vacío): se resalta
+  // y el sheet scrollea hasta ella; null si se abrió desde Ajustes
+  quickkeysSheetCorner: 'bl' | 'br' | null
   // esquinas de abajo y estilo del d-pad, editables en el mismo sheet
   dpad: DpadConfig
   // sheet de ajustes (engranaje de la fila de sesiones): push + batería + quickkeys
@@ -284,6 +287,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   dispatchSheetOpen: false,
   quickkeys: loadQuickkeys(),
   quickkeysSheetOpen: false,
+  quickkeysSheetCorner: null,
   dpad: loadDpad(),
   settingsSheetOpen: false,
   hideTmuxStatus: loadHideTmuxStatus(),

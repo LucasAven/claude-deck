@@ -90,9 +90,11 @@ export function loadQuickkeys(): string[] {
 // ---------- config del d-pad ----------
 // Las dos esquinas de ABAJO del d-pad toman una tecla del catálogo, o quedan
 // vacías; las de arriba son fijas (cámara y pegar).
-// TODO(d-pad): ni el d-pad flotante ni el d-pad fijo en la toolbox existen
-// todavía. Hoy el único d-pad es el popover 3x3 y `style` solo se guarda;
-// cuando se implementen, los dos lo leen de acá.
+// `style` decide si el popover 3x3 se puede mover: 'floating' muestra el
+// handle y se acomoda en uno de los 9 lugares (DpadSpot); 'fixed' lo deja
+// siempre en el lugar por defecto, sin handle.
+// TODO(d-pad): el d-pad fijo DENTRO de la toolbox (lo que promete el label
+// "Fijo en el toolbox") todavía no existe; cuando se implemente, lo lee de acá.
 export type DpadStyle = 'floating' | 'fixed'
 export type DpadConfig = { corners: { bl: string | null; br: string | null }; style: DpadStyle }
 
@@ -118,6 +120,46 @@ export function loadDpad(): DpadConfig {
     }
   } catch {
     return DEFAULT_DPAD
+  }
+}
+
+// ---------- lugar del d-pad flotante ----------
+// 3 columnas × 3 filas. La fila se guarda como nombre y no como px: 'low' es
+// justo arriba de la toolbox, 'high' arriba de todo sobre la salida y 'mid' a
+// mitad de camino entre las dos, y los px se calculan al abrir, así el lugar
+// sigue a la toolbox cuando sube el teclado. Un solo lugar para teclado
+// abierto y cerrado: abrir el teclado no lo mueve de donde se dejó.
+export type DpadCol = 'left' | 'center' | 'right'
+export type DpadRow = 'low' | 'mid' | 'high'
+export type DpadSpot = { col: DpadCol; row: DpadRow }
+
+export const DEFAULT_DPAD_SPOT: DpadSpot = { col: 'left', row: 'low' }
+export const DPAD_SPOT_LS_KEY = 'deck-dpad-spot'
+
+const DPAD_COLS: readonly DpadCol[] = ['left', 'center', 'right']
+const DPAD_ROWS: readonly DpadRow[] = ['low', 'mid', 'high']
+export const DPAD_SPOTS: DpadSpot[] = DPAD_ROWS.flatMap((row) => DPAD_COLS.map((col) => ({ col, row })))
+
+// lector puro como loadDpad: cualquier cosa rota → el lugar por defecto. Lee
+// también el formato viejo { kb, nokb } (un lugar por estado del teclado)
+// quedándose con el de teclado cerrado.
+export function loadDpadSpot(): DpadSpot {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DPAD_SPOT_LS_KEY) || 'null')
+    const v = (parsed && 'nokb' in parsed ? parsed.nokb : parsed) as Partial<DpadSpot> | null
+    const col = DPAD_COLS.find((c) => c === v?.col)
+    const row = DPAD_ROWS.find((r) => r === v?.row)
+    return col && row ? { col, row } : DEFAULT_DPAD_SPOT
+  } catch {
+    return DEFAULT_DPAD_SPOT
+  }
+}
+
+export function saveDpadSpot(spot: DpadSpot) {
+  try {
+    localStorage.setItem(DPAD_SPOT_LS_KEY, JSON.stringify(spot))
+  } catch {
+    /* localStorage puede fallar (modo privado): el d-pad vuelve al lugar por defecto */
   }
 }
 

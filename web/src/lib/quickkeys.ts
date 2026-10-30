@@ -36,12 +36,13 @@ function persistDpad(cfg: DpadConfig) {
   }
 }
 
-export function openQuickkeysSheet() {
-  useDeckStore.setState({ quickkeysSheetOpen: true })
+// `corner`: el "+" de una esquina vacía del d-pad abre el sheet apuntando a ella
+export function openQuickkeysSheet(corner: 'bl' | 'br' | null = null) {
+  useDeckStore.setState({ quickkeysSheetOpen: true, quickkeysSheetCorner: corner })
 }
 
 export function closeQuickkeysSheet() {
-  useDeckStore.setState({ quickkeysSheetOpen: false })
+  useDeckStore.setState({ quickkeysSheetOpen: false, quickkeysSheetCorner: null })
 }
 
 function setQuickkeys(list: string[]) {

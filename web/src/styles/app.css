@@ -547,8 +547,10 @@ body.composer-open .tabbar { display: none; }
 }
 /* el de modelo se abre desde #btn-switch (statusline): arriba de ella, no encima */
 .switch-menu[data-kind="model"] { bottom: calc(100% + var(--sl-h) + 6px); }
-/* d-pad: grilla 3x3 alineada al borde izquierdo de #btn-dpad, también arriba
-   de la statusline */
+/* d-pad: grilla 3x3 sin contenedor visible (solo las celdas, para tapar lo
+   menos posible del prompt). Este left/bottom es el lugar por defecto, alineado
+   con #btn-dpad y arriba de la statusline: con estilo "fijo" queda acá, y con
+   "flotante" el left/top inline de useDpadPlacement lo reemplaza */
 .switch-menu[data-kind="dpad"] {
   bottom: calc(100% + var(--sl-h) + 6px);
   left: 12px;
@@ -556,22 +558,27 @@ body.composer-open .tabbar { display: none; }
   display: grid;
   grid-template-columns: repeat(3, 48px);
   grid-auto-rows: 48px;
-  gap: 3px;
-  padding: 7px;
-  border-radius: 24px;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
   max-height: none;
   overflow: visible;
 }
+.switch-menu.dp-snapping { transition: left 180ms ease-out, top 180ms ease-out; }
 .dp-cell {
   width: 48px;
   height: 48px;
   padding: 0;
-  border: none;
-  border-radius: 12px;
-  background: #1b1f26;
-  color: #cdd2d9;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 15px;
+  background: rgba(27, 31, 38, 0.9);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  color: #f0f0f0;
   font-family: inherit;
-  font-size: 18px;
+  font-size: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -580,22 +587,79 @@ body.composer-open .tabbar { display: none; }
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
+.dp-cell[data-act] { color: #cdd2d9; } /* cámara y pegar */
 .dp-cell:active { color: var(--accent); }
 .dp-enter {
+  border-color: #f5a623;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--bg);
-  font-size: 20px;
+  background: #f5a623;
+  color: #14171c;
 }
-.dp-enter:active { color: var(--bg); opacity: 0.8; }
+.dp-enter:active { color: #14171c; opacity: 0.8; }
 /* esquina configurable: la tecla con el tamaño y la fuente de las quickkeys,
-   no el 18px de las flechas */
+   no el 20px de las flechas */
 .dp-corner {
   font-family: var(--mono);
   font-size: 13px;
   gap: 2px;
 }
 .dp-mod { color: var(--muted); }
+/* esquina sin tecla: slot punteado, el tap abre Teclas rápidas */
+.dp-slot {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 15px;
+  background: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 18px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.dp-slot:active { border-color: #f5a623; color: #f5a623; }
+/* handle tipo grip de textarea en la esquina de abajo a la derecha. El área
+   táctil (44px) empieza 18px adentro de la grilla, como antes, y crece solo
+   hacia la derecha y hacia abajo, lejos de la celda de la esquina: un dedo que
+   apenas erra el grip cae acá y no en la terminal (que toma foco y abre el
+   teclado). Queda DEBAJO de las celdas (z-index -1 dentro del stacking context
+   del menú), así en los 18px que se pisa con la celda gana la celda. El grip
+   va fijo arriba a la izquierda del área, en el hueco del radio de 15px */
+.dp-handle {
+  position: absolute;
+  z-index: -1;
+  right: -26px;
+  bottom: -26px;
+  width: 44px;
+  height: 44px;
+  padding: 7px 0 0 7px;
+  border: none;
+  background: none;
+  color: #9aa0a8;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.dp-handle.dragging { color: #f5a623; cursor: grabbing; }
+/* los 9 lugares donde puede quedar, solo mientras se arrastra (el tamaño va
+   inline, medido del menú) */
+.dp-spot {
+  position: absolute;
+  z-index: 39;
+  border: 1.5px dashed #f5a623;
+  border-radius: 15px;
+  opacity: 0.35;
+  pointer-events: none;
+}
 .switch-menu .mh,
 .create-menu .mh {
   padding: 8px 12px 4px;
@@ -881,6 +945,9 @@ body.composer-open .tabbar { display: none; }
   opacity: 0.35;
   pointer-events: none;
 }
+/* d-pad abierto: el resto de la fila se apaga (sigue tocable: tocar afuera
+   cierra el menú) */
+.toolrow:has(#btn-dpad.active) > :not(#btn-dpad) { opacity: 0.4; }
 /* label del drag: absoluto contra .controlbar, arriba del botón y de la
    statusline (con teclado abierto no hay statusline, ver kb-open) */
 .dpad-drag-label {
