@@ -13,7 +13,7 @@ import {
   type DpadRow,
   type DpadSpot,
 } from '../../lib/keys'
-import { saveSwitch, sendSlashCommand, closeSwitchMenu } from '../../lib/switch'
+import { saveSwitch, sendSlashCommand, closeSwitchMenu, closeDpadPanel } from '../../lib/switch'
 import { pasteFromClipboard } from '../../lib/image'
 import { openQuickkeysSheet } from '../../lib/quickkeys'
 import { useTap } from '../../hooks/useTap'
@@ -100,13 +100,57 @@ export const DPAD_ICONS = {
   ),
 }
 
+// Teclas del catálogo que se pintan con ícono en vez de su label de texto. El
+// label sigue siendo el texto de los <select> nativos, que no pintan svg. El
+// tamaño va en em para seguir la fuente de cada lugar (riel, d-pad, sheet).
+const KEY_ICONS: Record<string, React.ReactNode> = {
+  bksp: (
+    <svg className="key-ico" viewBox="0 0 24 24" width="1.4em" height="1.4em" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 5.5h10.5a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9L3 12z" />
+      <path d="M12.5 9.5l5 5M17.5 9.5l-5 5" />
+    </svg>
+  ),
+}
+
+export function KeyLabel({ id, label }: { id: string; label: string }) {
+  return <>{KEY_ICONS[id] ?? label}</>
+}
+
+// Mantener apretada una celda que repite es un long-press para iOS: a los
+// ~500ms arranca la selección de texto y, como la celda no es seleccionable,
+// se lleva el texto más cercano (el ◆ de la pestaña Claude, justo abajo).
+// preventDefault en el touchstart corta todo el gesto nativo (selección, lupa,
+// menú y el click sintético); los pointer events de la repetición llegan igual.
+// Va como listener nativo porque React registra touchstart como pasivo y ahí
+// el preventDefault no hace nada.
+function noLongPress(el: HTMLElement | null) {
+  el?.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.cancelable) e.preventDefault()
+    },
+    { passive: false },
+  )
+}
+
 const REPEAT_DELAY_MS = 350
 const REPEAT_EVERY_MS = 80
 
-// Flecha del d-pad: manda en pointerdown (no en el up como useTap) para que
-// mantener apretado auto-repita. En el popover no hay scroll que proteger, así
-// que no hace falta el slop. El preventDefault mantiene el teclado virtual.
-function ArrowCell({ k, title, children }: { k: string; title: string; children: React.ReactNode }) {
+// Flecha del d-pad (o esquina con una tecla `repeat`, como ⌫): manda en
+// pointerdown (no en el up como useTap) para que mantener apretado
+// auto-repita. En el d-pad no hay scroll que proteger, así que no hace falta
+// el slop. El preventDefault mantiene el teclado virtual.
+function RepeatCell({
+  k,
+  title,
+  className = 'dp-cell',
+  children,
+}: {
+  k: string
+  title: string
+  className?: string
+  children: React.ReactNode
+}) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const stop = () => {
     if (timerRef.current) {
@@ -122,9 +166,10 @@ function ArrowCell({ k, title, children }: { k: string; title: string; children:
   }
   return (
     <button
-      className="dp-cell"
+      className={className}
       data-k={k}
       title={title}
+      ref={noLongPress}
       onPointerDown={(e) => {
         e.preventDefault()
         stop()
@@ -145,8 +190,8 @@ function ArrowCell({ k, title, children }: { k: string; title: string; children:
 // cae en la terminal, el textarea de xterm (que está en la línea del cursor,
 // justo debajo del lugar por defecto) toma foco y se abre el teclado.
 // preventDefault en el touchend cancela ese click. Va como listener nativo en
-// el elemento y no como onTouchEnd de React: el "+", cámara y pegar ya se
-// desmontaron cuando llega el touchend, y un nodo suelto no burbujea hasta la
+// el elemento y no como onTouchEnd de React: en el popover el "+", cámara y
+// pegar ya se desmontaron cuando llega el touchend, y un nodo suelto no burbujea hasta la
 // raíz donde React delega. La acción no se pierde: corre antes, en pointerup.
 // Ref callback estable: React lo llama una vez por elemento montado.
 function noGhostClick(el: HTMLElement | null) {
@@ -179,12 +224,18 @@ function CornerCell({ which, id }: { which: 'bl' | 'br'; id: string | null }) {
         +
       </button>
     )
+  if (cat.repeat)
+    return (
+      <RepeatCell k={cat.id} title={cat.desc} className="dp-cell dp-corner">
+        <KeyLabel id={cat.id} label={cat.label} />
+      </RepeatCell>
+    )
   // el modificador (^ o ⇧) va apagado delante de la tecla, mismo tamaño y fuente
   const [, mod, key] = cat.label.match(/^([\^⇧]?)(.*)$/) ?? ['', '', cat.label]
   return (
     <button className="dp-cell dp-corner" data-k={cat.id} title={cat.desc} {...tap}>
       {mod && <span className="dp-mod">{mod}</span>}
-      {key}
+      <KeyLabel id={cat.id} label={key} />
     </button>
   )
 }
@@ -209,19 +260,64 @@ function DpadMenu({ onCamera }: { onCamera: () => void }) {
       <button className="dp-cell" data-act="camera" title="Cámara o galería" ref={noGhostClick} {...cameraTap}>
         {DPAD_ICONS.camera}
       </button>
-      <ArrowCell k="up" title="Flecha arriba">↑</ArrowCell>
+      <RepeatCell k="up" title="Flecha arriba">↑</RepeatCell>
       <button className="dp-cell" data-act="paste" title="Pegar del portapapeles" ref={noGhostClick} {...pasteTap}>
         {DPAD_ICONS.paste}
       </button>
-      <ArrowCell k="left" title="Flecha izquierda">←</ArrowCell>
+      <RepeatCell k="left" title="Flecha izquierda">←</RepeatCell>
       <button className="dp-cell dp-enter" data-k="enter" title="Enter" {...enterTap}>
         {'⏎︎'}
       </button>
-      <ArrowCell k="right" title="Flecha derecha">→</ArrowCell>
+      <RepeatCell k="right" title="Flecha derecha">→</RepeatCell>
       <CornerCell which="bl" id={corners.bl} />
-      <ArrowCell k="down" title="Flecha abajo">↓</ArrowCell>
+      <RepeatCell k="down" title="Flecha abajo">↓</RepeatCell>
       <CornerCell which="br" id={corners.br} />
     </>
+  )
+}
+
+// D-pad fijo en la toolbox (estilo 'fixed'): ocupa el lugar de la statusline
+// y de la fila de teclas, así no tapa la terminal. Flechas en T invertida con
+// las dos esquinas configurables a los costados de ↑. Cámara y pegar lo
+// cierran como en el popover; flechas, esquinas y enter no, para poder
+// encadenarlas. El ✕ vuelve a la fila normal.
+export function DpadPanel({ onCamera }: { onCamera: () => void }) {
+  const corners = useDeckStore((s) => s.dpad.corners)
+  const cameraTap = useTap(() => {
+    closeDpadPanel()
+    onCamera()
+  })
+  const pasteTap = useTap(() => {
+    closeDpadPanel()
+    pasteFromClipboard()
+  })
+  const enterTap = useTap(() => window.claudeConn?.sendKeys(KEYS.enter))
+  const closeTap = useTap(() => closeDpadPanel())
+  return (
+    <div id="dpad-panel" className="dpad-panel">
+      <div className="dpp-side">
+        <button className="dp-cell" data-act="camera" title="Cámara o galería" ref={noGhostClick} {...cameraTap}>
+          {DPAD_ICONS.camera}
+        </button>
+        <button className="dp-cell" data-act="paste" title="Pegar del portapapeles" ref={noGhostClick} {...pasteTap}>
+          {DPAD_ICONS.paste}
+        </button>
+      </div>
+      <div className="dpp-arrows">
+        <CornerCell which="bl" id={corners.bl} />
+        <RepeatCell k="up" title="Flecha arriba">↑</RepeatCell>
+        <CornerCell which="br" id={corners.br} />
+        <RepeatCell k="left" title="Flecha izquierda">←</RepeatCell>
+        <RepeatCell k="down" title="Flecha abajo">↓</RepeatCell>
+        <RepeatCell k="right" title="Flecha derecha">→</RepeatCell>
+      </div>
+      <button className="dp-cell dp-enter" data-k="enter" title="Enter" {...enterTap}>
+        {'⏎︎'}
+      </button>
+      <button className="dpp-close" title="Cerrar el d-pad" ref={noGhostClick} {...closeTap}>
+        ✕
+      </button>
+    </div>
   )
 }
 
@@ -299,8 +395,8 @@ type DpadDrag = {
 // Posición del popover del d-pad flotante. Al abrir (y cuando el
 // visualViewport termina de cambiar, p. ej. al abrir el teclado) va al lugar
 // guardado, recalculado para el área visible de ese momento; el handle lo arrastra 1:1 y al soltar se acomoda en el
-// lugar más cercano. Con `enabled` en false no hay posición propia y el CSS
-// lo deja en el lugar por defecto.
+// lugar más cercano. Con `enabled` en false (menú cerrado u otro kind) no hay
+// posición propia.
 function useDpadPlacement(menuRef: React.RefObject<HTMLDivElement | null>, enabled: boolean) {
   const [pos, setPos] = useState<Pt | null>(null)
   const [spots, setSpots] = useState<{ at: Pt[]; w: number; h: number } | null>(null) // contornos durante el drag
@@ -435,9 +531,9 @@ function DpadHandle({ dragging, handlers }: { dragging: boolean; handlers: Retur
 
 export function SwitchMenu({ onCamera }: { onCamera: () => void }) {
   const kind = useDeckStore((s) => s.switchMenu)
-  const floating = useDeckStore((s) => s.dpad.style === 'floating')
   const menuRef = useRef<HTMLDivElement>(null)
-  const dp = useDpadPlacement(menuRef, kind === 'dpad' && floating)
+  // kind 'dpad' es siempre el flotante: con estilo fijo el tap abre DpadPanel
+  const dp = useDpadPlacement(menuRef, kind === 'dpad')
   // data-kind espeja el kind al DOM: parte del contrato con ui-test.mjs (lee
   // menu.dataset.kind) y con el CSS, igual que el `dataset.kind` del vanilla.
   return (
@@ -451,7 +547,7 @@ export function SwitchMenu({ onCamera }: { onCamera: () => void }) {
       >
         {kind === 'model' && <ModelMenu />}
         {kind === 'dpad' && <DpadMenu onCamera={onCamera} />}
-        {kind === 'dpad' && floating && <DpadHandle dragging={dp.dragging} handlers={dp.handleProps} />}
+        {kind === 'dpad' && <DpadHandle dragging={dp.dragging} handlers={dp.handleProps} />}
         {kind === 'snippets' && <SnippetsPalette />}
       </div>
       {dp.spots?.at.map((s, i) => (

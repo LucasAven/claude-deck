@@ -12,13 +12,13 @@ import {
   resetQuickkeys,
 } from '../../lib/quickkeys'
 import { TOOL_ICONS } from './ControlBar'
-import { DPAD_ICONS } from './SwitchMenu'
+import { DPAD_ICONS, KeyLabel } from './SwitchMenu'
 
 // Editor de la toolbox (tarea 11b). Bottom sheet con el esqueleto del
 // host-sheet (siempre montado, toggle hidden, backdrop cierra), abierto desde
 // el sheet de Ajustes. De arriba a abajo: vista previa en vivo de la fila real,
 // la lista de teclas del riel (arrastrables por el ⠿, "−" para sacar), los
-// chips del catálogo para agregar, las dos esquinas de abajo del d-pad y el
+// chips del catálogo para agregar, las dos esquinas configurables del d-pad y el
 // estilo del d-pad. Cada cambio persiste al instante (deck-quickkeys y
 // deck-dpad).
 // Los botones van con useTap, nunca onClick: el sheet se cierra sobre la
@@ -58,7 +58,7 @@ function Preview({ order }: { order: string[] }) {
           const c = catOf(id)
           return c ? (
             <span className="qk-pv-key" data-k={id} key={id}>
-              {c.label}
+              <KeyLabel id={id} label={c.label} />
             </span>
           ) : null
         })}
@@ -97,7 +97,9 @@ function RailRow({
       <span className="qk-grip" onPointerDown={(e) => onGripDown(e, id)}>
         ⠿
       </span>
-      <span className="qk-key">{c.label}</span>
+      <span className="qk-key">
+        <KeyLabel id={id} label={c.label} />
+      </span>
       <span className="qk-desc">{c.desc}</span>
       {canRemove && (
         <button className="qk-del" title="Sacar del riel" {...delTap}>
@@ -113,28 +115,46 @@ function CatalogChip({ id, label, desc }: { id: string; label: string; desc: str
   return (
     <button className="qk-chip qk-add" data-qk={id} title={desc} {...addTap}>
       <span className="qk-plus">+</span>
-      {label}
+      <KeyLabel id={id} label={label} />
     </button>
   )
 }
 
-// Diagrama del d-pad: espejo del popover 3x3 (cámara ↑ pegar / ← ⏎ → /
-// esquina ↓ esquina). Solo para mirar, nada acá es tocable.
+// Diagrama del d-pad, solo para mirar (nada acá es tocable). Sigue al estilo:
+// flotante es el popover 3x3 (cámara ↑ pegar / ← ⏎ → / esquina ↓ esquina) y
+// fijo es el panel (cámara y pegar apiladas, esquina ↑ esquina sobre ← ↓ →, ⏎
+// alto; el ✕ no va, no es una tecla).
 function DpadDiagram({
   corners,
   focus,
+  style,
 }: {
   corners: { bl: string | null; br: string | null }
   focus: 'bl' | 'br' | null
+  style: DpadStyle
 }) {
   const corner = (which: 'bl' | 'br') => {
     const c = catOf(corners[which])
     return (
       <span className={'qk-dp-cell qk-dp-corner' + (c ? '' : ' empty') + (focus === which ? ' focus' : '')}>
-        {c?.label ?? ''}
+        {c && <KeyLabel id={c.id} label={c.label} />}
       </span>
     )
   }
+  if (style === 'fixed')
+    return (
+      <div className="qk-dp qk-dp-panel" aria-hidden>
+        <span className="qk-dp-cell qk-dp-ico">{DPAD_ICONS.camera}</span>
+        {corner('bl')}
+        <span className="qk-dp-cell">↑</span>
+        {corner('br')}
+        <span className="qk-dp-cell qk-dp-enter">⏎</span>
+        <span className="qk-dp-cell qk-dp-ico">{DPAD_ICONS.paste}</span>
+        <span className="qk-dp-cell">←</span>
+        <span className="qk-dp-cell">↓</span>
+        <span className="qk-dp-cell">→</span>
+      </div>
+    )
   return (
     <div className="qk-dp" aria-hidden>
       <span className="qk-dp-cell qk-dp-ico">{DPAD_ICONS.camera}</span>
@@ -163,6 +183,7 @@ export function QuickkeysSheet() {
   const open = useDeckStore((s) => s.quickkeysSheetOpen)
   const list = useDeckStore((s) => s.quickkeys)
   const dpad = useDeckStore((s) => s.dpad)
+  const fixed = dpad.style === 'fixed'
   const doneTap = useTap(() => closeQuickkeysSheet())
   const resetTap = useTap(() => resetQuickkeys())
   const [focus, setFocus] = useState<'bl' | 'br' | null>(null)
@@ -311,27 +332,28 @@ export function QuickkeysSheet() {
 
         <div className="qk-label">Esquinas del d-pad</div>
         <div className="qk-corners" ref={cornersRef}>
-          <DpadDiagram corners={dpad.corners} focus={shownFocus} />
+          <DpadDiagram corners={dpad.corners} focus={shownFocus} style={dpad.style} />
+          {/* bl/br son las mismas dos esquinas en los dos estilos (izquierda
+              sigue siendo izquierda); lo que cambia es dónde caen */}
           <div className="qk-corner-rows">
             <div className="qk-corner-row">
-              <span>Arriba: cámara · pegar</span>
+              <span>{fixed ? 'Izquierda' : 'Arriba'}: cámara · pegar</span>
               <span className="qk-fixed">(fijas)</span>
             </div>
             <div className="qk-corner-row">
-              <span>Abajo izq.:</span>
+              <span>{fixed ? 'Arriba izq.:' : 'Abajo izq.:'}</span>
               {cornerSelect('bl')}
             </div>
             <div className="qk-corner-row">
-              <span>Abajo der.:</span>
+              <span>{fixed ? 'Arriba der.:' : 'Abajo der.:'}</span>
               {cornerSelect('br')}
             </div>
           </div>
         </div>
 
         <div className="qk-label">Estilo del d-pad</div>
-        {/* Flotante: el popover 3x3 se mueve con su handle. Fijo: queda en el
-            lugar por defecto, sin handle.
-            TODO(d-pad): el d-pad fijo DENTRO de la toolbox todavía no existe. */}
+        {/* Flotante: el popover 3x3 se mueve con su handle. Fijo: el panel de
+            flechas reemplaza la statusline y la fila de la toolbox */}
         <div id="qk-style" className="qk-seg">
           <StyleButton style="floating" label="Flotante" sel={dpad.style === 'floating'} />
           <StyleButton style="fixed" label="Fijo en el toolbox" sel={dpad.style === 'fixed'} />

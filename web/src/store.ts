@@ -186,8 +186,11 @@ interface DeckStore {
   // esquina del d-pad que abrió el sheet (el "+" de un slot vacío): se resalta
   // y el sheet scrollea hasta ella; null si se abrió desde Ajustes
   quickkeysSheetCorner: 'bl' | 'br' | null
-  // esquinas de abajo y estilo del d-pad, editables en el mismo sheet
+  // esquinas configurables y estilo del d-pad, editables en el mismo sheet
   dpad: DpadConfig
+  // d-pad fijo (estilo 'fixed') abierto: la statusline y la fila de la toolbox
+  // ceden su lugar al panel de flechas (DpadPanel) hasta que se toque su ✕
+  dpadPanel: boolean
   // sheet de ajustes (engranaje de la fila de sesiones): push + batería + quickkeys
   settingsSheetOpen: boolean
   // pref: ocultar el status bar de tmux (franja verde), persistida por dispositivo
@@ -289,6 +292,7 @@ export const useDeckStore = create<DeckStore>((set, get) => ({
   quickkeysSheetOpen: false,
   quickkeysSheetCorner: null,
   dpad: loadDpad(),
+  dpadPanel: false,
   settingsSheetOpen: false,
   hideTmuxStatus: loadHideTmuxStatus(),
   switchMenu: null,

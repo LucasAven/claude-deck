@@ -2529,13 +2529,11 @@ const qkRun = await page.evaluate(async () => {
   pick('qk-corner-br', 'ctrlend');
   await frame();
   out.cornersSaved = JSON.stringify(savedDpad().corners) === JSON.stringify({ bl: 'esc', br: 'ctrlend' });
+  // los labels y el diagrama siguen al estilo: en flotante, el 3x3
+  out.floatSheet = [...document.querySelectorAll('.qk-corner-row > span:first-child')].map((e) => e.textContent).join('|') === 'Arriba: cámara · pegar|Abajo izq.:|Abajo der.:'
+    && !document.querySelector('.qk-dp').classList.contains('qk-dp-panel');
 
-  // estilo del d-pad: el segmentado marca la opción elegida y la guarda
-  tap(document.querySelector('#qk-style [data-style="fixed"]')); await frame();
-  out.styleSaved = savedDpad().style === 'fixed'
-    && document.querySelector('#qk-style [data-style="fixed"]').classList.contains('sel');
-
-  // las esquinas configuradas aparecen en el d-pad real, abajo a los costados
+  // las esquinas configuradas aparecen en el d-pad flotante, abajo a los costados
   tap(document.querySelector('#qk-done')); await frame();
   tap(document.querySelector('#btn-dpad')); await frame();
   const menu = document.querySelector('#switch-menu');
@@ -2544,6 +2542,38 @@ const qkRun = await page.evaluate(async () => {
   tap(menu.querySelector('[data-k="esc"]')); await frame();
   out.cornerSends = sent.length === 1 && sent[0] === '\x1b' && menu.dataset.kind === 'dpad';
   tap(document.querySelector('#btn-dpad')); await frame();
+  sent.length = 0;
+
+  // estilo del d-pad: el segmentado marca la opción elegida y la guarda
+  await openEditor();
+  tap(document.querySelector('#qk-style [data-style="fixed"]')); await frame();
+  out.styleSaved = savedDpad().style === 'fixed'
+    && document.querySelector('#qk-style [data-style="fixed"]').classList.contains('sel');
+  // en fijo, el diagrama del panel y las esquinas "arriba", a los costados de ↑
+  out.fixedSheet = [...document.querySelectorAll('.qk-corner-row > span:first-child')].map((e) => e.textContent).join('|') === 'Izquierda: cámara · pegar|Arriba izq.:|Arriba der.:'
+    && document.querySelector('.qk-dp').classList.contains('qk-dp-panel');
+  tap(document.querySelector('#qk-done')); await frame();
+
+  // fijo: el tap cambia la statusline y la fila por el panel, sin popover. Las
+  // esquinas van a los costados de ↑ y la vacía es un "+"
+  tap(document.querySelector('#btn-dpad')); await frame();
+  const panel = document.querySelector('#dpad-panel');
+  out.panelOpens = !!panel && menu.classList.contains('hidden')
+    && getComputedStyle(document.querySelector('.toolrow')).visibility === 'hidden'
+    && document.querySelector('#statusline').classList.contains('sl-collapsed');
+  out.panelCells = panel
+    ? [...panel.querySelectorAll('.dpp-arrows > *')].map((c) => c.dataset.k || (c.classList.contains('dp-slot') ? '+' : '')).join(',')
+    : '';
+  // esquina, enter y un tap en la terminal no lo cierran; el ✕ sí
+  tap(panel.querySelector('[data-k="esc"]')); await frame();
+  tap(panel.querySelector('.dp-enter')); await frame();
+  document.querySelector('#term-claude').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  await frame();
+  out.panelStays = sent.join('|') === '\x1b|\r' && !!document.querySelector('#dpad-panel');
+  tap(panel.querySelector('.dpp-close')); await frame();
+  out.panelCloses = !document.querySelector('#dpad-panel')
+    && getComputedStyle(document.querySelector('.toolrow')).visibility !== 'hidden'
+    && !document.querySelector('#statusline').classList.contains('sl-collapsed');
   sent.length = 0;
 
   // restaurar por defecto: vuelve el riel histórico Y la config del d-pad
@@ -2577,9 +2607,16 @@ ok('teclas rápidas: la última tecla no se puede sacar', qkRun.lastNoDel);
 ok('teclas rápidas: el backdrop cierra', qkRun.backdropCloses);
 ok('teclas rápidas: las esquinas del d-pad persisten en deck-dpad', qkRun.cornersSaved);
 ok('teclas rápidas: el estilo del d-pad persiste y queda marcado', qkRun.styleSaved);
+ok('teclas rápidas: en flotante el diagrama es el 3x3 y las esquinas dicen "Abajo"', qkRun.floatSheet);
+ok('teclas rápidas: en fijo el diagrama es el panel y las esquinas dicen "Arriba"', qkRun.fixedSheet);
 ok('d-pad: las esquinas configuradas se pintan abajo a los costados',
   qkRun.dpadCells === 'camera,up,paste,left,enter,right,esc,down,ctrlend');
 ok('d-pad: tocar una esquina manda su tecla y no cierra el menú', qkRun.cornerSends);
+ok('d-pad fijo: el tap cambia la statusline y la fila por el panel, sin popover', qkRun.panelOpens);
+ok('d-pad fijo: las esquinas van a los costados de ↑ (T invertida abajo)',
+  qkRun.panelCells === 'esc,up,ctrlend,left,down,right');
+ok('d-pad fijo: esquina, ⏎ y tocar la terminal no cierran el panel', qkRun.panelStays);
+ok('d-pad fijo: el ✕ vuelve la fila y la statusline', qkRun.panelCloses);
 ok('teclas rápidas: restaurar por defecto vuelve el riel y la config del d-pad', qkRun.reset);
 
 // 24b. la tecla "^End" (scroll al final de la conversación de Claude): NO está
@@ -2618,6 +2655,54 @@ const cendRun = await page.evaluate(async () => {
 ok('teclas rápidas: el catálogo ofrece "^End" (fuera del riel default)', cendRun.offered && cendRun.catLabel.includes('^End'));
 ok('teclas rápidas: "^End" en el riel se muestra compacta', cendRun.added && cendRun.barLabel === '^End');
 ok('teclas rápidas: tap en "^End" manda CSI 1;5F (\\x1b[1;5F)', cendRun.sentSeq);
+
+// 24b2. ⌫ (backspace, DEL): el catálogo la ofrece con ícono en vez de texto.
+// En el riel es un DEL por tap (el riel scrollea); en una esquina del d-pad
+// mantenerla auto-repite como las flechas. sendKeys espiado y localStorage
+// limpio al final.
+const bkspRun = await page.evaluate(async () => {
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
+  const sent = [];
+  const realSend = claudeConn.sendKeys;
+  claudeConn.sendKeys = (s) => sent.push(s);
+  const down = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  const up = (el) => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, clientX: 60, clientY: 60 }));
+  const tap = (el) => { down(el); up(el); };
+  tap(document.querySelector('#btn-settings')); await frame();
+  tap(document.querySelector('#set-qk-row')); await frame();
+
+  const cat = document.querySelector('#qk-catalog [data-qk="bksp"]');
+  const out = { chipIcon: !!cat?.querySelector('svg') && !cat.textContent.includes('⌫') };
+  tap(cat); await frame();
+  const sel = document.querySelector('#qk-corner-bl');
+  sel.value = 'bksp';
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+  tap(document.querySelector('#qk-done')); await frame();
+
+  const btn = document.querySelector('.quickkeys[data-term="claude"] [data-k="bksp"]');
+  out.railIcon = !!btn?.querySelector('svg');
+  tap(btn); await frame();
+  out.railOne = sent.length === 1 && sent[0] === '\x7f';
+  sent.length = 0;
+
+  tap(document.querySelector('#btn-dpad')); await frame();
+  const corner = document.querySelector('#switch-menu [data-k="bksp"]');
+  down(corner);
+  await new Promise((r) => setTimeout(r, 700));
+  up(corner);
+  const held = sent.length;
+  await new Promise((r) => setTimeout(r, 300));
+  out.cornerRepeats = held >= 4 && sent.length === held && sent.every((k) => k === '\x7f');
+  tap(document.querySelector('#btn-dpad')); await frame();
+
+  claudeConn.sendKeys = realSend;
+  localStorage.removeItem('deck-quickkeys');
+  localStorage.removeItem('deck-dpad');
+  return out;
+});
+ok('teclas rápidas: el catálogo ofrece ⌫ con ícono', bkspRun.chipIcon);
+ok('teclas rápidas: ⌫ en el riel pinta el ícono y manda un DEL por tap', bkspRun.railIcon && bkspRun.railOne);
+ok('d-pad: ⌫ en una esquina auto-repite DEL y frena al soltar', bkspRun.cornerRepeats);
 
 // 24c. migración de una config vieja: las flechas y el enter salieron del
 // catálogo (viven en el d-pad), así que loadQuickkeys los descarta al arrancar

@@ -40,7 +40,20 @@ function toggle(kind: 'model' | 'dpad') {
 }
 
 export const openModelMenu = () => toggle('model')
-export const openDpadMenu = () => toggle('dpad')
+// con estilo 'fixed' el d-pad no es un popover: el tap cambia la fila de la
+// toolbox por el panel de flechas, que no se cierra con tocar afuera
+export function openDpadMenu() {
+  if (useDeckStore.getState().dpad.style === 'fixed') {
+    closeSwitchMenu()
+    useDeckStore.setState({ dpadPanel: true })
+    return
+  }
+  toggle('dpad')
+}
+
+export function closeDpadPanel() {
+  useDeckStore.setState({ dpadPanel: false })
+}
 
 // un shift+tab por llamada (el chip se actualiza solo cuando el footer de
 // Claude muestra el modo nuevo, ver lib/mode). No cierra el menú acá: #btn-mode

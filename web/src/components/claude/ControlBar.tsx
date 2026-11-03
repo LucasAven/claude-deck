@@ -7,7 +7,7 @@ import { openComposer } from '../../lib/composer'
 import { openScrollback } from '../../lib/scrollback'
 import { attachImage, sendPendingImage, hideImgChip } from '../../lib/image'
 import { closeSwitchMenu, openDpadMenu } from '../../lib/switch'
-import { SwitchMenu } from './SwitchMenu'
+import { DpadPanel, KeyLabel, SwitchMenu } from './SwitchMenu'
 
 // Controlbar (index.html:88-133). Chip de imagen + popover switch-menu + la
 // toolbox (una sola fila: d-pad, quickkeys/snippets/lector, compose). La lógica
@@ -166,6 +166,7 @@ export function ControlBar() {
   const imgChip = useDeckStore((s) => s.imgChip)
   const snippetsActive = useDeckStore((s) => s.switchMenu === 'snippets')
   const dpadActive = useDeckStore((s) => s.switchMenu === 'dpad')
+  const dpadPanel = useDeckStore((s) => s.dpadPanel)
   const quickkeys = useDeckStore((s) => s.quickkeys)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -209,6 +210,8 @@ export function ControlBar() {
     if (!blocked()) openScrollback()
   })
 
+  const openCamera = () => inputRef.current?.click()
+
   const onImgInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (f) attachImage(f, 'Imagen adjunta')
@@ -241,7 +244,7 @@ export function ControlBar() {
         </button>
       </div>
 
-      <SwitchMenu onCamera={() => inputRef.current?.click()} />
+      <SwitchMenu onCamera={openCamera} />
 
       {/* toolbox: una sola fila. D-pad fijo a la izquierda, teclas + snippets +
           lector en el medio (scroll horizontal, la config de "Teclas rápidas"
@@ -250,38 +253,50 @@ export function ControlBar() {
           por CSS con body.kb-open).
           El fade del borde derecho solo está mientras queda contenido a la
           derecha: al final del scroll el último botón se ve entero. */}
-      <div className="toolrow">
-        <DpadButton active={dpadActive} />
-        <input id="img-input" type="file" accept="image/*" className="hidden" ref={inputRef} onChange={onImgInput} />
-        <div
-          className={'quickkeys' + (fade ? ' fade' : '')}
-          data-term="claude"
-          ref={scrollRef}
-          onScroll={onScroll}
-          onPointerDownCapture={onRowPointerDown}
-        >
-          {quickkeys.map((id) => {
-            const cat = QUICKKEY_CATALOG.find((c) => c.id === id)
-            if (!cat) return null
-            return (
-              <QuickKey key={id} k={id} title={cat.desc} blocked={blocked}>
-                {cat.label}
-              </QuickKey>
-            )
-          })}
-          <button id="btn-snippets" className={'ctl-sq' + (snippetsActive ? ' active' : '')} title="Snippets" {...snippetsTap}>
-            {TOOL_ICONS.snippets}
+      {/* la fila y el panel del d-pad fijo comparten el hueco: la fila queda
+          montada y estacionada (invisible pero con caja, no display:none) para
+          no perder su scroll ni el ResizeObserver del fade. El alto del hueco
+          anima y la terminal se re-fittea al final, cuando ya tiene su alto nuevo */}
+      <div
+        className={'toolslot' + (dpadPanel ? ' panel' : '')}
+        onTransitionEnd={(e) => {
+          if (e.target === e.currentTarget && e.propertyName === 'height') requestAnimationFrame(() => window.claudeConn?.fit())
+        }}
+      >
+        <div className={'toolrow' + (dpadPanel ? ' parked' : '')}>
+          <DpadButton active={dpadActive} />
+          <input id="img-input" type="file" accept="image/*" className="hidden" ref={inputRef} onChange={onImgInput} />
+          <div
+            className={'quickkeys' + (fade ? ' fade' : '')}
+            data-term="claude"
+            ref={scrollRef}
+            onScroll={onScroll}
+            onPointerDownCapture={onRowPointerDown}
+          >
+            {quickkeys.map((id) => {
+              const cat = QUICKKEY_CATALOG.find((c) => c.id === id)
+              if (!cat) return null
+              return (
+                <QuickKey key={id} k={id} title={cat.desc} blocked={blocked}>
+                  <KeyLabel id={id} label={cat.label} />
+                </QuickKey>
+              )
+            })}
+            <button id="btn-snippets" className={'ctl-sq' + (snippetsActive ? ' active' : '')} title="Snippets" {...snippetsTap}>
+              {TOOL_ICONS.snippets}
+            </button>
+            <button id="btn-scrollback" className="ctl-sq" title="Vista de lectura (scrollback legible)" {...scrollbackTap}>
+              {TOOL_ICONS.scrollback}
+            </button>
+          </div>
+          <button id="btn-composer" className="ctl-compose" title="Componer prompt" {...composerTap}>
+            {TOOL_ICONS.compose}
           </button>
-          <button id="btn-scrollback" className="ctl-sq" title="Vista de lectura (scrollback legible)" {...scrollbackTap}>
-            {TOOL_ICONS.scrollback}
+          <button id="btn-kbclose" className="ctl-sq" title="Cerrar teclado" {...kbCloseTap}>
+            {TOOL_ICONS.kbclose}
           </button>
         </div>
-        <button id="btn-composer" className="ctl-compose" title="Componer prompt" {...composerTap}>
-          {TOOL_ICONS.compose}
-        </button>
-        <button id="btn-kbclose" className="ctl-sq" title="Cerrar teclado" {...kbCloseTap}>
-          {TOOL_ICONS.kbclose}
-        </button>
+        {dpadPanel && <DpadPanel onCamera={openCamera} />}
       </div>
     </div>
   )

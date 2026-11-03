@@ -430,7 +430,8 @@ body.composer-open .tabbar { display: none; }
 /* ---------- barra de control inferior (pestaña Claude) ---------- */
 /* statusline del panel (tarea 22): línea fina y discreta arriba de la controlbar,
    tipo el statusLine de Claude Code. Mono, chica, color de alerta al llenarse el
-   contexto. SIEMPRE visible: a la derecha viven el chip de batería del host y el
+   contexto. Visible siempre salvo con el panel del d-pad fijo abierto
+   (sl-collapsed, más abajo): a la derecha viven el chip de batería del host y el
    dot de conexión (mudados de la fila de sesiones); los segmentos de contexto se
    ocultan solos si el hook no escribió estado. */
 .statusline {
@@ -448,7 +449,13 @@ body.composer-open .tabbar { display: none; }
   border-top: 1px solid var(--border);
   white-space: nowrap;
   overflow: hidden;
+  transition: height 150ms ease-out, padding 150ms ease-out;
 }
+.statusline > * { transition: opacity 150ms ease-out; }
+/* panel del d-pad fijo abierto: de la statusline queda solo su borde de arriba,
+   que pasa a ser la línea entre la terminal y el panel */
+.statusline.sl-collapsed { height: 1px; padding-top: 0; padding-bottom: 0; }
+.statusline.sl-collapsed > * { opacity: 0; pointer-events: none; }
 .statusline .sl-sep { opacity: 0.4; }
 .statusline #sl-pct { font-weight: 600; }
 /* ctx/tokens: ocupa lo que dejan los chips y se corta con "…" si no entra */
@@ -547,10 +554,10 @@ body.composer-open .tabbar { display: none; }
 }
 /* el de modelo se abre desde #btn-switch (statusline): arriba de ella, no encima */
 .switch-menu[data-kind="model"] { bottom: calc(100% + var(--sl-h) + 6px); }
-/* d-pad: grilla 3x3 sin contenedor visible (solo las celdas, para tapar lo
-   menos posible del prompt). Este left/bottom es el lugar por defecto, alineado
-   con #btn-dpad y arriba de la statusline: con estilo "fijo" queda acá, y con
-   "flotante" el left/top inline de useDpadPlacement lo reemplaza */
+/* d-pad flotante: grilla 3x3 sin contenedor visible (solo las celdas, para
+   tapar lo menos posible del prompt). Este left/bottom, alineado con #btn-dpad
+   y arriba de la statusline, es solo la primera pintada: useDpadPlacement mide
+   el menú ahí y lo lleva con left/top inline al lugar guardado */
 .switch-menu[data-kind="dpad"] {
   bottom: calc(100% + var(--sl-h) + 6px);
   left: 12px;
@@ -604,6 +611,8 @@ body.composer-open .tabbar { display: none; }
   gap: 2px;
 }
 .dp-mod { color: var(--muted); }
+/* ícono de tecla del catálogo (⌫): mide en em, centrado con el texto vecino */
+.key-ico { display: inline-block; flex: none; vertical-align: middle; }
 /* esquina sin tecla: slot punteado, el tap abre Teclas rápidas */
 .dp-slot {
   width: 48px;
@@ -1009,6 +1018,96 @@ body.composer-open .tabbar { display: none; }
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
   pointer-events: none;
 }
+
+/* hueco de la toolbox: la fila (42px) o el panel del d-pad fijo (82px). El
+   alto anima y el contenido va pegado abajo, así lo que se mueve es el borde
+   de arriba y la terminal, nunca las teclas. ControlBar re-fittea la terminal
+   en el transitionend */
+.toolslot {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 42px;
+  overflow: hidden;
+  transition: height 150ms ease-out;
+}
+.toolslot.panel { height: 82px; }
+.toolslot > * { flex: none; }
+/* fila estacionada mientras está el panel: fuera del flujo pero con el mismo
+   ancho, así no pierde el scroll de las teclas */
+.toolrow.parked {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* panel del d-pad fijo: cámara y pegar apiladas, flechas en T invertida (con
+   las esquinas configurables a los costados de ↑) centradas en lo que sobra,
+   ⏎ alto y ✕ que vuelve a la fila */
+.dpad-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 82px;
+}
+.dpp-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dpp-arrows {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 50px);
+  grid-auto-rows: 38px;
+  gap: 6px;
+  justify-content: center;
+}
+.dpad-panel .dp-cell,
+.dpad-panel .dp-slot {
+  width: 50px;
+  height: 38px;
+  border-radius: 11px;
+}
+.dpad-panel .dp-cell {
+  border: none;
+  background: #222731;
+  box-shadow: none;
+  font-size: 18px;
+}
+.dpad-panel .dp-cell[data-act] {
+  width: 44px;
+  border: 1px solid #2a2f37;
+  background: #1b1f26;
+}
+.dpad-panel .dp-cell[data-act]:active { border-color: var(--accent); }
+.dpad-panel .dp-enter {
+  width: 56px;
+  height: 82px;
+  border-radius: 14px;
+  background: #f5a623;
+  color: #14171c;
+  font-size: 22px;
+}
+.dpp-close {
+  flex: none;
+  width: 34px;
+  height: 82px;
+  padding: 0;
+  border: 1px solid #2a2f37;
+  border-radius: 11px;
+  background: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 14px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.dpp-close:active { border-color: var(--accent); color: var(--accent); }
 
 /* toolbox: una sola fila de 42px. D-pad y Compose fijos a los costados, las
    teclas scrollean de costado en el medio (pisan los estilos base de
@@ -1438,6 +1537,19 @@ body.composer-open .tabbar { display: none; }
   border-radius: 50%;
   background: var(--accent);
   color: var(--bg);
+}
+/* diagrama del panel fijo: 5 columnas × 2 filas, ⏎ ocupa las dos */
+.qk-dp.qk-dp-panel {
+  width: 150px;
+  height: 70px;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  border-radius: 14px;
+}
+.qk-dp-panel .qk-dp-enter {
+  grid-column: 5;
+  grid-row: 1 / span 2;
+  border-radius: 8px;
 }
 .qk-dp-corner { font-size: 11px; }
 .qk-dp-corner.empty {
@@ -2145,6 +2257,11 @@ button.set-row:active .set-label { color: var(--accent); }
   display: flex;
   border-top: 1px solid var(--border);
   background: var(--panel);
+  /* nada para seleccionar acá: sin esto, un long-press en el d-pad (justo
+     arriba) le seleccionaba el ícono a la pestaña Claude */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   /* recortado: el safe-area-inset-bottom del iPhone con gestos (~34px) dejaba una
      franja negra muerta; la barrita de home queda bien por debajo de los labels,
      así que se descarta la reserva (targets táctiles cómodos por min-height:56px) */

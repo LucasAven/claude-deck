@@ -37,6 +37,8 @@ export const KEYS: Record<string, string> = {
   // contra un claude real: scrolleado arriba con PageUp, esta lo trajo de vuelta
   // al final de la conversacion.
   ctrlend: '\x1b[1;5F',
+  // backspace = DEL, lo mismo que manda el teclado de iOS (lib/term.ts)
+  bksp: '\x7f',
 }
 
 // Catálogo de quickkeys disponibles para el riel de la toolbox (tarea 11b):
@@ -48,7 +50,9 @@ export const KEYS: Record<string, string> = {
 // siguen en KEYS para eso). Migración, sin código aparte: loadQuickkeys filtra
 // contra este catálogo y respeta el orden del resto, así que una config vieja
 // ["up","nl","down","esc","enter","tab"] carga como ["nl","esc","tab"].
-export const QUICKKEY_CATALOG: { id: string; label: string; desc: string }[] = [
+// repeat: en una esquina del d-pad mantenerla apretada auto-repite como las
+// flechas (en el riel no: ahí el scroll de costado necesita el tap en el up).
+export const QUICKKEY_CATALOG: { id: string; label: string; desc: string; repeat?: true }[] = [
   { id: 'nl', label: '\\n', desc: 'Nueva línea sin enviar' },
   { id: 'slash', label: '/', desc: 'Comandos' },
   { id: 'esc', label: 'esc', desc: 'Cancelar / salir' },
@@ -63,6 +67,7 @@ export const QUICKKEY_CATALOG: { id: string; label: string; desc: string }[] = [
   { id: 'ctrlu', label: '^U', desc: 'Borrar línea' },
   { id: 'shifttab', label: '⇧tab', desc: 'Cambiar modo' },
   { id: 'ctrlend', label: '^End', desc: 'Ir al final' },
+  { id: 'bksp', label: '⌫', desc: 'Borrar', repeat: true },
 ]
 
 // riel por defecto = el histórico sin flechas ni enter (nl primero, pedido del
@@ -88,13 +93,13 @@ export function loadQuickkeys(): string[] {
 }
 
 // ---------- config del d-pad ----------
-// Las dos esquinas de ABAJO del d-pad toman una tecla del catálogo, o quedan
-// vacías; las de arriba son fijas (cámara y pegar).
-// `style` decide si el popover 3x3 se puede mover: 'floating' muestra el
-// handle y se acomoda en uno de los 9 lugares (DpadSpot); 'fixed' lo deja
-// siempre en el lugar por defecto, sin handle.
-// TODO(d-pad): el d-pad fijo DENTRO de la toolbox (lo que promete el label
-// "Fijo en el toolbox") todavía no existe; cuando se implemente, lo lee de acá.
+// Las dos esquinas configurables del d-pad (bl/br: abajo en el popover 3x3, a
+// los costados de ↑ en el panel fijo) toman una tecla del catálogo, o quedan
+// vacías; cámara y pegar son fijas.
+// `style` decide qué abre el tap en el botón del d-pad: 'floating' es el
+// popover 3x3 con handle, que se acomoda en uno de los 9 lugares (DpadSpot);
+// 'fixed' cambia la statusline y la fila de la toolbox por el panel de flechas
+// (DpadPanel), sin tapar la terminal.
 export type DpadStyle = 'floating' | 'fixed'
 export type DpadConfig = { corners: { bl: string | null; br: string | null }; style: DpadStyle }
 

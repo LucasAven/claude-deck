@@ -7,6 +7,7 @@ import {
   type DpadConfig,
   type DpadStyle,
 } from './keys'
+import { closeDpadPanel, closeSwitchMenu } from './switch'
 
 // Quickkeys configurables (tarea 11b): el riel de la toolbox se renderiza desde
 // store.quickkeys, que persiste en localStorage['deck-quickkeys'] (global del
@@ -16,7 +17,7 @@ import {
 // Edición: la lista de "En el riel" se reordena arrastrando el ⠿ (el commit del
 // drag entra por setQuickkeyOrder, una sola escritura), el "−" saca una tecla y
 // los chips punteados del catálogo agregan al final.
-// La config del d-pad (esquinas de abajo + estilo) vive aparte, en
+// La config del d-pad (esquinas configurables + estilo) vive aparte, en
 // localStorage['deck-dpad'], pero se edita en el mismo sheet y el "restaurar
 // por defecto" la vuelve a cero junto con el riel.
 
@@ -75,9 +76,15 @@ export function setQuickkeyOrder(list: string[]) {
   setQuickkeys(next)
 }
 
+// al cambiar de estilo (o restaurar) se cierra lo que estaba abierto con el
+// viejo: el popover en flotante, el panel en fijo
 function setDpad(cfg: DpadConfig) {
+  const restyled = cfg.style !== useDeckStore.getState().dpad.style
   useDeckStore.setState({ dpad: cfg })
   persistDpad(cfg)
+  if (!restyled) return
+  if (useDeckStore.getState().switchMenu === 'dpad') closeSwitchMenu()
+  closeDpadPanel()
 }
 
 export function setDpadCorner(corner: 'bl' | 'br', id: string | null) {

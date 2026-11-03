@@ -25,8 +25,8 @@ import { useTap } from '../../hooks/useTap'
 // A la derecha vive el chip de batería del host (antes en la fila de
 // sesiones). El punto de conexión se retiró (Lucas 2026-10-28, para ganar
 // ancho): con el WS caído la línea entera se atenúa (sl-off). La línea está
-// SIEMPRE visible (ya no roba/devuelve filas → no hace falta el fit() por
-// visibilidad, §5.5).
+// siempre visible salvo con el panel del d-pad fijo abierto, que ocupa su
+// lugar (sl-collapsed); ese fit() lo hace ControlBar al terminar la animación.
 //
 // Modelo y modo son chips tocables (mudados de la fila de acciones de la
 // controlbar): #btn-switch abre el menú de modelo/esfuerzo y #btn-mode manda un
@@ -44,6 +44,8 @@ export function Statusline() {
   const effort = useDeckStore((st) => st.switchState.effort)
   // último modo leído del footer de la terminal (lib/mode); null → "mode"
   const mode = useDeckStore((st) => st.claudeMode)
+  // el panel del d-pad fijo ocupa su lugar: queda solo el borde de arriba
+  const collapsed = useDeckStore((st) => st.dpadPanel)
 
   // el chip de host va con useTap (no onClick): un onClick se dispara con el
   // `click` fantasma que el navegador sintetiza tras un tap táctil, y al cerrar
@@ -59,7 +61,7 @@ export function Statusline() {
   const fillW = batt ? Math.max(0.8, (13.2 * batt.pct) / 100).toFixed(1) : '0'
 
   return (
-    <div id="statusline" className={'statusline sl-' + level + (connected ? '' : ' sl-off')}>
+    <div id="statusline" className={'statusline sl-' + level + (connected ? '' : ' sl-off') + (collapsed ? ' sl-collapsed' : '')}>
       <span className="sl-info">
         {s && (
           <>
