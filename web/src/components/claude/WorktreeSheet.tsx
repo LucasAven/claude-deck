@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useDeckStore } from '../../store'
+import { useSheetDrag } from '../../hooks/useSheetDrag'
 import { closeWorktreeSheet, createWorktree, fetchBranches, type BranchInfo } from '../../lib/worktree'
 
 // Sheet "Nuevo worktree" (tarea 5, design-refs/task05-worktree-sheet.png):
@@ -17,6 +18,7 @@ function lastSeg(branch: string): string {
 
 export function WorktreeSheet() {
   const open = useDeckStore((s) => s.worktreeSheetOpen)
+  const { panelRef, handle: dragHandle, dismiss } = useSheetDrag(open, closeWorktreeSheet)
   const selectSession = useDeckStore((s) => s.selectSession)
   const [branch, setBranch] = useState('')
   const [base, setBase] = useState('')
@@ -65,19 +67,21 @@ export function WorktreeSheet() {
       id="worktree-sheet"
       className={'host-sheet' + (open ? '' : ' hidden')}
       onClick={(e) => {
-        if (e.target === e.currentTarget) closeWorktreeSheet()
+        if (e.target === e.currentTarget) dismiss()
       }}
     >
-      <div className="host-sheet-panel">
-        <div className="sheet-grip" />
-        <div className="host-title">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="7" cy="6" r="2.5" />
-            <circle cx="7" cy="18" r="2.5" />
-            <circle cx="17" cy="9" r="2.5" />
-            <path d="M7 8.5v7M17 11.5c0 3.5-4 3-7.5 4.5" />
-          </svg>
-          <span>Nuevo worktree</span>
+      <div className="host-sheet-panel" ref={panelRef}>
+        <div className="sheet-head" {...dragHandle}>
+          <div className="sheet-grip" />
+          <div className="host-title">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="7" cy="6" r="2.5" />
+              <circle cx="7" cy="18" r="2.5" />
+              <circle cx="17" cy="9" r="2.5" />
+              <path d="M7 8.5v7M17 11.5c0 3.5-4 3-7.5 4.5" />
+            </svg>
+            <span>Nuevo worktree</span>
+          </div>
         </div>
 
         <label className="wt-label" htmlFor="wt-branch">Nombre de rama</label>

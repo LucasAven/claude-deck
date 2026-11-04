@@ -329,7 +329,7 @@ const dpadSlot = await page.evaluate(() => ({
 ok('esquina vacía del d-pad abre Teclas rápidas con esa esquina resaltada',
   dpadSlot.menuClosed && dpadSlot.sheetOpen && dpadSlot.pointed);
 await tapSel('#qk-done');
-await new Promise((r) => setTimeout(r, 200));
+await new Promise((r) => setTimeout(r, 300));
 
 // arrastrar #btn-dpad manda flechas sin abrir el menú: ↓ al pasar los 14px,
 // repite cada 120ms, cambiar de eje cambia la flecha (el ×N vuelve a 1),
@@ -2255,7 +2255,8 @@ const pushRun = await page.evaluate(async () => {
   // regresión tarea 20: el engranaje ocupa el lugar de la campana, donde el ✕
   // del scrollback se solapa — un `click` pelado (el fantasma que el navegador
   // sintetiza al cerrar ese overlay) NO debe abrir el sheet solo
-  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  // "Listo" y el backdrop cierran con la salida animada del sheet (SETTLE_MS = 220ms)
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 300));
   gear.click(); await frame();
   out.gearIgnoresBareClick = sheet.classList.contains('hidden');
   tapEl(gear); await frame(); // reabrir para el resto de la sección
@@ -2342,11 +2343,11 @@ const pushRun = await page.evaluate(async () => {
   const hostSheet = document.querySelector('#host-sheet');
   tapEl(document.querySelector('#set-batt-row')); await frame();
   out.battOpensHost = sheet.classList.contains('hidden') && !hostSheet.classList.contains('hidden');
-  hostSheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  hostSheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 300));
 
   // el backdrop cierra el sheet (como el resto de los sheets — sin botón Listo)
   tapEl(gear); await frame();
-  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 300));
   out.backdropCloses = sheet.classList.contains('hidden');
   return out;
 });
@@ -2465,7 +2466,7 @@ const qkRun = await page.evaluate(async () => {
     && document.querySelector('#settings-sheet').classList.contains('hidden') && sent.length === 0;
 
   // "Listo" cierra el sheet
-  tap(document.querySelector('#qk-done')); await frame();
+  tap(document.querySelector('#qk-done')); await new Promise((r) => setTimeout(r, 300));
   out.doneCloses = sheet.classList.contains('hidden');
 
   // regresión: el long-press sobre una tecla ya NO abre el editor, es un tap
@@ -2515,9 +2516,29 @@ const qkRun = await page.evaluate(async () => {
   out.lastNoDel = listKeys().length === 1 && !document.querySelector('#qk-current .qk-del');
 
   // el backdrop cierra
-  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 300));
   out.backdropCloses = sheet.classList.contains('hidden');
   await openEditor();
+
+  // arrastrar el encabezado (grip + título) hacia abajo, como un sheet de iOS:
+  // un drag corto y lento vuelve a su lugar, uno largo cierra, y al reabrir el
+  // panel no quedó corrido. Moves espaciados para que no cuente como flick
+  const head = sheet.querySelector('.sheet-head');
+  const qkPanel = sheet.querySelector('.host-sheet-panel');
+  const dragHead = async (dy) => {
+    down(head, 100);
+    for (let i = 1; i <= 6; i++) { move(head, 100 + (dy * i) / 6); await wait(40); }
+    await wait(150);
+    up(head, 100 + dy);
+    await wait(300); // SETTLE_MS
+    await frame();
+  };
+  await dragHead(60);
+  out.dragSnapsBack = !sheet.classList.contains('hidden') && !qkPanel.style.transform;
+  await dragHead(300);
+  out.dragCloses = sheet.classList.contains('hidden');
+  await openEditor();
+  out.dragReopensClean = !sheet.classList.contains('hidden') && !qkPanel.style.transform;
 
   // esquinas del d-pad: los <select> nativos persisten en deck-dpad
   const pick = (id, v) => {
@@ -2534,7 +2555,7 @@ const qkRun = await page.evaluate(async () => {
     && !document.querySelector('.qk-dp').classList.contains('qk-dp-panel');
 
   // las esquinas configuradas aparecen en el d-pad flotante, abajo a los costados
-  tap(document.querySelector('#qk-done')); await frame();
+  tap(document.querySelector('#qk-done')); await new Promise((r) => setTimeout(r, 300));
   tap(document.querySelector('#btn-dpad')); await frame();
   const menu = document.querySelector('#switch-menu');
   out.dpadCells = [...menu.children].map((c) => c.dataset.k || c.dataset.act || '').join(',');
@@ -2552,7 +2573,7 @@ const qkRun = await page.evaluate(async () => {
   // en fijo, el diagrama del panel y las esquinas "arriba", a los costados de ↑
   out.fixedSheet = [...document.querySelectorAll('.qk-corner-row > span:first-child')].map((e) => e.textContent).join('|') === 'Izquierda: cámara · pegar|Arriba izq.:|Arriba der.:'
     && document.querySelector('.qk-dp').classList.contains('qk-dp-panel');
-  tap(document.querySelector('#qk-done')); await frame();
+  tap(document.querySelector('#qk-done')); await new Promise((r) => setTimeout(r, 300));
 
   // fijo: el tap cambia la statusline y la fila por el panel, sin popover. Las
   // esquinas van a los costados de ↑ y la vacía es un "+"
@@ -2583,7 +2604,7 @@ const qkRun = await page.evaluate(async () => {
     && JSON.stringify(savedDpad()) === JSON.stringify({ corners: { bl: null, br: null }, style: 'floating' })
     && !document.querySelector('#qk-corner-bl').value
     && document.querySelector('#qk-style [data-style="floating"]').classList.contains('sel');
-  tap(document.querySelector('#qk-done')); await frame();
+  tap(document.querySelector('#qk-done')); await new Promise((r) => setTimeout(r, 300));
 
   claudeConn.sendKeys = realSend;
   localStorage.removeItem('deck-quickkeys'); // dejar limpio
@@ -2605,6 +2626,9 @@ ok('teclas rápidas: el arrastre no escribe hasta soltar', qkRun.dragNotCommitte
 ok('teclas rápidas: al soltar commitea el orden (barra + localStorage)', qkRun.dragCommitted);
 ok('teclas rápidas: la última tecla no se puede sacar', qkRun.lastNoDel);
 ok('teclas rápidas: el backdrop cierra', qkRun.backdropCloses);
+ok('teclas rápidas: un drag corto del encabezado vuelve a su lugar', qkRun.dragSnapsBack);
+ok('teclas rápidas: arrastrar el encabezado hacia abajo cierra', qkRun.dragCloses);
+ok('teclas rápidas: al reabrir tras el drag el panel no quedó corrido', qkRun.dragReopensClean);
 ok('teclas rápidas: las esquinas del d-pad persisten en deck-dpad', qkRun.cornersSaved);
 ok('teclas rápidas: el estilo del d-pad persiste y queda marcado', qkRun.styleSaved);
 ok('teclas rápidas: en flotante el diagrama es el 3x3 y las esquinas dicen "Abajo"', qkRun.floatSheet);
@@ -2640,7 +2664,7 @@ const cendRun = await page.evaluate(async () => {
   const out = { offered: !!cat, catLabel: cat ? cat.textContent.trim() : '' };
   tap(cat); await frame();
   out.added = rowKeys().at(-1) === 'ctrlend';
-  tap(document.querySelector('#qk-done')); await frame();
+  tap(document.querySelector('#qk-done')); await new Promise((r) => setTimeout(r, 300));
 
   // en el riel se muestra compacta (^End) y el tap manda CSI 1;5F
   const btn = document.querySelector('.quickkeys[data-term="claude"] [data-k="ctrlend"]');
@@ -2677,7 +2701,7 @@ const bkspRun = await page.evaluate(async () => {
   const sel = document.querySelector('#qk-corner-bl');
   sel.value = 'bksp';
   sel.dispatchEvent(new Event('change', { bubbles: true }));
-  tap(document.querySelector('#qk-done')); await frame();
+  tap(document.querySelector('#qk-done')); await new Promise((r) => setTimeout(r, 300));
 
   const btn = document.querySelector('.quickkeys[data-term="claude"] [data-k="bksp"]');
   out.railIcon = !!btn?.querySelector('svg');
@@ -2832,7 +2856,7 @@ const defdirRun = await page.evaluate(async () => {
   // badge no pueden discrepar (misma fuente).
   tap(gear); await frame();
   out.rowSubAfter = document.querySelector('#set-dir-row .set-sub')?.textContent || '';
-  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await frame();
+  sheet.dispatchEvent(new MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 300));
 
   window.fetch = realFetch;
   return out;

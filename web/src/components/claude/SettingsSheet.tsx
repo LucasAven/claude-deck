@@ -1,5 +1,6 @@
 import { useDeckStore } from '../../store'
 import { useTap } from '../../hooks/useTap'
+import { useSheetDrag } from '../../hooks/useSheetDrag'
 import { closeSettingsSheet, toggleTmuxStatus } from '../../lib/settings'
 import { openHostSheet } from '../../lib/host'
 import { openQuickkeysSheet } from '../../lib/quickkeys'
@@ -55,6 +56,7 @@ const SET_ICONS = {
 
 export function SettingsSheet() {
   const open = useDeckStore((s) => s.settingsSheetOpen)
+  const { panelRef, handle: dragHandle, dismiss } = useSheetDrag(open, closeSettingsSheet)
   const pushState = useDeckStore((s) => s.pushState)
   const h = useDeckStore((s) => s.hostStatus)
   const hideTmuxStatus = useDeckStore((s) => s.hideTmuxStatus)
@@ -92,12 +94,14 @@ export function SettingsSheet() {
       id="settings-sheet"
       className={'host-sheet' + (open ? '' : ' hidden')}
       onClick={(e) => {
-        if (e.target === e.currentTarget) closeSettingsSheet()
+        if (e.target === e.currentTarget) dismiss()
       }}
     >
-      <div className="host-sheet-panel">
-        <div className="sheet-grip" />
-        <div className="set-title">Ajustes</div>
+      <div className="host-sheet-panel" ref={panelRef}>
+        <div className="sheet-head" {...dragHandle}>
+          <div className="sheet-grip" />
+          <div className="set-title">Ajustes</div>
+        </div>
         {pushState !== 'unsupported' && (
           <div id="set-push-row" className={'set-row' + (pushState === 'denied' ? ' denied' : '')}>
             <span className="set-ico">{SET_ICONS.bell}</span>

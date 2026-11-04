@@ -1264,7 +1264,10 @@ body.composer-open .tabbar { display: none; }
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  background: rgba(0, 0, 0, 0.55);
+  /* --sheet-drag (0..1) lo escribe useSheetDrag: el backdrop se aclara a medida
+     que el panel baja con el dedo */
+  background: rgba(0, 0, 0, calc(0.55 * (1 - var(--sheet-drag, 0))));
+  animation: sheet-fade 0.22s ease;
 }
 .host-sheet-panel {
   background: var(--panel);
@@ -1272,7 +1275,20 @@ body.composer-open .tabbar { display: none; }
   border-radius: 16px 16px 0 0;
   padding: 8px 16px calc(14px + env(safe-area-inset-bottom));
   box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55);
+  /* sube desde abajo cada vez que se abre: el sheet está siempre montado y
+     .hidden es display:none, así que la animación arranca de nuevo al mostrarse */
+  animation: sheet-up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+@keyframes sheet-up { from { transform: translateY(100%); } }
+@keyframes sheet-fade { from { background-color: transparent; } }
+/* al soltar el drag: el panel vuelve a su lugar o sale por abajo (SETTLE_MS) */
+.host-sheet.settling,
+.host-sheet.settling .host-sheet-panel {
+  transition: background-color 0.22s ease, transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* grip + título: el handle del drag. touch-action none para que iOS no se
+   quede con el gesto como scroll */
+.sheet-head { touch-action: none; }
 .sheet-grip {
   width: 38px;
   height: 4px;
@@ -1309,12 +1325,24 @@ body.composer-open .tabbar { display: none; }
 .host-val.warn { color: var(--accent); }
 .host-val.good { color: #8fbe6b; } /* mismo verde que chip-dot-working */
 /* ---------- editor de teclas rápidas (tarea 11b): reusa host-sheet ---------- */
-/* el sheet creció (vista previa + riel + catálogo + d-pad): este panel scrollea,
-   el resto de los host-sheet queda como estaba */
+/* el sheet creció (vista previa + riel + catálogo + d-pad): scrollea solo el
+   cuerpo y el encabezado queda fijo, como un sheet de iOS. El alto deja la app
+   atenuada a la vista arriba para que se lea como un panel y no como otra
+   página. El resto de los host-sheet queda como estaba */
 #quickkeys-sheet .host-sheet-panel {
-  max-height: 92dvh;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - env(safe-area-inset-top) - 64px);
+  padding-bottom: 0;
+}
+.qk-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* el padding de abajo del panel pasa acá: el contenido scrollea hasta el borde */
+  margin: 0 -16px;
+  padding: 0 16px calc(14px + env(safe-area-inset-bottom));
 }
 .qk-title b { font-weight: 600; }
 .qk-done {

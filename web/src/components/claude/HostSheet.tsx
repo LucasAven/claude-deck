@@ -1,5 +1,6 @@
 import { useDeckStore } from '../../store'
 import { useTap } from '../../hooks/useTap'
+import { useSheetDrag } from '../../hooks/useSheetDrag'
 import { BATT_STATES, fmtUptime, closeHostSheet, toggleHostAlert, editHostThreshold, toggleAway } from '../../lib/host'
 
 // iconos de las filas del sheet (markup 100% estático, como FT_ICONS)
@@ -48,6 +49,7 @@ function HostRow({ icon, label, value, valueCls }: { icon: keyof typeof HOST_ICO
 // panel) cierra. Las filas salen del último /api/host/status del store.
 export function HostSheet() {
   const open = useDeckStore((s) => s.hostSheetOpen)
+  const { panelRef, handle: dragHandle, dismiss } = useSheetDrag(open, closeHostSheet)
   const h = useDeckStore((s) => s.hostStatus)
 
   // toggle y umbral con useTap como el vanilla (wireHost); el chip, el backdrop
@@ -63,17 +65,19 @@ export function HostSheet() {
       id="host-sheet"
       className={'host-sheet' + (open ? '' : ' hidden')}
       onClick={(e) => {
-        if (e.target === e.currentTarget) closeHostSheet()
+        if (e.target === e.currentTarget) dismiss()
       }}
     >
-      <div className="host-sheet-panel">
-        <div className="sheet-grip" />
-        <div className="host-title">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3.5" y="5" width="17" height="11" rx="1.8" />
-            <path d="M2 19h20" />
-          </svg>
-          <span id="host-name">{h?.name || 'Mac'}</span>
+      <div className="host-sheet-panel" ref={panelRef}>
+        <div className="sheet-head" {...dragHandle}>
+          <div className="sheet-grip" />
+          <div className="host-title">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3.5" y="5" width="17" height="11" rx="1.8" />
+              <path d="M2 19h20" />
+            </svg>
+            <span id="host-name">{h?.name || 'Mac'}</span>
+          </div>
         </div>
         <div id="host-rows">
           {h && (

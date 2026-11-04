@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useDeckStore } from '../../store'
 import { useTap } from '../../hooks/useTap'
+import { useSheetDrag } from '../../hooks/useSheetDrag'
 import { QUICKKEY_CATALOG, type DpadStyle } from '../../lib/keys'
 import {
   closeQuickkeysSheet,
@@ -184,7 +185,8 @@ export function QuickkeysSheet() {
   const list = useDeckStore((s) => s.quickkeys)
   const dpad = useDeckStore((s) => s.dpad)
   const fixed = dpad.style === 'fixed'
-  const doneTap = useTap(() => closeQuickkeysSheet())
+  const { panelRef, handle: dragHandle, dismiss } = useSheetDrag(open, closeQuickkeysSheet)
+  const doneTap = useTap(() => dismiss())
   const resetTap = useTap(() => resetQuickkeys())
   const [focus, setFocus] = useState<'bl' | 'br' | null>(null)
   // abierto desde el "+" de una esquina del d-pad: esa esquina queda resaltada
@@ -283,85 +285,90 @@ export function QuickkeysSheet() {
       id="quickkeys-sheet"
       className={'host-sheet' + (open ? '' : ' hidden')}
       onClick={(e) => {
-        if (e.target === e.currentTarget) closeQuickkeysSheet()
+        if (e.target === e.currentTarget) dismiss()
       }}
     >
-      <div className="host-sheet-panel">
-        <div className="sheet-grip" />
-        <div className="host-title qk-title">
-          <b>Teclas rápidas</b>
-          <button id="qk-done" className="qk-done" {...doneTap}>
-            Listo
-          </button>
-        </div>
-
-        <div className="qk-label">Vista previa</div>
-        <Preview order={order} />
-
-        <div className="qk-label qk-label-row">
-          <span>En el riel</span>
-          <span className="qk-hint">arrastrá ⠿ para ordenar</span>
-        </div>
-        <div
-          id="qk-current"
-          className="qk-list"
-          ref={listRef}
-          onPointerMove={onMove}
-          onPointerUp={onUp}
-          onPointerCancel={onUp}
-        >
-          {order.map((id) => (
-            <RailRow
-              key={id}
-              id={id}
-              lifted={drag?.id === id}
-              offset={drag?.offset ?? 0}
-              canRemove={order.length > 1}
-              onGripDown={onGripDown}
-            />
-          ))}
-        </div>
-
-        <div className="qk-label">Agregar</div>
-        <div id="qk-catalog" className="qk-chips">
-          {available.map((c) => (
-            <CatalogChip key={c.id} id={c.id} label={c.label} desc={c.desc} />
-          ))}
-          {!available.length && <span className="qk-empty">Todas en el riel</span>}
-        </div>
-
-        <div className="qk-label">Esquinas del d-pad</div>
-        <div className="qk-corners" ref={cornersRef}>
-          <DpadDiagram corners={dpad.corners} focus={shownFocus} style={dpad.style} />
-          {/* bl/br son las mismas dos esquinas en los dos estilos (izquierda
-              sigue siendo izquierda); lo que cambia es dónde caen */}
-          <div className="qk-corner-rows">
-            <div className="qk-corner-row">
-              <span>{fixed ? 'Izquierda' : 'Arriba'}: cámara · pegar</span>
-              <span className="qk-fixed">(fijas)</span>
-            </div>
-            <div className="qk-corner-row">
-              <span>{fixed ? 'Arriba izq.:' : 'Abajo izq.:'}</span>
-              {cornerSelect('bl')}
-            </div>
-            <div className="qk-corner-row">
-              <span>{fixed ? 'Arriba der.:' : 'Abajo der.:'}</span>
-              {cornerSelect('br')}
-            </div>
+      <div className="host-sheet-panel" ref={panelRef}>
+        <div className="sheet-head" {...dragHandle}>
+          <div className="sheet-grip" />
+          <div className="host-title qk-title">
+            <b>Teclas rápidas</b>
+            <button id="qk-done" className="qk-done" {...doneTap}>
+              Listo
+            </button>
           </div>
         </div>
 
-        <div className="qk-label">Estilo del d-pad</div>
-        {/* Flotante: el popover 3x3 se mueve con su handle. Fijo: el panel de
-            flechas reemplaza la statusline y la fila de la toolbox */}
-        <div id="qk-style" className="qk-seg">
-          <StyleButton style="floating" label="Flotante" sel={dpad.style === 'floating'} />
-          <StyleButton style="fixed" label="Fijo en el toolbox" sel={dpad.style === 'fixed'} />
-        </div>
+        {/* solo el cuerpo scrollea: el encabezado (grip + título) queda fijo */}
+        <div className="qk-body">
+          <div className="qk-label">Vista previa</div>
+          <Preview order={order} />
 
-        <button id="qk-reset" className="qk-reset" {...resetTap}>
-          Restaurar por defecto
-        </button>
+          <div className="qk-label qk-label-row">
+            <span>En el riel</span>
+            <span className="qk-hint">arrastrá ⠿ para ordenar</span>
+          </div>
+          <div
+            id="qk-current"
+            className="qk-list"
+            ref={listRef}
+            onPointerMove={onMove}
+            onPointerUp={onUp}
+            onPointerCancel={onUp}
+          >
+            {order.map((id) => (
+              <RailRow
+                key={id}
+                id={id}
+                lifted={drag?.id === id}
+                offset={drag?.offset ?? 0}
+                canRemove={order.length > 1}
+                onGripDown={onGripDown}
+              />
+            ))}
+          </div>
+
+          <div className="qk-label">Agregar</div>
+          <div id="qk-catalog" className="qk-chips">
+            {available.map((c) => (
+              <CatalogChip key={c.id} id={c.id} label={c.label} desc={c.desc} />
+            ))}
+            {!available.length && <span className="qk-empty">Todas en el riel</span>}
+          </div>
+
+          <div className="qk-label">Esquinas del d-pad</div>
+          <div className="qk-corners" ref={cornersRef}>
+            <DpadDiagram corners={dpad.corners} focus={shownFocus} style={dpad.style} />
+            {/* bl/br son las mismas dos esquinas en los dos estilos (izquierda
+                sigue siendo izquierda); lo que cambia es dónde caen */}
+            <div className="qk-corner-rows">
+              <div className="qk-corner-row">
+                <span>{fixed ? 'Izquierda' : 'Arriba'}: cámara · pegar</span>
+                <span className="qk-fixed">(fijas)</span>
+              </div>
+              <div className="qk-corner-row">
+                <span>{fixed ? 'Arriba izq.:' : 'Abajo izq.:'}</span>
+                {cornerSelect('bl')}
+              </div>
+              <div className="qk-corner-row">
+                <span>{fixed ? 'Arriba der.:' : 'Abajo der.:'}</span>
+                {cornerSelect('br')}
+              </div>
+            </div>
+          </div>
+
+          <div className="qk-label">Estilo del d-pad</div>
+          {/* Flotante: el popover 3x3 se mueve con su handle. Fijo: el panel de
+              flechas reemplaza la statusline y la fila de la toolbox */}
+          <div id="qk-style" className="qk-seg">
+            <StyleButton style="floating" label="Flotante" sel={dpad.style === 'floating'} />
+            <StyleButton style="fixed" label="Fijo en el toolbox" sel={dpad.style === 'fixed'} />
+          </div>
+
+          <button id="qk-reset" className="qk-reset" {...resetTap}>
+            Restaurar por defecto
+          </button>
+        </div>
       </div>
     </div>
   )

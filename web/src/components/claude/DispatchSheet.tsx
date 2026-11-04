@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useDeckStore } from '../../store'
+import { useSheetDrag } from '../../hooks/useSheetDrag'
 import {
   closeDispatchSheet,
   dispatchAgent,
@@ -42,6 +43,7 @@ const EFFORTS: Array<{ key: DispatchEffort; label: string }> = [
 
 export function DispatchSheet() {
   const open = useDeckStore((s) => s.dispatchSheetOpen)
+  const { panelRef, handle: dragHandle, dismiss } = useSheetDrag(open, closeDispatchSheet)
   const selectSession = useDeckStore((s) => s.selectSession)
   const [dirs, setDirs] = useState<string[]>([])
   const [dir, setDir] = useState('')
@@ -120,16 +122,18 @@ export function DispatchSheet() {
       id="dispatch-sheet"
       className={'host-sheet' + (open ? '' : ' hidden')}
       onClick={(e) => {
-        if (e.target === e.currentTarget) closeDispatchSheet()
+        if (e.target === e.currentTarget) dismiss()
       }}
     >
-      <div className="host-sheet-panel">
-        <div className="sheet-grip" />
-        <div className="host-title">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 12h13M13 6l6 6-6 6" />
-          </svg>
-          <span>Despachar agente</span>
+      <div className="host-sheet-panel" ref={panelRef}>
+        <div className="sheet-head" {...dragHandle}>
+          <div className="sheet-grip" />
+          <div className="host-title">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12h13M13 6l6 6-6 6" />
+            </svg>
+            <span>Despachar agente</span>
+          </div>
         </div>
 
         <label className="wt-label" htmlFor="dp-dir">Directorio</label>
