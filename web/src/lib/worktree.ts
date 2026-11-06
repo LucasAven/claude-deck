@@ -36,7 +36,7 @@ export function closeDispatchSheet() {
   useDeckStore.setState({ dispatchSheetOpen: false })
 }
 
-// subdirectorios de primer nivel de WORKSPACES_ROOT (endpoint propio; /api/fs/list
+// subdirectorios de primer nivel de la primera raiz de PROJECT_ROOTS (endpoint propio; /api/fs/list
 // no sirve — sin session cae a DEFAULT_DIR y mezcla archivos)
 export async function fetchWorkspaces(): Promise<string[] | null> {
   try {

@@ -21,7 +21,7 @@ La sesión de Claude Code corre dentro de **tmux**. VS Code y el celular hacen `
 
 ## Seguridad (no negociable)
 
-Bind solo a `127.0.0.1`; la única exposición es `tailscale serve` (HTTPS + WireGuard, tailnet propio, jamás `0.0.0.0` ni abrir puertos al router). `AUTH_TOKEN` obligatorio incluso dentro del tailnet. `WORKSPACES_ROOT` es el perímetro de seguridad: ningún endpoint git/fs opera fuera de esa raíz. Sin ejecución arbitraria por HTTP, solo subcomandos fijos de `git`/`tmux`, sin shell. Detalle completo en el README, sección "Seguridad".
+Bind solo a `127.0.0.1`; la única exposición es `tailscale serve` (HTTPS + WireGuard, tailnet propio, jamás `0.0.0.0` ni abrir puertos al router). `AUTH_TOKEN` obligatorio incluso dentro del tailnet. Sin ejecución arbitraria por HTTP, solo subcomandos fijos de `git`/`tmux`, sin shell. Eso es todo el modelo de seguridad: `PROJECT_ROOTS` es solo UI (dónde viven mis proyectos, lo que ofrece la pestaña Proyectos), NO una frontera, y ningún endpoint rechaza rutas de afuera (ver `docs/adr/0003`). Detalle completo en el README, sección "Seguridad".
 
 ## Gotchas críticos
 

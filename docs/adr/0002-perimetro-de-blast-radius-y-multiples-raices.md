@@ -1,5 +1,8 @@
 # WORKSPACES_ROOT es perímetro de blast-radius (no de confinamiento) y admite múltiples raíces
 
+> SUPERSEDED por `docs/adr/0003`: el perímetro se quitó y las raíces pasaron a
+> ser un concepto de UI (`PROJECT_ROOTS`).
+
 El README describía `WORKSPACES_ROOT` como "el perímetro de seguridad". Al diseñar
 el selector de directorios de la PWA (que quita el `cd` a mano) quedó claro que esa
 frase se leía como confinamiento del usuario, y no lo es: el celu tiene una terminal

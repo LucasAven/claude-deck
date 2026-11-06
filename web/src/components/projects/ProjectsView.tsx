@@ -431,7 +431,7 @@ export function ProjectsView() {
 
   // bridge global para ui-test (mockea fetch y llama window.refreshProjects())
   useEffect(() => registerProjectsRefresh(refresh), [refresh])
-  // raices del perimetro una vez (etiqueta de proyecto + raices del arbol de
+  // raices de proyectos una vez (etiqueta de proyecto + raices del arbol de
   // EXPLORAR): no cambian en runtime
   useEffect(() => {
     fetchWorkspaceRoots().then(setRoots)

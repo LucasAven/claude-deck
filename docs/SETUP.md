@@ -21,13 +21,13 @@ cp .env.example .env
 Editar `.env` con las dos variables obligatorias:
 
 ```bash
-WORKSPACES_ROOT=/ruta/que/contiene/tus/proyectos   # ej: /Users/vos/proyectos
+PROJECT_ROOTS=/ruta/que/contiene/tus/proyectos     # varias: separadas por ":"
 AUTH_TOKEN=<salida de: openssl rand -hex 32>       # mínimo 32 caracteres
 ```
 
-`WORKSPACES_ROOT` es el **perímetro de seguridad**: el server no lee archivos ni opera git fuera de esa ruta, sin importar en qué directorio esté parada una sesión tmux. Cualquier repo adentro funciona sin configurar nada más.
+`PROJECT_ROOTS` son las carpetas donde viven tus proyectos: de ahí salen los puntos de entrada de la pestaña Proyectos (el árbol de EXPLORAR, los dirs del sheet de despacho, la etiqueta de raíz de cada proyecto). **No es una frontera de seguridad**: el panel opera sobre cualquier ruta que exista, también afuera de esas carpetas (ver `docs/adr/0003`). Lo que lo protege es el `AUTH_TOKEN`.
 
-Opcionales (una línea cada una): `DEFAULT_DIR` (directorio "home" del panel — dónde nacen las sesiones tmux nuevas; default `WORKSPACES_ROOT`, debe caer adentro de él), `DECK_PORT` (puerto local, default `7433`), `TMUX_SESSION` (nombre de la sesión tmux, default `deck`).
+Opcionales (una línea cada una): `DEFAULT_DIR` (directorio "home" del panel — dónde nacen las sesiones tmux nuevas; default, la primera raíz de `PROJECT_ROOTS`), `DECK_PORT` (puerto local, default `7433`), `TMUX_SESSION` (nombre de la sesión tmux, default `deck`).
 
 ## 3. Prueba local
 
@@ -123,6 +123,6 @@ El push lleva la sesión tmux como título y un deep-link relativo que el servic
 
 El server escucha únicamente en `127.0.0.1`; la única exposición es vía `tailscale serve` (HTTPS + WireGuard, visible solo para los dispositivos del tailnet propio). El `AUTH_TOKEN` no se comparte ni se sube al repositorio: `.env` queda fuera del control de versiones.
 
-Una excepción deliberada la abre `deck expose <puerto>` (sección 6): publica **otra** app local (`localhost:<puerto>`) en el tailnet vía `tailscale serve`, **fuera** del `AUTH_TOKEN` del panel y de `WORKSPACES_ROOT`. La protege solo el tailnet (WireGuard); no es un endpoint del server ni un proxy, sino un comando que corrés vos a mano. Exponé solo lo que quieras que vea tu tailnet, y bajá cada mapeo con `deck unexpose <puerto>` al terminar (son persistentes).
+Una excepción deliberada la abre `deck expose <puerto>` (sección 6): publica **otra** app local (`localhost:<puerto>`) en el tailnet vía `tailscale serve`, **fuera** del `AUTH_TOKEN` del panel. La protege solo el tailnet (WireGuard); no es un endpoint del server ni un proxy, sino un comando que corrés vos a mano. Exponé solo lo que quieras que vea tu tailnet, y bajá cada mapeo con `deck unexpose <puerto>` al terminar (son persistentes).
 
 La otra dependencia asumida es Chrome Remote Desktop para ver la pantalla (sección 6): identidad y señalización por Google, a propósito fuera del tailnet (sirve de acceso de emergencia si Tailscale se cae). Tu cuenta de Google pasa a ser una llave de la Mac: 2FA fuerte obligatoria. El detalle y la alternativa all-local quedaron en `docs/adr/0001` del repo y en la sección Seguridad del README.

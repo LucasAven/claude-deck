@@ -23,9 +23,9 @@ interface WorkspacesResp {
   roots?: { root: string; dirs: string[] }[]
 }
 
-// Raices del perimetro (WORKSPACES_ROOTS): las usamos para etiquetar cada
-// proyecto con la raiz que lo contiene (desambigua homonimos en raices
-// distintas). Degradacion silenciosa: sin raices, ProjectsView cae al dirname.
+// Raices de proyectos (PROJECT_ROOTS): las usamos para etiquetar cada proyecto
+// con la raiz que lo contiene (desambigua homonimos en raices distintas).
+// Degradacion silenciosa: sin raices, ProjectsView cae al dirname.
 export async function fetchWorkspaceRoots(): Promise<string[]> {
   try {
     const data = await deck.get<WorkspacesResp>('/api/workspaces')
@@ -149,7 +149,7 @@ export function projName(dir: string): string {
   return parts[parts.length - 1] || dir
 }
 
-// Colapsa el home a ~ (cosmetico, como el mockup): las rutas del perimetro son
+// Colapsa el home a ~ (cosmetico, como el mockup): las rutas de proyectos son
 // absolutas (/Users/<user>/... o /home/<user>/...). No hace falta conocer el
 // home real: la etiqueta es solo para leer de un vistazo donde vive el proyecto.
 function collapseHome(p: string): string {
@@ -157,14 +157,15 @@ function collapseHome(p: string): string {
 }
 
 // Etiqueta de raiz junto al nombre (mockup "claude-deck  ~/Desktop/projects"):
-// la raiz del perimetro que contiene el dir, mas el subcamino relativo del PADRE
-// (para un dir que no es hijo directo de la raiz). Fuera de la union (una sesion
-// que hizo cd afuera) cae a la ruta absoluta colapsada del padre.
+// la raiz de proyectos que contiene el dir, mas el subcamino relativo del PADRE
+// (para un dir que no es hijo directo de la raiz). Un dir fuera de todas las
+// raices (una sesion parada en otro lado) cae a la ruta absoluta colapsada del
+// padre.
 export function projRootLabel(dir: string, roots: string[]): string {
   if (!dir) return ''
   const root = roots.find((r) => dir === r || dir.startsWith(r + '/'))
   if (!root) {
-    // fuera de la union: mostrar el padre absoluto colapsado
+    // fuera de las raices: mostrar el padre absoluto colapsado
     const parent = dir.slice(0, dir.lastIndexOf('/')) || '/'
     return collapseHome(parent)
   }

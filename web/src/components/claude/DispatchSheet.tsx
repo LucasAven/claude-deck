@@ -58,7 +58,8 @@ export function DispatchSheet() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // dirs frescos en cada apertura (subdirectorios de primer nivel de WORKSPACES_ROOT)
+  // dirs frescos en cada apertura (subdirectorios de primer nivel de la primera
+  // raiz de PROJECT_ROOTS)
   useEffect(() => {
     if (!open) return
     setError('')

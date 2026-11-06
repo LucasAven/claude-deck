@@ -44,16 +44,16 @@ try {
 // entorno sin UTF-8. Defaultear acá cubre al proceso y a todo lo que spawnea.
 if (!process.env.LANG) process.env.LANG = 'en_US.UTF-8'
 
-// WORKSPACES_ROOTS es el perímetro de blast-radius de los endpoints estructurados
-// (git/fs/dispatch/worktree): el server no lee ni opera git fuera de la UNION de
-// estas raíces, sin importar a dónde haga cd una sesión tmux. No es confinamiento
-// del usuario (la terminal tmux da un shell libre), sino la frontera de alcance de
-// un bug en los lectores no-shell. Ver docs/adr/0002. Se parsea como PATH (rutas
-// separadas por ":"). WORKSPACES_ROOT (singular) sigue como alias de compat de una
-// sola raíz: si WORKSPACES_ROOTS no está seteada, se usa el singular.
+// PROJECT_ROOTS es un concepto de UI, NO una frontera de seguridad (ver
+// docs/adr/0003): son las carpetas donde viven tus proyectos, lo que la pestaña
+// Proyectos ofrece como puntos de entrada (raíces del árbol de EXPLORAR, dirs
+// del sheet de despacho, etiqueta de raíz de cada proyecto). Ningún endpoint
+// rechaza rutas de afuera: la seguridad es el AUTH_TOKEN + el bind a 127.0.0.1
+// + tailscale, y ese mismo token abre una terminal tmux con shell libre. Se
+// parsea como PATH (rutas separadas por ":").
 // DEFAULT_DIR es solo el "home" del panel: dónde nacen las sesiones tmux nuevas
-// y sobre qué operan los endpoints sin ?session=. Debe caer dentro del perímetro.
-const WORKSPACES_ROOTS_RAW = process.env.WORKSPACES_ROOTS || process.env.WORKSPACES_ROOT || ''
+// y sobre qué operan los endpoints sin ?session=.
+const PROJECT_ROOTS_RAW = process.env.PROJECT_ROOTS || ''
 const AUTH_TOKEN = process.env.AUTH_TOKEN || ''
 const TMUX_SESSION = process.env.TMUX_SESSION || 'deck'
 const PORT = Number(process.env.DECK_PORT || 7433)
@@ -63,26 +63,32 @@ function die(msg: string): never {
   process.exit(1)
 }
 
-if (!WORKSPACES_ROOTS_RAW) die('falta WORKSPACES_ROOTS (o el alias de compat WORKSPACES_ROOT): lista de raíces separadas por ":" que contienen tus proyectos; el server no accede a nada fuera de la union de ellas')
-// Cada raíz: existe, es dir, realpath-eada y deduplicada. El perímetro es su union.
-const WORKSPACES_ROOTS: string[] = []
-for (const raw of WORKSPACES_ROOTS_RAW.split(':').map((s) => s.trim()).filter(Boolean)) {
-  if (!fs.existsSync(raw) || !fs.statSync(raw).isDirectory()) die(`raíz de WORKSPACES_ROOTS no existe o no es un directorio: ${raw}`)
-  const real = fs.realpathSync(raw)
-  if (!WORKSPACES_ROOTS.includes(real)) WORKSPACES_ROOTS.push(real)
+if (!PROJECT_ROOTS_RAW) {
+  // único rastro de los nombres viejos: avisar del rename en vez de arrancar
+  // con una lista vacía o, peor, ignorar en silencio una config que ya existía
+  if (process.env.WORKSPACES_ROOTS || process.env.WORKSPACES_ROOT) {
+    die('WORKSPACES_ROOTS/WORKSPACES_ROOT se renombró a PROJECT_ROOTS (mismo formato: rutas separadas por ":"); actualizá tu .env')
+  }
+  die('falta PROJECT_ROOTS: lista de carpetas separadas por ":" donde viven tus proyectos (es lo que ofrece la pestaña Proyectos, no una frontera de seguridad)')
 }
-if (WORKSPACES_ROOTS.length === 0) die('WORKSPACES_ROOTS quedó vacío tras el parseo (solo separadores ":" o espacios)')
-// Sin DEFAULT_DIR explícito: la primera raíz (mismo default que el singular viejo).
-// Es solo el FALLBACK del home: el default vivo lo manda defaultDirEffective()
-// (el elegido desde la PWA gana, tarea 43).
-const DEFAULT_DIR_RAW = process.env.DEFAULT_DIR || WORKSPACES_ROOTS[0]
+// Cada raíz: existe, es dir, realpath-eada y deduplicada (el frontend compara
+// estas rutas contra las realpath-eadas de pins/recientes/browse).
+const PROJECT_ROOTS: string[] = []
+for (const raw of PROJECT_ROOTS_RAW.split(':').map((s) => s.trim()).filter(Boolean)) {
+  if (!fs.existsSync(raw) || !fs.statSync(raw).isDirectory()) die(`raíz de PROJECT_ROOTS no existe o no es un directorio: ${raw}`)
+  const real = fs.realpathSync(raw)
+  if (!PROJECT_ROOTS.includes(real)) PROJECT_ROOTS.push(real)
+}
+if (PROJECT_ROOTS.length === 0) die('PROJECT_ROOTS quedó vacío tras el parseo (solo separadores ":" o espacios)')
+// Sin DEFAULT_DIR explícito: la primera raíz. Es solo el FALLBACK del home: el
+// default vivo lo manda defaultDirEffective() (el elegido desde la PWA gana,
+// tarea 43).
+const DEFAULT_DIR_RAW = process.env.DEFAULT_DIR || PROJECT_ROOTS[0]
 if (!fs.existsSync(DEFAULT_DIR_RAW) || !fs.statSync(DEFAULT_DIR_RAW).isDirectory()) die(`DEFAULT_DIR no existe o no es un directorio: ${DEFAULT_DIR_RAW}`)
 // realpath-eado como las raíces (tarea 43): el frontend compara esta ruta contra
 // las de pins/recientes/browse (todas realpath-eadas) para pintar el badge de
 // default; sin normalizar, un symlink o una barra final darían un falso negativo.
 const DEFAULT_DIR = fs.realpathSync(DEFAULT_DIR_RAW)
-if (!insideUnion(DEFAULT_DIR))
-  die(`DEFAULT_DIR debe estar dentro de alguna raíz del perímetro: ${DEFAULT_DIR_RAW} ⊄ union{${WORKSPACES_ROOTS.join(', ')}}`)
 if (!AUTH_TOKEN) die('falta AUTH_TOKEN — el servidor no arranca sin token (ver README, sección Seguridad)')
 if (AUTH_TOKEN.length < 32) die('AUTH_TOKEN demasiado corto: debe tener al menos 32 caracteres (probá: openssl rand -hex 32)')
 
@@ -111,72 +117,49 @@ function isTokenValid(token: string | undefined | null): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Guardián del perímetro de filesystem (docs/adr/0002)
+// Contención de rutas (docs/adr/0003)
 //
-// El perímetro es la UNION de WORKSPACES_ROOTS: la frontera de blast-radius de
-// los endpoints estructurados (git/fs/dispatch/worktree/dirs), que toman rutas
-// del cliente y tocan disco sin pasar por un shell. No confina al usuario (la
-// terminal tmux ya da un shell libre): acota lo que un bug de path-traversal
-// en esos lectores podría alcanzar (~/.ssh, ~/.aws, los transcripts, etc.).
+// NO hay una frontera global de filesystem: los endpoints de git/fs/dispatch/
+// worktree/dirs operan sobre cualquier ruta absoluta que exista (el AUTH_TOKEN
+// ya abre una terminal tmux con shell libre, así que una raíz no protegía
+// nada y sí bloqueaba sesiones afuera de PROJECT_ROOTS).
 //
-// Gotcha central: la contención se decide por PREFIJO LEXICO (insideDir), que
-// solo es sólida si ambos lados están normalizados. Las raíces se realpath-ean
-// al boot; el lado del cliente se realpath-ea acá (resolveInside*), así un
-// symlink dentro del perímetro que apunte afuera NO lo elude. insideUnion es
-// la única puerta sin realpath: para rutas ya realpath-eadas o que todavía no
-// existen (el destino de un worktree), donde el caller garantiza el prefijo.
+// Lo que queda son contenciones LOCALES, cada una con su motivo propio: el
+// subárbol de UN repo (checkRepoPath, para rutas relativas del cliente), las
+// raíces de transcripts, el filtro de symlinks de un listado y el directorio
+// de estáticos. Todas se deciden por PREFIJO LEXICO (insideDir), que solo es
+// sólido si ambos lados están normalizados: por eso resolveWithin realpath-ea
+// la ruta y pide la base YA realpath-eada.
 //
-// Interfaz (los endpoints usan ESTO, nunca insideDir directo):
-//   resolveInside(p)        realpath dentro de la union, o HttpError 403.
-//   resolveInsideOrNull(p)  idem pero null: guards y filtros silenciosos.
-//   insideUnion(p)          check léxico contra la union, sin realpath.
-//   resolveWithin(p, base)  genérica: realpath de p contenido en una base
-//                           arbitraria YA realpath-eada, o null (filtros de
-//                           symlinks por-raíz o por-repo, transcripts).
-//
-// Perímetros secundarios que comparten la primitiva léxica pero NO la union:
-// checkRepoPath (subárbol del repo, 400) y el handler de estáticos
-// (PUBLIC_DIR, léxico a propósito: PUBLIC_DIR no está realpath-eado y un
-// realpath acá cambiaría qué se sirve). Son los únicos callers directos de
-// insideDir fuera de este bloque.
+// Callers directos de insideDir (el resto usa resolveWithin): checkRepoPath
+// (chequea un path que puede no existir todavía) y el handler de estáticos
+// (léxico a propósito: PUBLIC_DIR no está realpath-eado y un realpath acá
+// cambiaría qué se sirve).
 // ---------------------------------------------------------------------------
 
-/** Primitiva léxica de contención. Detalle interno del guardián (ver arriba). */
+/** Primitiva léxica de contención (ver doc del bloque). */
 function insideDir(child: string, parent: string): boolean {
   return child === parent || child.startsWith(parent + path.sep)
 }
 
-/** Check léxico contra la union de WORKSPACES_ROOTS, sin realpath (ver doc del bloque). */
-function insideUnion(p: string): boolean {
-  return WORKSPACES_ROOTS.some((root) => insideDir(p, root))
-}
-
-/** Realpath validado contra la UNION de WORKSPACES_ROOTS (perímetro git/fs). */
-function resolveInside(p: string): string {
-  const real = fs.realpathSync(p)
-  if (insideUnion(real)) return real
-  throw new HttpError(403, 'directorio fuera del perímetro (union de WORKSPACES_ROOTS)')
-}
-
-/** Variante silenciosa de resolveInside: null si no existe o cae fuera de la union. */
-function resolveInsideOrNull(p: string): string | null {
-  try {
-    const real = fs.realpathSync(p)
-    return insideUnion(real) ? real : null
-  } catch {
-    return null
-  }
-}
-
 /**
- * Contención genérica en una base arbitraria YA realpath-eada (una raíz del
- * perímetro, el toplevel de un repo, una raíz de transcripts): realpath de p,
- * o null si p no existe o su realpath queda fuera de la base.
+ * Contención en una base arbitraria YA realpath-eada (una raíz de proyectos, el
+ * toplevel de un repo, una raíz de transcripts): realpath de p, o null si p no
+ * existe o su realpath queda fuera de la base.
  */
 function resolveWithin(p: string, baseReal: string): string | null {
   try {
     const real = fs.realpathSync(p)
     return insideDir(real, baseReal) ? real : null
+  } catch {
+    return null
+  }
+}
+
+/** realpath de un dir del cliente, o null si no existe. Guards y filtros silenciosos. */
+function realpathOrNull(p: string): string | null {
+  try {
+    return fs.realpathSync(p)
   } catch {
     return null
   }
@@ -409,12 +392,11 @@ async function paneAtShellPrompt(name: string): Promise<boolean> {
 }
 
 // --- transcript de Claude por sesión (tarea 9, fase jsonl) ----------------
-// EXCEPCIÓN DELIBERADA AL PERÍMETRO (solo lectura, documentada en README):
-// los transcripts viven en ~/.claude*/projects, FUERA del perímetro (WORKSPACES_ROOTS).
-// El matching sesión↔jsonl no se adivina: scripts/state.sh anota el
+// Solo lectura y acotado a las dos raíces de transcripts (los dos perfiles del
+// usuario): el matching sesión↔jsonl no se adivina, scripts/state.sh anota el
 // transcript_path que traen los hooks en ~/.claude-deck/state/<sesión>.transcript,
-// y acá solo se acepta ese path si realpath-resuelve a un *.jsonl dentro de
-// las raíces conocidas (los dos perfiles del usuario). Nada más es legible.
+// y acá solo se acepta ese path si realpath-resuelve a un *.jsonl dentro de esas
+// raíces. Nada más de ~/.claude* es legible por este endpoint.
 const TRANSCRIPT_ROOTS = [
   path.join(os.homedir(), '.claude', 'projects'),
   path.join(os.homedir(), '.claude-work', 'projects'),
@@ -566,8 +548,8 @@ async function resolvePaneDir(session: string): Promise<string> {
  * Resuelve el directorio git sobre el que operar.
  * Sin `session` → el home efectivo del panel (defaultDirEffective, tarea 43).
  * Con `session` → directorio actual del pane de esa sesión tmux. En ambos
- * casos, validado como repo git dentro del perímetro (union de
- * WORKSPACES_ROOTS).
+ * casos, el toplevel del repo, realpath-eado (los callers lo usan como base de
+ * contención de los paths relativos que manda el cliente, ver checkRepoPath).
  */
 async function resolveGitDir(session: string | undefined): Promise<string> {
   const dir = session ? await resolvePaneDir(session) : defaultDirEffective()
@@ -577,7 +559,7 @@ async function resolveGitDir(session: string | undefined): Promise<string> {
   } catch {
     throw new HttpError(400, `el directorio de la sesión no es un repo git: ${dir}`)
   }
-  return resolveInside(toplevel)
+  return fs.realpathSync(toplevel)
 }
 
 /**
@@ -593,7 +575,7 @@ async function resolveFsDir(session: string | undefined): Promise<string> {
   } catch {
     /* no es un repo: se lista el directorio del pane */
   }
-  return resolveInside(top)
+  return fs.realpathSync(top)
 }
 
 // ---------------------------------------------------------------------------
@@ -658,9 +640,9 @@ const DIFF_LIMIT = 500 * 1024
 
 /**
  * Validación estricta de un path relativo al repo: nada fuera del repo.
- * Devuelve el absoluto. Perímetro SECUNDARIO (el subárbol del repo, no la
- * union, ver el guardián): usa la primitiva léxica con realpath propio, y el
- * chequeo pre-realpath sobre `abs` es deliberado (el path puede no existir).
+ * Devuelve el absoluto. Contención LOCAL al subárbol del repo (ver el bloque
+ * de contención): usa la primitiva léxica con realpath propio, y el chequeo
+ * pre-realpath sobre `abs` es deliberado (el path puede no existir).
  */
 function checkRepoPath(dir: string, rel: string): string {
   if (!rel || rel.includes('\0') || path.isAbsolute(rel) || rel.split(/[\\/]+/).includes('..')) {
@@ -1367,9 +1349,8 @@ app.get('/api/git/branches', async (c) => {
 
 // Worktree en un tap (tarea 5): git worktree add + rama nueva + sesión tmux en
 // una sola llamada. El path del worktree es HERMANO del repo
-// (../<repo>-<último-segmento-de-la-rama>): queda fuera del repo pero tiene que
-// seguir dentro del perímetro (alguna raíz de WORKSPACES_ROOTS; si el repo ES una
-// raíz, el hermano cae afuera → 400).
+// (../<repo>-<último-segmento-de-la-rama>): queda fuera del repo, al lado, y
+// nace solo si todavía no existe (409 si está ocupado).
 //
 // La rama NO valida con SESSION_RE (feat/composer lleva "/"): regex propia.
 // Los "/" y los ".." se controlan acá porque el último segmento se joinea a un
@@ -1475,13 +1456,10 @@ app.post('/api/worktree', async (c) => {
   const hideStatus = body.hideStatus === true
 
   // el destino no existe todavía → no se puede realpathear: se realpathea el
-  // PADRE (el dir del repo, que sí existe) y se prefix-checkea el join
+  // PADRE (el dir del repo, que sí existe) y se joinea el nombre del hermano
   const parent = fs.realpathSync(path.dirname(repo))
   const lastSeg = branch.split('/').pop() as string
   const wtPath = path.join(parent, `${path.basename(repo)}-${lastSeg}`)
-  if (!insideUnion(wtPath)) {
-    throw new HttpError(400, `el worktree caería fuera del perímetro (union de WORKSPACES_ROOTS): ${wtPath}`)
-  }
   if (fs.existsSync(wtPath)) throw new HttpError(409, `ya existe ${wtPath}`)
 
   try {
@@ -1501,7 +1479,7 @@ app.post('/api/worktree', async (c) => {
 })
 
 // Directorios candidatos para despachar (tarea 6): subdirectorios de PRIMER
-// nivel de CADA raíz del perímetro, solo dirs, NO recursivo. /api/fs/list no
+// nivel de CADA raíz de PROJECT_ROOTS, solo dirs, NO recursivo. /api/fs/list no
 // sirve para esto: sin session cae a DEFAULT_DIR (que suele ser un repo → devuelve
 // su toplevel, no la raíz) y mezcla archivos. Acá listamos cada raíz misma.
 //
@@ -1511,15 +1489,15 @@ app.post('/api/worktree', async (c) => {
 // PRIMERA raíz tal cual antes, para que el consumidor viejo (sheet de despacho)
 // siga andando sin tocar web/src.
 app.get('/api/workspaces', (c) => {
-  const roots = WORKSPACES_ROOTS.map((root) => {
+  const roots = PROJECT_ROOTS.map((root) => {
     const dirs: string[] = []
     for (const d of fs.readdirSync(root, { withFileTypes: true })) {
       if (d.name.startsWith('.')) continue // .git, dotdirs
       const target = path.join(root, d.name)
       try {
         const s = fs.statSync(target) // sigue symlinks
-        // contención POR-RAIZ a propósito (no la union): un symlink de primer
-        // nivel que apunte a OTRA raíz no se lista bajo esta
+        // contención POR-RAIZ: un symlink de primer nivel que apunte afuera de
+        // ESTA raíz no se lista bajo ella (el listado es "qué hay acá adentro")
         if (s.isDirectory() && resolveWithin(target, root) !== null) dirs.push(d.name)
       } catch {
         continue // symlink roto / sin permisos
@@ -1532,9 +1510,9 @@ app.get('/api/workspaces', (c) => {
 })
 
 // Despachar un agente (tarea 6, design-refs/task06-dispatch-sheet.png): crea una
-// sesión tmux nueva en un dir del perímetro (WORKSPACES_ROOTS) y lanza `claude` con un prompt
-// inicial + permission-mode. Fire-and-forget desde el celu; se sigue como un
-// chip normal (con dot de estado de la tarea 4).
+// sesión tmux nueva en un dir y lanza `claude` con un prompt inicial +
+// permission-mode. Fire-and-forget desde el celu; se sigue como un chip normal
+// (con dot de estado de la tarea 4).
 //
 // Entrega del prompt (decidido con prototipo contra un claude real, tarea 6):
 // argv posicional `claude $'<prompt>' --permission-mode <m> [--model <a>] [--effort <e>]` vía send-keys -l
@@ -1585,7 +1563,7 @@ function shQuote(s: string): string {
 /**
  * Nombre de sesión para el dispatch y para "+ nueva sesión acá", con
  * desambiguación de homónimos (tarea 39). `dir` ya llega realpath-eado y
- * validado dentro de la unión. Siempre devuelve un nombre LIBRE: varias
+ * validado como directorio. Siempre devuelve un nombre LIBRE: varias
  * sesiones sobre el mismo dir son legítimas (decisión de Lucas 2026-07-15,
  * ver abajo), así que ningún caso aborta.
  *
@@ -1679,27 +1657,24 @@ app.post('/api/dispatch', async (c) => {
   if (prompt.length > 10000) throw new HttpError(400, 'prompt demasiado largo (máx 10000)')
   if (!dirName || dirName === '.' || dirName === '..') throw new HttpError(400, 'directorio inválido')
 
-  // Tarea 39: relaja el dispatch a cualquier raíz/profundidad. Dos formas
-  // aceptadas en `dir` (documentado, ver README):
-  //  (a) ruta ABSOLUTA dentro de la unión, a cualquier profundidad (la que
-  //      van a mandar las tareas 41/42 desde pins/recent/browse).
+  // Dos formas aceptadas en `dir` (documentado, ver README):
+  //  (a) ruta ABSOLUTA a cualquier profundidad (la que mandan las tareas 41/42
+  //      desde pins/recent/browse).
   //  (b) basename SIN separadores (compat con el sheet viejo de la tarea 6,
   //      que solo conoce basenames de primer nivel de `data.dirs`): se
-  //      resuelve como antes, hijo directo de la PRIMERA raíz.
+  //      resuelve como hijo directo de la PRIMERA raíz de proyectos.
   let dir: string
   if (path.isAbsolute(dirName)) {
     if (dirName.includes('\0')) throw new HttpError(400, 'directorio inválido')
-    let real: string
     try {
-      real = fs.realpathSync(dirName)
+      dir = fs.realpathSync(dirName)
     } catch {
       throw new HttpError(404, 'directorio no encontrado')
     }
-    dir = resolveInside(real) // 403 si cae fuera de la unión
     if (!fs.statSync(dir).isDirectory()) throw new HttpError(400, 'no es un directorio')
   } else {
     if (dirName.includes('/') || dirName.includes(path.sep)) throw new HttpError(400, 'directorio inválido')
-    const root = WORKSPACES_ROOTS[0]
+    const root = PROJECT_ROOTS[0]
     try {
       dir = fs.realpathSync(path.join(root, dirName))
     } catch {
@@ -1727,8 +1702,8 @@ app.post('/api/dispatch', async (c) => {
 })
 
 // "[+ nueva sesion aca]" (tarea 41) y el "+" de la fila de chips (tarea 43):
-// crea una sesion tmux PELADA (un shell, sin lanzar claude) enraizada en un dir
-// del perimetro. Es el primo del dispatch sin prompt/modelo/effort: reusa el
+// crea una sesion tmux PELADA (un shell, sin lanzar claude) enraizada en un dir.
+// Es el primo del dispatch sin prompt/modelo/effort: reusa el
 // mismo naming desambiguado (dispatchSessionName), la misma pref hideStatus y el
 // mismo registro de MRU (recordRecentDir, tarea 39). Fire-and-forget: valida
 // ANTES de tocar tmux; el frontend selecciona la sesion devuelta y salta a la
@@ -1747,9 +1722,8 @@ app.post('/api/session/new', async (c) => {
 
   let dir: string
   try {
-    dir = resolveInside(pathIn) // 403 fuera de la union; ENOENT -> 404 abajo
-  } catch (e) {
-    if (e instanceof HttpError) throw e
+    dir = fs.realpathSync(pathIn)
+  } catch {
     throw new HttpError(404, 'directorio no encontrado')
   }
   if (!fs.statSync(dir).isDirectory()) throw new HttpError(400, 'no es un directorio')
@@ -1783,9 +1757,8 @@ app.post('/api/session/cd', async (c) => {
 
   let dir: string
   try {
-    dir = resolveInside(pathIn) // 403 fuera de la unión; ENOENT -> 404 abajo
-  } catch (e) {
-    if (e instanceof HttpError) throw e
+    dir = fs.realpathSync(pathIn)
+  } catch {
     throw new HttpError(404, 'directorio no encontrado')
   }
   if (!fs.statSync(dir).isDirectory()) throw new HttpError(400, 'no es un directorio')
@@ -1847,8 +1820,8 @@ app.get('/api/fs/raw', async (c) => {
 
 // Snippets (tarea 10): lista GLOBAL de frases para la paleta del frontend.
 // Server-side a pedido de Lucas para que sincronice celu ↔ desktop — única
-// escritura de "datos de la app": un JSON propio en ~/.claude-deck (fuera del
-// perímetro WORKSPACES_ROOTS a propósito: no es contenido de repos).
+// escritura de "datos de la app": un JSON propio en ~/.claude-deck (aparte de
+// los proyectos a propósito: no es contenido de repos).
 const SNIPPETS_FILE = path.join(os.homedir(), '.claude-deck', 'snippets.json')
 // presets del mockup (design-refs/task10-snippets.png): se sirven mientras no
 // exista el archivo; el primer PUT los materializa (editados o no)
@@ -1894,8 +1867,8 @@ app.put('/api/snippets', async (c) => {
 // ---------------------------------------------------------------------------
 // Directorios: pins + MRU + default (tareas 39 y 43). Mismo patrón EXACTO que
 // snippets arriba (server-side para que sincronice celu ↔ desktop; JSON propio
-// en ~/.claude-deck, fuera del perímetro WORKSPACES_ROOTS a propósito: es
-// app-data de la app, no contenido de un repo). Shape: `pins` (curada a mano
+// en ~/.claude-deck, aparte de los proyectos a propósito: es app-data de la
+// app, no contenido de un repo). Shape: `pins` (curada a mano
 // vía PUT) + `recent` (MRU que el propio server va escribiendo) + `defaultDir`
 // (dónde nacen las sesiones del "+", elegido desde la PWA, tarea 43). Las rutas
 // se guardan siempre realpath-eadas.
@@ -1933,10 +1906,10 @@ function writeDirs(data: DirsStore): void {
   fs.renameSync(tmp, DIRS_FILE)
 }
 
-/** ¿Sigue siendo un dir válido? (existe, es directorio, cae dentro de la unión). */
+/** ¿Sigue siendo un dir válido? (existe y es un directorio). */
 function dirStillValid(p: string): boolean {
   try {
-    const real = resolveInsideOrNull(p)
+    const real = realpathOrNull(p)
     return real !== null && fs.statSync(real).isDirectory()
   } catch {
     return false
@@ -1944,8 +1917,9 @@ function dirStillValid(p: string): boolean {
 }
 
 /**
- * Valida una ruta para guardarla en el store (pin o default): realpath, existe,
- * es directorio y cae dentro de la unión. Devuelve la realpath-eada o tira 400.
+ * Valida una ruta para guardarla en el store (pin o default): existe y es un
+ * directorio. Devuelve la realpath-eada (así el frontend puede compararla con
+ * las demás rutas del store) o tira 400.
  */
 function resolveStorableDir(p: string): string {
   let real: string
@@ -1955,10 +1929,6 @@ function resolveStorableDir(p: string): string {
     throw new HttpError(400, `ruta inexistente: ${p}`)
   }
   if (!fs.statSync(real).isDirectory()) throw new HttpError(400, `no es un directorio: ${p}`)
-  // 400 (no el 403 de resolveInside): acá se valida un body, criterio del PUT
-  if (!insideUnion(real)) {
-    throw new HttpError(400, `fuera del perímetro (unión de WORKSPACES_ROOTS): ${p}`)
-  }
   return real
 }
 
@@ -1966,7 +1936,7 @@ function resolveStorableDir(p: string): string {
  * El "home" efectivo del panel (tarea 43): dónde nacen las sesiones nuevas y
  * sobre qué operan los endpoints sin `?session=`. Gana el default elegido desde
  * la PWA; si no hay ninguno, o el guardado dejó de ser válido (repo borrado,
- * perímetro reconfigurado), cae al `DEFAULT_DIR` del `.env`, que siempre es
+ * carpeta movida), cae al `DEFAULT_DIR` del `.env`, que siempre es
  * válido porque se valida al boot. Se lee en cada uso (no se cachea): el store
  * puede cambiar en cualquier momento desde el celu, y son microsegundos.
  */
@@ -1977,8 +1947,8 @@ function defaultDirEffective(): string {
 }
 
 // GET filtra EN LECTURA (no persiste el filtrado): si un pin/recent dejó de
-// existir o quedó fuera de la unión (repo borrado, perímetro reconfigurado),
-// no se muestra, pero el archivo en disco no se toca acá. `defaultDir` sale
+// existir (repo borrado, carpeta movida), no se muestra, pero el archivo en
+// disco no se toca acá. `defaultDir` sale
 // EFECTIVO (nunca null): es la ruta donde el "+" va a parir la sesión, sea la
 // elegida o el fallback del .env, así el frontend pinta el badge sin recalcular.
 app.get('/api/dirs', (c) => {
@@ -2037,10 +2007,10 @@ app.put('/api/dirs', async (c) => {
 // MRU: la llama el dispatch (esta tarea) al nacer una sesión, y la tarea 40 la
 // va a llamar también desde /api/session/cd, por eso vive acá como helper de
 // módulo reusable y no inline en la ruta. Guarda SIEMPRE la ruta realpath-eada;
-// una ruta fuera de la unión no se registra (guard silencioso, no revienta el
+// una ruta que ya no existe no se registra (guard silencioso, no revienta el
 // caller: esto corre fire-and-forget después de que la sesión ya existe).
 function recordRecentDir(dir: string): void {
-  const real = resolveInsideOrNull(dir)
+  const real = realpathOrNull(dir)
   if (!real) return // no debería pasar (la sesión ya se creó ahí), pero por las dudas
   const current = readDirs()
   const recent = [real, ...current.recent.filter((p) => p !== real)].slice(0, RECENT_DIRS_MAX)
@@ -2048,23 +2018,21 @@ function recordRecentDir(dir: string): void {
 }
 
 // Browse (tarea 39): /api/fs/list está anclado a la raíz de una SESIÓN
-// (checkRepoPath), no puede navegar una ruta absoluta arbitraria de OTRA raíz
-// de la unión. Este endpoint chico sí: lista subdirectorios inmediatos de
-// cualquier `path` absoluto dentro de la unión (NO recursivo, solo dirs, sin
-// dotdirs), lo que van a consumir las tareas 41/42 para el árbol de picker.
-// Shape: `{ path: <abs realpath-eado>, dirs: string[] }` (nombres, no rutas
-// completas: el cliente arma el join). Fuera de la unión: 403 (mismo criterio
-// que resolveGitDir/resolveFsDir, es una resolución de ruta como esas, a
-// diferencia de /api/dirs PUT que valida un body y devuelve 400).
+// (checkRepoPath), no puede navegar una ruta absoluta arbitraria. Este endpoint
+// chico sí: lista subdirectorios inmediatos de cualquier `path` absoluto que
+// exista (NO recursivo, solo dirs, sin dotdirs), lo que consumen las tareas
+// 41/42 para el árbol de picker. Shape: `{ path: <abs realpath-eado>, dirs:
+// string[] }` (nombres, no rutas completas: el cliente arma el join). Los
+// puntos de entrada de la UI siguen siendo las raíces de proyectos + pins +
+// recientes; el server no limita a dónde se puede navegar desde ahí.
 app.get('/api/dirs/browse', (c) => {
   const raw = c.req.query('path') || ''
   if (!raw || !path.isAbsolute(raw)) throw new HttpError(400, 'path debe ser una ruta absoluta')
   let abs: string
   try {
-    abs = resolveInside(raw) // 403 si cae fuera de la unión
-  } catch (e) {
-    if (e instanceof HttpError) throw e
-    throw new HttpError(404, 'directorio no encontrado') // ENOENT del realpath interno
+    abs = fs.realpathSync(raw)
+  } catch {
+    throw new HttpError(404, 'directorio no encontrado')
   }
   let st: fs.Stats
   try {
@@ -2078,11 +2046,10 @@ app.get('/api/dirs/browse', (c) => {
     if (d.name.startsWith('.')) continue // .git, dotdirs
     const target = path.join(abs, d.name)
     try {
-      const s = fs.statSync(target) // sigue symlinks
-      // symlink que escapa de la unión: no se lista (mismo guard que fsList)
-      if (s.isDirectory() && resolveInsideOrNull(target)) dirs.push(d.name)
+      // statSync sigue symlinks, así que un symlink roto cae en el catch
+      if (fs.statSync(target).isDirectory()) dirs.push(d.name)
     } catch {
-      continue // symlink roto/fuera de la unión, o sin permisos
+      continue // symlink roto o sin permisos
     }
   }
   dirs.sort((a, b) => a.localeCompare(b))
@@ -2491,8 +2458,8 @@ app.get('*', (c) => {
   let p = decodeURIComponent(new URL(c.req.url).pathname)
   if (p === '/') p = '/index.html'
   const abs = path.normalize(path.join(PUBLIC_DIR, p))
-  // perímetro secundario de estáticos: léxico a propósito, sin realpath
-  // (PUBLIC_DIR no está realpath-eado; ver la doc del guardián)
+  // contención de estáticos: léxica a propósito, sin realpath (PUBLIC_DIR no
+  // está realpath-eado; ver el bloque de contención de rutas)
   if (!insideDir(abs, PUBLIC_DIR)) return c.text('Not found', 404)
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return c.text('Not found', 404)
   const body = new Uint8Array(fs.readFileSync(abs))

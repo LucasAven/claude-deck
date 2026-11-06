@@ -278,8 +278,8 @@ ok('scrollback sesión inexistente → 404', sb404.status === 404);
 
 // 9e. GET /api/claude/transcript (tarea 9, fase jsonl): turnos legibles del
 // .jsonl apuntado por el marker que escribe scripts/state.sh; el path se
-// valida contra las raíces ~/.claude*/projects (excepción read-only al
-// perímetro). Fixture scratch bajo la raíz real, limpiada en el finally.
+// valida contra las raíces ~/.claude*/projects (read-only, nada más de ahí es
+// legible). Fixture scratch bajo la raíz real, limpiada en el finally.
 const TR_DIR = `${os.homedir()}/.claude/projects/zz-deck-ws-test`;
 const TR_FILE = `${TR_DIR}/fixture.jsonl`;
 const TR_MARK = `${STATE_DIR}/deck-2.transcript`;
@@ -315,7 +315,7 @@ try {
   fs.writeFileSync(outFile, '{}\n');
   fs.writeFileSync(TR_MARK, outFile);
   const trOut = await trGet('session=deck-2');
-  ok('transcript con marker fuera de ~/.claude*/projects se ignora (perímetro)',
+  ok('transcript con marker fuera de ~/.claude*/projects se ignora',
     trOut.status === 200 && (await trOut.json()).turns.length === 0);
   fs.rmSync(outFile, { force: true });
   ok('transcript nombre inválido → 400', (await trGet('session=..%2Fmal')).status === 400);
@@ -406,12 +406,12 @@ try {
 }
 
 // 9h. GET /api/git/branches + POST /api/worktree (tarea 5): worktree + rama +
-// sesión tmux en un tap. Repo scratch DENTRO de WORKSPACES_ROOT (el hermano
-// ../<repo>-<seg> tiene que caer dentro del perímetro) con sesión tmux propia
-// deck-wt; la sesión derivada sale de sanitizar la rama (feat/composer →
+// sesión tmux en un tap. Repo scratch bajo la primera raíz de PROJECT_ROOTS
+// (donde el worktree hermano ../<repo>-<seg> nace al lado) con sesión tmux
+// propia deck-wt; la sesión derivada sale de sanitizar la rama (feat/composer →
 // feat-composer). Todo se limpia en el finally.
 const WROOT = fs.readFileSync(new URL('../.env', import.meta.url), 'utf8')
-  .match(/WORKSPACES_ROOT=(.+)/)[1].trim();
+  .match(/^PROJECT_ROOTS=(.+)/m)[1].trim().split(':')[0].trim();
 const WT_REPO = `${WROOT}/deck-wt-ws-test`;
 const WT_SIB = `${WROOT}/deck-wt-ws-test-composer`;
 const wtPost = (body, q = 'session=deck-wt') => fetch(`${HTTP}/api/worktree?${q}`, {
@@ -463,7 +463,7 @@ try {
 }
 
 // 9j. GET /api/workspaces + POST /api/dispatch (tarea 6): despachar un agente en
-// un dir de WORKSPACES_ROOT con prompt inicial + permission-mode. SOLO los checks
+// un dir de PROJECT_ROOTS con prompt inicial + permission-mode. SOLO los checks
 // deterministas que NO lanzan claude (contrato + rechazos + naming): la integridad
 // del quoting/argv del prompt la aserta el script scratch del agente con un stub
 // (DECK_CLAUDE_BIN), para no arrancar un claude real en la corrida de Lucas.
@@ -523,7 +523,7 @@ try {
 }
 
 // 9k. POST /api/git/commit + /api/git/push (tarea 12): subcomandos fijos, sin
-// flags del cliente. Repo scratch DENTRO de WORKSPACES_ROOT con remote bare
+// flags del cliente. Repo scratch bajo la primera raíz de PROJECT_ROOTS con remote bare
 // local para el push; sesión tmux deck-ci cd'ada ahí. El mensaje con
 // quotes/newline/$() se asserta VERBATIM en git log (argv, no shell).
 const CI_REPO = `${WROOT}/deck-ci-ws-test`;
@@ -832,7 +832,13 @@ const dirsPut = (body) => fetch(`${HTTP}/api/dirs`, {
   const cfg = await (await fetch(`${HTTP}/api/config`, { headers: { 'x-deck-token': TOKEN } })).json();
   ok('/api/config y /api/dirs coinciden en defaultDir', cfg.defaultDir === j.defaultDir);
   ok('PUT /api/dirs {} → 400 (nada que actualizar)', (await dirsPut({})).status === 400);
-  ok('PUT defaultDir fuera del perímetro → 400', (await dirsPut({ defaultDir: '/etc' })).status === 400);
+  // una ruta de afuera de PROJECT_ROOTS ya no se rechaza (las raíces son un
+  // concepto de UI, ver docs/adr/0003): se chequea con el browse, que es de
+  // lectura, porque un PUT acá escribiría el store real de Lucas
+  const brOut = await fetch(`${HTTP}/api/dirs/browse?path=/etc`, { headers: { 'x-deck-token': TOKEN } });
+  ok('browse de un dir fuera de las raíces → 200 (ya no hay perímetro)', brOut.status === 200);
+  ok('browse de un dir inexistente → 404',
+    (await fetch(`${HTTP}/api/dirs/browse?path=/no-existe-zzz-43`, { headers: { 'x-deck-token': TOKEN } })).status === 404);
   ok('PUT defaultDir inexistente → 400', (await dirsPut({ defaultDir: `${WROOT}/no-existe-zzz-43` })).status === 400);
   ok('PUT defaultDir tipo inválido → 400', (await dirsPut({ defaultDir: 42 })).status === 400);
   // ningún 400 escribe: el store real de Lucas tiene que haber quedado intacto
